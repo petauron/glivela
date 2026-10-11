@@ -1,24 +1,27 @@
-# Petauron Meridian
+# Petauron Glivela
 
-Meridian is Petauron's access and subscription domain for managed proxy
+Formerly Meridian. See [the in-place brand migration](BRANDING.md) for stable
+installation identities and coordinated release steps.
+
+Glivela is Petauron's access and subscription domain for managed proxy
 entries. It owns account plans, stable access credentials, route grants,
 shared usage accounting, and deterministic subscription rendering.
 
-Meridian is not a general-purpose proxy panel and does not fork 3x-ui. Vastora
+Glivela is not a general-purpose proxy panel and does not fork 3x-ui. Vastora
 remains the desired-state control plane and its Agent remains responsible for
 validating and atomically applying Xray configurations on managed nodes.
-Meridian supplies the authoritative, runtime-independent domain rules that
+Glivela supplies the authoritative, runtime-independent domain rules that
 both sides share.
 
 ## Product boundary
 
 - **Vastora** deploys applications, selects nodes, authorizes operations, and
   records desired/applied revisions.
-- **Meridian** defines accounts, credentials, route grants, shared quotas, and
+- **Glivela** defines accounts, credentials, route grants, shared quotas, and
   subscription output.
 - **Vastora Agent** applies the resulting Xray identities and routes, reports
   monotonic counters, and confirms runtime health.
-- **Pulse** observes infrastructure health.
+- **Senulun** observes infrastructure health.
 
 There is one writer for each credential. A migration may import an existing
 3x-ui identity once, but released runtime code must not retain dual reads,
@@ -29,13 +32,13 @@ dual writes, aliases, or a 3x-ui fallback after cutover.
 The first complete vertical slice supports managed VLESS/REALITY and native
 Hysteria2/TLS entries, VLESS fixed entry-to-egress route credentials,
 conventional base64 subscriptions, Mihomo YAML, and one shared account quota
-across both protocols and all route credentials. A native Meridian credential
+across both protocols and all route credentials. A native Glivela credential
 owns a VLESS UUID and, when Hysteria2 is enabled for the entry, a separate
 Hysteria2 authentication secret. Both runtime clients use the same Xray user
 label, so their counters contribute to the same account ledger instead of
 creating a second account or quota. Routed credentials remain VLESS-only:
 current Xray Hysteria inbounds do not provide a trustworthy per-user routing
-boundary, so Meridian never publishes a routed Hysteria credential that could
+boundary, so Glivela never publishes a routed Hysteria credential that could
 silently escape through the native exit.
 
 The APIs are pure and deterministic so callers can persist state in their own
@@ -77,12 +80,12 @@ transports, and mismatched protocol material.
 
 Vastora's migration adapter rejects legacy per-entry traffic ceilings and
 per-client simultaneous-IP limits before import. Those policies do not have an
-equivalent in Meridian's account-wide quota model and current Xray runtime, so
+equivalent in Glivela's account-wide quota model and current Xray runtime, so
 they must never be silently weakened during replacement.
 
 ## Status
 
-This public module is the reusable Meridian domain authority. Vastora is its
+This public module is the reusable Glivela domain authority. Vastora is its
 first control-plane integration and owns persistence, operator APIs, UI, and
 Agent orchestration; no separate mutable panel or node-side service is part of
 the architecture. The first release remains in pre-release integration until

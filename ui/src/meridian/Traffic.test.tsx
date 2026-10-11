@@ -22,7 +22,7 @@ it("shows historical direction totals and coverage without probes or quota chang
  expect(document.body.textContent).toContain("3 KiB");
  expect(document.body.textContent).toContain("待采集");
  expect(document.body.textContent).toContain("非月度账单");
- expect(document.body.textContent).toContain("Pulse 入口不可用");
+ expect(document.body.textContent).toContain("Senulun 入口不可用");
  const missing=Array.from(document.querySelectorAll("tr")).find(r=>r.textContent?.includes("Entry B"))!;
  expect(missing.textContent).not.toContain("KiB");
  const refresh=Array.from(document.querySelectorAll("button")).find(b=>b.textContent?.includes("刷新用量"))!;

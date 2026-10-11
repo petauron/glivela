@@ -1,4 +1,4 @@
-# Meridian Agent Rules
+# Glivela Agent Rules
 
 ## GitHub releases and Actions storage
 
@@ -41,6 +41,6 @@
   merge, release, signing operation or production deployment.
 
 - Read `RELEASING.md` before changing release workflows. Keep the UI package,
-  lockfile and release manifest versions aligned. A Meridian source release does
+  lockfile and release manifest versions aligned. A Glivela source release does
   not publish its UI into the signed application catalog or upgrade an installed
   runtime; those are separate, explicitly authorized operations.

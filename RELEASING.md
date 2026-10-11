@@ -16,7 +16,7 @@ dispatches ci.yml on the version PR branch to run the existing checks.
 
 These are source-code releases, not automatic production deployments.
 
-Meridian source releases do not automatically package or deploy the UI in the
+Glivela source releases do not automatically package or deploy the UI in the
 production catalog. That remains a separately reviewed catalog operation.
 
 Local workflow edits alone do not activate releases. Push/review the changes,

@@ -1,8 +1,8 @@
-# Meridian application UI
+# Glivela application UI
 
-This directory owns Meridian's page composition and its independently signed
+This directory owns Glivela's page composition and its independently signed
 browser bundle. Center provides authenticated data, platform actions, and the
-shared component library; it does not compile Meridian pages into its own web
+shared component library; it does not compile Glivela pages into its own web
 application after the migration.
 
 The build uses the reviewed Vastora UI source at commit
