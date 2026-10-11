@@ -57,7 +57,7 @@ export function MeridianManagerSheet({ application, data, language, mutate, onCl
     <SheetContent className="w-full sm:max-w-3xl">
       <SheetHeader>
         <SheetTitle>{copy(language, "账号与订阅", "Accounts & subscriptions")}</SheetTitle>
-        <SheetDescription className="sr-only">Meridian</SheetDescription>
+        <SheetDescription className="sr-only">Glivela</SheetDescription>
       </SheetHeader>
       <Tabs className="min-h-0 flex-1 px-4" value={tab} onValueChange={setTab}>
         <TabsList variant="line">
@@ -97,7 +97,7 @@ function CutoverPanel({ cutover, language, busy, error, onRun }: { cutover: AppD
     backup: ["正在创建恢复点", "Creating restore point"],
     import: ["正在导入账号与节点", "Importing accounts and entries"],
     publish: ["正在将订阅入口切换到 Center", "Moving the subscription entry to Center"],
-    project: ["正在部署 Meridian", "Deploying Meridian"],
+    project: ["正在部署 Glivela", "Deploying Glivela"],
     verify: ["正在验证全部运行时", "Verifying every runtime"],
     retire: ["正在移除旧运行时", "Retiring legacy runtimes"],
     complete: ["替换完成", "Replacement complete"],
@@ -106,10 +106,10 @@ function CutoverPanel({ cutover, language, busy, error, onRun }: { cutover: AppD
   const canStart = cutover.state === "inspect" || cutover.state === "failed" || Boolean(cutover.lastError) && (cutover.state === "publish" || cutover.state === "project" || cutover.state === "verify" || cutover.state === "retire");
   const start = () => onRun("cutover", () => api.startMeridianCutover(), cutover.state === "inspect" || cutover.state === "failed" ? copy(language, "安全替换流程已启动。", "The safe replacement workflow has started.") : copy(language, "失败节点已重新进入当前阶段。", "Failed nodes were requeued in the current phase."));
   return <div className="rounded-xl border p-4">
-    <div className="flex items-start justify-between gap-3"><div><p className="font-medium">{copy(language, "3x-ui → Meridian 安全替换", "3x-ui → Meridian safe replacement")}</p><p className="mt-1 text-sm text-muted-foreground">{copy(language, ...labels[cutover.state])}</p></div>{cutover.complete ? <CheckCircle2Icon className="size-5 text-emerald-500" /> : <ArrowRightLeftIcon className="size-5 text-muted-foreground" />}</div>
+    <div className="flex items-start justify-between gap-3"><div><p className="font-medium">{copy(language, "3x-ui → Glivela 安全替换", "3x-ui → Glivela safe replacement")}</p><p className="mt-1 text-sm text-muted-foreground">{copy(language, ...labels[cutover.state])}</p></div>{cutover.complete ? <CheckCircle2Icon className="size-5 text-emerald-500" /> : <ArrowRightLeftIcon className="size-5 text-muted-foreground" />}</div>
     <Progress className="mt-4" value={Math.min(100, Math.round(progress))} />
     <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-      <div><dt className="text-muted-foreground">{copy(language, "订阅权威", "Subscription authority")}</dt><dd className="mt-1 font-medium">{cutover.subscriptionAuthority === "meridian" ? "Meridian" : "3x-ui"}</dd></div>
+      <div><dt className="text-muted-foreground">{copy(language, "订阅权威", "Subscription authority")}</dt><dd className="mt-1 font-medium">{cutover.subscriptionAuthority === "meridian" ? "Glivela" : "3x-ui"}</dd></div>
       <div><dt className="text-muted-foreground">{copy(language, "账号 / 凭据", "Accounts / credentials")}</dt><dd className="mt-1 tabular-nums">{cutover.importedAccounts} / {cutover.expectedAccounts} · {cutover.importedCredentials} / {cutover.expectedCredentials}</dd></div>
       <div><dt className="text-muted-foreground">{cutover.state === "retire" || cutover.state === "complete" ? copy(language, "旧运行时已移除", "Legacy runtimes retired") : copy(language, "可订阅入口已验证", "Subscription entries verified")}</dt><dd className="mt-1 tabular-nums">{cutover.state === "retire" || cutover.state === "complete" ? cutover.retiredEndpoints : cutover.readyEndpoints} / {cutover.expectedEndpoints}</dd></div>
       <div><dt className="text-muted-foreground">{copy(language, "落地路由已验证", "Egress routes verified")}</dt><dd className="mt-1 tabular-nums">{cutover.readyRoutes} / {cutover.expectedRoutes}{cutover.blockedRoutes > 0 ? <span className="ml-2 text-destructive">{copy(language, `${cutover.blockedRoutes} 个不可用`, `${cutover.blockedRoutes} blocked`)}</span> : null}</dd></div>
@@ -179,11 +179,11 @@ function EndpointPanel({ application, endpoint, publication, language, busy, err
       setVerificationError(copy(language, "请先在当前节点完成 REALITY 目标检查。", "Verify the REALITY target from this node first."));
       return;
     }
-    await onRun("endpoint", () => api.createMeridianEndpoint({ applicationId: application.id, verificationId: verification.id, targetIp: verification.targetIp!, advertiseHost: advertiseHost.trim() || undefined, targetHost: targetHost.trim(), serverName: serverName.trim(), regionCode, name: entryName.trim() }), copy(language, "Meridian 入口已创建，正在等待 Agent 应用。", "The Meridian entry was created and is waiting for the Agent."));
+    await onRun("endpoint", () => api.createMeridianEndpoint({ applicationId: application.id, verificationId: verification.id, targetIp: verification.targetIp!, advertiseHost: advertiseHost.trim() || undefined, targetHost: targetHost.trim(), serverName: serverName.trim(), regionCode, name: entryName.trim() }), copy(language, "Glivela 入口已创建，正在等待 Agent 应用。", "The Glivela entry was created and is waiting for the Agent."));
   };
   return <form onSubmit={(event) => void submit(event)}><FieldGroup>
-      <Alert><RadioTowerIcon /><AlertTitle>{copy(language, "创建 Meridian 入口", "Create a Meridian entry")}</AlertTitle><AlertDescription>{copy(language, "先创建并发布 VLESS / REALITY 的 TCP 443 基础入口；公网域名就绪后，可添加原生 Hysteria2。账号与流量共用，固定落地仅作用于 VLESS。", "Create and publish the VLESS / REALITY TCP 443 anchor first, then add native Hysteria2 after its public hostname is ready. Accounts and usage are shared; fixed egress applies to VLESS only.")}</AlertDescription></Alert>
-    <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel>{copy(language, "地区前缀", "Region prefix")}</FieldLabel><RegionCombobox id="meridian-new-entry-region" language={language} onValueChange={setRegionCode} value={regionCode} /></Field><Field><FieldLabel htmlFor="meridian-new-entry-name">{copy(language, "节点名称", "Node name")}</FieldLabel><Input id="meridian-new-entry-name" maxLength={48} onChange={(event) => setEntryName(event.target.value)} value={entryName} required /><FieldDescription>{copy(language, "订阅中显示为“国旗｜名称”，全部 Meridian 入口必须唯一。", "Subscriptions show “flag｜name”; every Meridian entry name must be unique.")}</FieldDescription></Field></div>
+      <Alert><RadioTowerIcon /><AlertTitle>{copy(language, "创建 Glivela 入口", "Create a Glivela entry")}</AlertTitle><AlertDescription>{copy(language, "先创建并发布 VLESS / REALITY 的 TCP 443 基础入口；公网域名就绪后，可添加原生 Hysteria2。账号与流量共用，固定落地仅作用于 VLESS。", "Create and publish the VLESS / REALITY TCP 443 anchor first, then add native Hysteria2 after its public hostname is ready. Accounts and usage are shared; fixed egress applies to VLESS only.")}</AlertDescription></Alert>
+    <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel>{copy(language, "地区前缀", "Region prefix")}</FieldLabel><RegionCombobox id="meridian-new-entry-region" language={language} onValueChange={setRegionCode} value={regionCode} /></Field><Field><FieldLabel htmlFor="meridian-new-entry-name">{copy(language, "节点名称", "Node name")}</FieldLabel><Input id="meridian-new-entry-name" maxLength={48} onChange={(event) => setEntryName(event.target.value)} value={entryName} required /><FieldDescription>{copy(language, "订阅中显示为“国旗｜名称”，全部 Glivela 入口必须唯一。", "Subscriptions show “flag｜name”; every Glivela entry name must be unique.")}</FieldDescription></Field></div>
     <Field><FieldLabel htmlFor="meridian-target">{copy(language, "REALITY 目标", "REALITY target")}</FieldLabel><Input id="meridian-target" value={targetHost} onChange={(event) => { setTargetHost(event.target.value); setVerification(null); }} required /><FieldDescription>{copy(language, "必须使用可稳定访问的 .com TLS 站点；端口固定为 443。", "Use a stable reachable .com TLS site; port 443 is fixed.")}</FieldDescription></Field>
     <Field><FieldLabel htmlFor="meridian-sni">SNI</FieldLabel><Input id="meridian-sni" value={serverName} onChange={(event) => { setServerName(event.target.value); setVerification(null); }} required /></Field>
     <div className="flex flex-wrap items-center gap-3"><Button disabled={checking || !targetHost.trim() || !serverName.trim()} onClick={() => void checkTarget()} type="button" variant="outline">{checking ? <Spinner data-icon="inline-start" /> : <ShieldCheckIcon data-icon="inline-start" />}{copy(language, "从当前节点检查", "Check from this node")}</Button>{verification?.state === "succeeded" && verification.targetIp ? <span className="text-sm text-emerald-600 dark:text-emerald-400">{targetHost} → {verification.targetIp}</span> : null}</div>

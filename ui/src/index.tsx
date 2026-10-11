@@ -17,7 +17,7 @@ type MeridianHostProps = AppWorkspaceProps & {
 };
 
 // The app bundle owns the React tree. Center passes platform data and actions,
-// but does not import or compile Meridian's page components.
+// but does not import or compile Glivela's page components.
 export function mount(element: HTMLElement, initial: MeridianHostProps) {
   const root = createRoot(element);
   let props = initial;

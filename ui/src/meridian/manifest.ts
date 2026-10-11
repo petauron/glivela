@@ -1,4 +1,4 @@
-// Meridian owns its navigation. Center only supplies the mount point.
+// Glivela owns its navigation. Center only supplies the mount point.
 export const manifest = {
   appKey: "vastora-official/meridian",
   pages: [
