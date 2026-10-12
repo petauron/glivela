@@ -10,11 +10,16 @@ listener, counter, dialer, TLS validation, or retry implementation. It adds:
   preserving its port, network, authenticated user, and original destination;
 - an exact native successful-empty DNS predicate, distinct from NXDOMAIN,
   SERVFAIL, timeout, and combined errors;
-- revision 1 of the target-selection capability and focused upstream tests.
+- revision 1 of the target-selection capability and focused upstream tests;
+- an exact capability marker in version/config-preflight output;
+- routing Lua initialization in `run -test`, without opening inbound sockets.
 
 These interfaces are missing from the reviewed upstream core. Merely upgrading
 an official image to the same version does not supply them. Generated scripts
-assert the capabilities at startup, before Vastora switches the active config.
+assert the capabilities during config preflight, before Vastora switches the
+active config. The host also requires the exact capability marker: an official
+image with an equal or newer version is rejected. The CLI regression proves
+that an initialization error fails preflight without starting listeners.
 There is no alternative routing implementation or compatibility fallback.
 
 Why not loopback? Xray `DispatchLink` wraps the existing link's user counters

@@ -10,6 +10,7 @@ import (
 // Composite routes keep one client credential and one quota membership. The
 // private transport family is independent of each exit's final public family.
 const CompositeMinimumXrayVersion = "26.10.10"
+const CompositeRuntimeCapability = "GlivelaTargetSelectionRevision: 1"
 const CompositeDNSAddress = "127.0.0.1:10086"
 
 func ValidateCompositePeers(grant RouteGrant, ipv6, ipv4 RoutePeer) error {

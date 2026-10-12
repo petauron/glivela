@@ -6,10 +6,12 @@ RUN git init && git remote add origin https://github.com/XTLS/Xray-core.git \
     && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = 701af60772cda123492f86e383e1fdba066614a9
 COPY runtime/xray-target-selection.patch /tmp/selection.patch
+COPY runtime/test-config-validation.sh /tmp/test-config-validation.sh
 RUN git apply /tmp/selection.patch \
     && go test ./app/router ./app/dns -run '^TestGlivela' -count=1 \
     && mkdir /out \
     && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o /out/xray ./main \
+    && sh /tmp/test-config-validation.sh /out/xray \
     && cp LICENSE /out/LICENSE.xray
 FROM scratch
 COPY --from=build /out/xray /usr/local/bin/xray
