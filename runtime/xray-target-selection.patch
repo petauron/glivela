@@ -1,3 +1,41 @@
+diff --git a/core/core.go b/core/core.go
+index 09a950b..49d1ae3 100644
+--- a/core/core.go
++++ b/core/core.go
+@@ -68,5 +68,6 @@ func VersionStatement() []string {
+ 	return []string{
+ 		serial.Concat("Xray ", Version(), " (", codename, ") ", build, " (", runtime.Version(), " ", runtime.GOOS, "/", runtime.GOARCH, ")"),
+ 		intro,
++		"GlivelaTargetSelectionRevision: 1",
+ 	}
+ }
+diff --git a/main/run.go b/main/run.go
+index b87ca63..b79e648 100644
+--- a/main/run.go
++++ b/main/run.go
+@@ -19,6 +19,7 @@ import (
+ 	clog "github.com/xtls/xray-core/common/log"
+ 	"github.com/xtls/xray-core/common/platform"
+ 	"github.com/xtls/xray-core/core"
++	"github.com/xtls/xray-core/features/routing"
+ 	"github.com/xtls/xray-core/main/commands/base"
+ )
+ 
+@@ -87,6 +88,14 @@ func executeRun(cmd *base.Command, args []string) {
+ 	}
+ 
+ 	if *test {
++		// Validate Lua initialization and capability assertions without
++		// opening inbound sockets or starting data-plane listeners.
++		if router := server.(*core.Instance).GetFeature(routing.RouterType()); router != nil {
++			if err := router.Start(); err != nil {
++				fmt.Println("Routing validation failed:", err)
++				os.Exit(23)
++			}
++		}
+ 		fmt.Println("Configuration OK.")
+ 		os.Exit(0)
+ 	}
 diff --git a/app/dns/lua.go b/app/dns/lua.go
 index 3c5194b..db19e84 100644
 --- a/app/dns/lua.go
