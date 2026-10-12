@@ -139,9 +139,11 @@ func (e RealityEndpoint) validateSubscription() error {
 }
 
 type RoutePeer struct {
-	EgressID string `json:"egressId"`
-	Address  string `json:"address"`
-	Port     int    `json:"port"`
+	EgressID   string       `json:"egressId"`
+	Address    string       `json:"address"`
+	Port       int          `json:"port"`
+	ExitFamily EgressPolicy `json:"exitFamily,omitempty"`
+	Ready      bool         `json:"ready,omitempty"`
 }
 
 func (p RoutePeer) Validate() error {
@@ -270,6 +272,9 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 		},
 		"routing": map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
 	}
+	if err := projectCompositeRuntime(plan, projection, config); err != nil {
+		return nil, err
+	}
 	encoded, err := json.Marshal(config)
 	if err != nil {
 		return nil, errors.New("meridian: cannot encode Xray configuration")
@@ -392,6 +397,17 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 			return xrayProjection{}, errors.New("meridian: conflicting Xray route grant")
 		}
 		seenGrants[grant.ID], usedRoutes[grant.Route.ID] = true, true
+		if grant.IPv4EgressID != "" {
+			secondary := projection.peers[grant.IPv4EgressID]
+			if err := ValidateCompositePeers(grant, peer, secondary); err != nil {
+				return xrayProjection{}, err
+			}
+			for _, endpoint := range projection.realityEndpoints {
+				if endpoint.InboundTag == grant.InboundTag && (endpoint.ListenAddress == peer.Address || endpoint.ListenAddress == secondary.Address) {
+					return xrayProjection{}, errors.New("glivela: composite landing transport is the entry machine")
+				}
+			}
+		}
 	}
 	for _, material := range plan.Credentials {
 		if material.Credential.Kind == RouteCredential && material.Credential.Enabled && !usedRoutes[material.Credential.ID] {

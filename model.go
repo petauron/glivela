@@ -86,24 +86,28 @@ func (c Credential) Validate() error {
 }
 
 type RouteGrant struct {
-	ID          string         `json:"id"`
-	AccountID   string         `json:"accountId"`
-	EntryID     string         `json:"entryId"`
-	EgressID    string         `json:"egressId"`
-	InboundTag  string         `json:"inboundTag"`
-	Base        Credential     `json:"base"`
-	Route       Credential     `json:"route"`
-	Mode        PublishingMode `json:"mode"`
-	Enabled     bool           `json:"enabled"`
-	HideNative  bool           `json:"hideNative"`
-	DesiredRev  uint64         `json:"desiredRevision"`
-	AppliedRev  uint64         `json:"appliedRevision"`
-	RuntimeGood bool           `json:"runtimeHealthy"`
+	ID           string         `json:"id"`
+	AccountID    string         `json:"accountId"`
+	EntryID      string         `json:"entryId"`
+	EgressID     string         `json:"egressId"`
+	IPv4EgressID string         `json:"ipv4EgressId,omitempty"`
+	InboundTag   string         `json:"inboundTag"`
+	Base         Credential     `json:"base"`
+	Route        Credential     `json:"route"`
+	Mode         PublishingMode `json:"mode"`
+	Enabled      bool           `json:"enabled"`
+	HideNative   bool           `json:"hideNative"`
+	DesiredRev   uint64         `json:"desiredRevision"`
+	AppliedRev   uint64         `json:"appliedRevision"`
+	RuntimeGood  bool           `json:"runtimeHealthy"`
 }
 
 func (g RouteGrant) Validate() error {
 	if !ValidIdentifier(g.ID) || !ValidIdentifier(g.AccountID) || !ValidIdentifier(g.EntryID) || !ValidIdentifier(g.EgressID) || !g.Mode.Valid() || !validInboundTag(g.InboundTag) || g.DesiredRev == 0 || g.AppliedRev > g.DesiredRev {
 		return errors.New("meridian: invalid route grant")
+	}
+	if g.IPv4EgressID != "" && (!ValidIdentifier(g.IPv4EgressID) || g.IPv4EgressID == g.EgressID || g.IPv4EgressID == g.EntryID || g.EgressID == g.EntryID) {
+		return errors.New("glivela: a composite route requires two independent exits")
 	}
 	if g.Base.Validate() != nil || g.Base.Kind != NativeCredential || g.Base.AccountID != g.AccountID || g.Base.EntryID != g.EntryID {
 		return errors.New("meridian: invalid native route credential")

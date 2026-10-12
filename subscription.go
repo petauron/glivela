@@ -14,15 +14,16 @@ import (
 const maxSubscriptionBytes = 4 << 20
 
 type PublishedRoute struct {
-	Grant                 RouteGrant   `json:"grant"`
-	Protocol              ProtocolKind `json:"protocol"`
-	EntryName             string       `json:"entryName"`
-	EgressNameSuffix      string       `json:"egressNameSuffix,omitempty"`
-	EgressRegionPrefix    string       `json:"egressRegionPrefix,omitempty"`
-	BaseLink              string       `json:"baseLink"`
-	RouteLink             string       `json:"routeLink"`
-	BaseProtocolIdentity  string       `json:"baseProtocolIdentity"`
-	RouteProtocolIdentity string       `json:"routeProtocolIdentity"`
+	Grant                  RouteGrant   `json:"grant"`
+	Protocol               ProtocolKind `json:"protocol"`
+	EntryName              string       `json:"entryName"`
+	EgressNameSuffix       string       `json:"egressNameSuffix,omitempty"`
+	EgressRegionPrefix     string       `json:"egressRegionPrefix,omitempty"`
+	IPv4EgressRegionPrefix string       `json:"ipv4EgressRegionPrefix,omitempty"`
+	BaseLink               string       `json:"baseLink"`
+	RouteLink              string       `json:"routeLink"`
+	BaseProtocolIdentity   string       `json:"baseProtocolIdentity"`
+	RouteProtocolIdentity  string       `json:"routeProtocolIdentity"`
 }
 
 type NativeEntry struct {
@@ -163,6 +164,7 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 	}
 	lines := strings.Split(strings.TrimRight(string(plain), "\r\n"), "\n")
 	identities := map[string]bool{}
+	routeLabels := compositeRouteLabels(routes)
 	for _, line := range lines {
 		if link, err := parseVLESSLink(strings.TrimSpace(line)); err == nil {
 			identities[string(VLESSReality)+"\x00"+link.User.Username()] = true
@@ -197,7 +199,11 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 			return nil, errors.New("meridian: invalid routed credential")
 		}
 		routeLink, _, _ := strings.Cut(strings.TrimSpace(item.RouteLink), "#")
-		lines = append(lines, routeLink+"#"+escapeLinkFragment(routeName(item)))
+		name := routeName(item)
+		if label := routeLabels[item.Grant.ID]; label != "" {
+			name = label
+		}
+		lines = append(lines, routeLink+"#"+escapeLinkFragment(name))
 		identities[string(VLESSReality)+"\x00"+routed.User.Username()] = true
 	}
 	lines = slices.DeleteFunc(lines, func(line string) bool {
@@ -250,6 +256,7 @@ func composeMihomo(native []byte, accountID string, mode PublishingMode, routes 
 		return nil
 	}
 	baseProxies := slices.Clone(proxies)
+	routeLabels := compositeRouteLabels(routes)
 	routeNames := []any{}
 	replacements := map[string][]any{}
 	for _, item := range routes {
@@ -291,6 +298,9 @@ func composeMihomo(native []byte, accountID string, mode PublishingMode, routes 
 			}
 		}
 		name := routeName(item)
+		if label := routeLabels[item.Grant.ID]; label != "" {
+			name = label
+		}
 		if err := reserve(name); err != nil {
 			return nil, err
 		}
@@ -428,6 +438,9 @@ func routeName(item PublishedRoute) string {
 	}
 	entry = compactEntryName(strings.TrimLeft(entry, "｜| "))
 	label := item.EgressNameSuffix
+	if item.Grant.IPv4EgressID != "" {
+		label = "IPv6优先+IPv4"
+	}
 	if label == "" {
 		label = "双跳"
 	}
@@ -436,5 +449,40 @@ func routeName(item PublishedRoute) string {
 	if prefix == "" {
 		prefix = "落地"
 	}
+	if item.Grant.IPv4EgressID != "" {
+		four := item.IPv4EgressRegionPrefix
+		if four == "" {
+			four = "IPv4落地"
+		}
+		prefix += " + " + four
+	}
 	return prefix + "｜" + entry
+}
+
+// Only new combinations are disambiguated; existing single-exit names stay
+// byte-for-byte unchanged. Never append credential IDs or opaque node hashes.
+func compositeRouteLabels(routes []PublishedRoute) map[string]string {
+	groups := map[string][]string{}
+	for _, route := range routes {
+		if route.Grant.IPv4EgressID != "" {
+			name := routeName(route)
+			groups[name] = append(groups[name], route.Grant.ID)
+		}
+	}
+	labels := map[string]string{}
+	for name, ids := range groups {
+		slices.Sort(ids)
+		for i, id := range ids {
+			label := name
+			if len(ids) > 1 {
+				if i < 20 {
+					label += string(rune('①') + rune(i))
+				} else {
+					label += "·" + strconv.Itoa(i+1)
+				}
+			}
+			labels[id] = label
+		}
+	}
+	return labels
 }
