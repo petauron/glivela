@@ -1,4 +1,4 @@
-module github.com/petauron/meridian
+module github.com/petauron/glivela
 
 go 1.26.0
 

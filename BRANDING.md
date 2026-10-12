@@ -7,18 +7,26 @@ the monitoring product.
 ## Stable installation identity
 
 The following are permanent machine contracts, not old implementations or
-runtime aliases: the Go module/package `github.com/petauron/meridian`, catalog
-ID `meridian`, capability `meridian-runtime`, `/api/v1/meridian` routes, persisted
+runtime aliases: the Go package name `meridian`, catalog ID `meridian`,
+capability `meridian-runtime`, `/api/v1/meridian` routes, persisted
 field names, and `ui-meridian-<version>` signed asset names. Changing a display
 name must not create new accounts, subscriptions, credentials or installations.
 There is one implementation and one set of endpoints. Do not introduce a second
 `glivela` application ID, shadow database or fallback API.
 
-The source repository keeps its existing URL while these PRs are reviewed.
-Renaming GitHub repositories is a separate administrative operation: update and
-verify module/source pins, CI source identities, documentation and provenance
-consumers together before changing those coordinates. Do not republish old
-assets or reuse old tags under new names.
+## Canonical source identity
+
+The source repository is `petauron/glivela` and the Go module path is
+`github.com/petauron/glivela`. Consumers must update their imports and pin a
+commit containing the new module declaration (or a later reviewed release).
+Do not add an old-path module alias or `replace` fallback. A pinned pseudo-version
+can integrate the source migration without publishing a version or catalog.
+
+The rename preserves Git history, tags, issues and PRs. Historical tags still
+contain their original module declaration; do not move them or republish old
+assets under the new identity. The catalog's existing UI source SHA and signed
+asset names remain unchanged until a separately reviewed UI release. Release
+Please keeps its existing component key `meridian` and version history.
 
 ## Release and managed upgrade
 
