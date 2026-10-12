@@ -13,9 +13,10 @@ import (
 )
 
 type DesiredArtifact struct {
-	Revision     uint64 `json:"revision"`
-	Config       []byte `json:"config"`
-	ConfigSHA256 string `json:"configSha256"`
+	Revision     uint64            `json:"revision"`
+	Config       []byte            `json:"config"`
+	ConfigSHA256 string            `json:"configSha256"`
+	Files        map[string][]byte `json:"files,omitempty"`
 }
 
 func BuildDesiredArtifact(plan XrayPlan) (DesiredArtifact, error) {
@@ -24,7 +25,11 @@ func BuildDesiredArtifact(plan XrayPlan) (DesiredArtifact, error) {
 		return DesiredArtifact{}, err
 	}
 	digest := sha256.Sum256(config)
-	return DesiredArtifact{Revision: plan.Revision, Config: config, ConfigSHA256: hex.EncodeToString(digest[:])}, nil
+	files, err := compositeRuntimeFiles(plan)
+	if err != nil {
+		return DesiredArtifact{}, err
+	}
+	return DesiredArtifact{Revision: plan.Revision, Config: config, ConfigSHA256: hex.EncodeToString(digest[:]), Files: files}, nil
 }
 
 func (a DesiredArtifact) Validate() error {
@@ -35,7 +40,7 @@ func (a DesiredArtifact) Validate() error {
 	if subtle.ConstantTimeCompare([]byte(a.ConfigSHA256), []byte(hex.EncodeToString(digest[:]))) != 1 {
 		return errors.New("meridian: desired artifact digest changed")
 	}
-	return nil
+	return validateRuntimeFiles(a.Config, a.Files)
 }
 
 type AppliedReceipt struct {
