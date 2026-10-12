@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	m "github.com/petauron/meridian"
+	m "github.com/petauron/glivela"
 )
 
 func main() {
