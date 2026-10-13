@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { StateBadge, copy, userError } from "@/views/shared";
+import { RouteHealth } from "./RouteHealth";
 
 type CompositeGrant = AppData["meridian"]["grants"][number] & { ipv4EgressNodeId?: string; ipv4EgressNodeName?: string };
 const ipv6Exit = (server: LandingView["servers"][number]) => Boolean(server.egressIp?.includes(":") && !server.egressIp?.toLowerCase().startsWith("::ffff:"));
@@ -73,6 +74,19 @@ export function MeridianRoutes({ data, language, mutate, endpointId: fixedEntry,
       <details className="mt-3 text-muted-foreground"><summary className="w-fit cursor-pointer">{copy(language, "高级选项", "Advanced")}</summary><div className="mt-2 flex items-center gap-2"><Switch id={`${id}-native`} checked={hideNative} onCheckedChange={setHideNative} disabled={busy} /><label htmlFor={`${id}-native`}>{copy(language, "隐藏直连 VLESS", "Hide direct VLESS")}</label></div></details>
     </form>
     {error ? <p role="alert" className="text-destructive">{error}{availableServers === null ? <Button size="sm" variant="ghost" onClick={() => setReload((value) => value + 1)}>{copy(language, "重试", "Retry")}</Button> : null}</p> : null}
-    {grants.length ? <details className="border-t pt-2"><summary className="w-fit cursor-pointer text-muted-foreground">{copy(language, `已添加 ${grants.length} 条线路`, `${grants.length} added routes`)}</summary><div className="mt-2 divide-y">{grants.map((grant) => <div className="flex items-center gap-2 py-2" key={grant.id}><span className="min-w-0 flex-1 truncate" title={grant.ipv4EgressNodeId ? `${grant.egressNodeName} (IPv6) / ${grant.ipv4EgressNodeName ?? grant.ipv4EgressNodeId} (IPv4)` : grant.egressNodeName}>{data.meridian.accounts.find((value) => value.id === grant.accountId)?.displayName} · {data.meridian.endpoints.find((value) => value.id === grant.endpointId)?.displayName} → {grant.ipv4EgressNodeId ? copy(language, "IPv6 优先 + IPv4", "IPv6 priority + IPv4") : grant.egressNodeName}</span><StateBadge language={language} value={grant.status} /><Button size="icon-sm" variant="ghost" aria-label={copy(language, "移除订阅线路", "Remove subscription route")} disabled={busy || grant.status === "revoking"} onClick={() => void run(() => api.revokeMeridianRoute(grant.id), copy(language, "正在移除线路。", "Removing route."))}><Trash2Icon data-icon="inline-start" /></Button>{grant.lastError ? <span className="text-destructive" title={grant.lastError}>{copy(language, "配置失败", "Failed")}</span> : null}</div>)}</div></details> : null}
+    {grants.length ? <details className="border-t pt-2">
+      <summary className="w-fit cursor-pointer text-muted-foreground">{copy(language, `已添加 ${grants.length} 条线路`, `${grants.length} added routes`)}</summary>
+      <div className="mt-2 divide-y">{grants.map((grant) => <div className="flex min-w-0 flex-col gap-2 py-2" key={grant.id}>
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate" title={grant.ipv4EgressNodeId ? `${grant.egressNodeName} (IPv6) / ${grant.ipv4EgressNodeName ?? grant.ipv4EgressNodeId} (IPv4)` : grant.egressNodeName}>
+            {data.meridian.accounts.find((value) => value.id === grant.accountId)?.displayName} · {data.meridian.endpoints.find((value) => value.id === grant.endpointId)?.displayName} → {grant.ipv4EgressNodeId ? copy(language, "IPv6 优先 + IPv4", "IPv6 priority + IPv4") : grant.egressNodeName}
+          </span>
+          <StateBadge language={language} value={grant.status} />
+          <Button size="icon-sm" variant="ghost" aria-label={copy(language, "移除订阅线路", "Remove subscription route")} disabled={busy || grant.status === "revoking"} onClick={() => void run(() => api.revokeMeridianRoute(grant.id), copy(language, "正在移除线路。", "Removing route."))}><Trash2Icon data-icon="inline-start" /></Button>
+          {grant.lastError ? <span className="text-destructive">{copy(language, grant.status === "blocked" ? "链路未验证" : "配置失败", grant.status === "blocked" ? "Transport unverified" : "Failed")}</span> : null}
+        </div>
+        <RouteHealth routeId={grant.id} language={language} primaryName={grant.egressNodeName} ipv4Name={grant.ipv4EgressNodeName} />
+      </div>)}</div>
+    </details> : null}
   </section>;
 }
