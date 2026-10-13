@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.19](https://github.com/petauron/glivela/compare/v0.1.0-alpha.18...v0.1.0-alpha.19) (2026-10-13)
+
+
+### Bug Fixes
+
+* **deps:** patch source-map-js denial-of-service vulnerability ([01c606c](https://github.com/petauron/glivela/commit/01c606c1995dad203af712280e511faf2a170608))
+* **ui:** remove vulnerable component CLI dependencies ([3208df4](https://github.com/petauron/glivela/commit/3208df40990a2271c561569784d18395ff5dd6d8))
+
 ## [0.1.0-alpha.18](https://github.com/petauron/glivela/compare/v0.1.0-alpha.17...v0.1.0-alpha.18) (2026-10-13)
 
 
