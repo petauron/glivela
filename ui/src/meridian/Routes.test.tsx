@@ -48,7 +48,10 @@ it("sends one composite identity with two independent, ready exits", async () =>
   expect(submit.disabled).toBe(false);
   await act(async () => submit.click());
   expect(create).toHaveBeenCalledExactlyOnceWith({ accountId: "account", endpointId: "endpoint", egressNodeId: "exit6", ipv4EgressNodeId: "exit4", hideNative: false });
-  expect(document.body.textContent).toContain("DNS 或 IPv6 连接失败不会切换");
+  expect(document.body.textContent).toContain("使用官方 Xray");
+  expect(document.body.textContent).toContain("按 DNS 返回结果优先走 IPv6");
+  expect(document.body.textContent).toContain("连接失败不切换落地");
+  expect(document.body.textContent).not.toContain("确认无 AAAA");
 });
 it("cannot submit a combination without an independent IPv4 exit", async () => {
   const create = vi.spyOn(api, "createMeridianRoute");

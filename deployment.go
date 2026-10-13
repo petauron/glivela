@@ -13,10 +13,9 @@ import (
 )
 
 type DesiredArtifact struct {
-	Revision     uint64            `json:"revision"`
-	Config       []byte            `json:"config"`
-	ConfigSHA256 string            `json:"configSha256"`
-	Files        map[string][]byte `json:"files,omitempty"`
+	Revision     uint64 `json:"revision"`
+	Config       []byte `json:"config"`
+	ConfigSHA256 string `json:"configSha256"`
 }
 
 func BuildDesiredArtifact(plan XrayPlan) (DesiredArtifact, error) {
@@ -25,11 +24,7 @@ func BuildDesiredArtifact(plan XrayPlan) (DesiredArtifact, error) {
 		return DesiredArtifact{}, err
 	}
 	digest := sha256.Sum256(config)
-	files, err := compositeRuntimeFiles(plan)
-	if err != nil {
-		return DesiredArtifact{}, err
-	}
-	return DesiredArtifact{Revision: plan.Revision, Config: config, ConfigSHA256: hex.EncodeToString(digest[:]), Files: files}, nil
+	return DesiredArtifact{Revision: plan.Revision, Config: config, ConfigSHA256: hex.EncodeToString(digest[:])}, nil
 }
 
 func (a DesiredArtifact) Validate() error {
@@ -40,7 +35,14 @@ func (a DesiredArtifact) Validate() error {
 	if subtle.ConstantTimeCompare([]byte(a.ConfigSHA256), []byte(hex.EncodeToString(digest[:]))) != 1 {
 		return errors.New("meridian: desired artifact digest changed")
 	}
-	return validateRuntimeFiles(a.Config, a.Files)
+	var runtime struct {
+		Routing struct{ Script string }
+		DNS     struct{ Script string }
+	}
+	if json.Unmarshal(a.Config, &runtime) != nil || runtime.Routing.Script != "" || runtime.DNS.Script != "" {
+		return errors.New("glivela: runtime artifacts must use official Xray configuration without scripts")
+	}
+	return nil
 }
 
 type AppliedReceipt struct {
