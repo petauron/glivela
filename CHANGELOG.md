@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.17](https://github.com/petauron/glivela/compare/v0.1.0-alpha.16...v0.1.0-alpha.17) (2026-10-13)
+
+
+### Features
+
+* **routing:** add strict IPv6 and IPv4 composite exits ([#34](https://github.com/petauron/glivela/issues/34)) ([ba1d641](https://github.com/petauron/glivela/commit/ba1d6417dabb7990131effbb49f78f64c4e8dff4))
+
+
+### Bug Fixes
+
+* **routing:** use official Xray for IPv6 and IPv4 composites ([264e9a1](https://github.com/petauron/glivela/commit/264e9a110b2651f3dd2b62ddc72de46fb3d1aaed))
+* **runtime:** validate composite capabilities before configuration switch ([8976ef0](https://github.com/petauron/glivela/commit/8976ef02d290bf66bb7d855fb710ae8fb79a8e90))
+
 ## [0.1.0-alpha.16](https://github.com/petauron/glivela/compare/v0.1.0-alpha.15...v0.1.0-alpha.16) (2026-10-12)
 
 
