@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.18](https://github.com/petauron/glivela/compare/v0.1.0-alpha.17...v0.1.0-alpha.18) (2026-10-13)
+
+
+### Bug Fixes
+
+* **subscription:** preserve home route names when adding IPv4 exits ([0ac05e9](https://github.com/petauron/glivela/commit/0ac05e9725810d4cb88b7ba678f03598cea0625a))
+
 ## [0.1.0-alpha.17](https://github.com/petauron/glivela/compare/v0.1.0-alpha.16...v0.1.0-alpha.17) (2026-10-13)
 
 
