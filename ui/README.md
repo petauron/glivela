@@ -19,3 +19,12 @@ same preparation step for both catalog build passes.
 Center remains responsible for authentication and authorization on every API
 request. Loading the UI bundle does not grant new permissions to an app or a
 third-party catalog source.
+
+The shared shadcn Tailwind utilities are ejected unchanged from the locked
+`shadcn@4.21.0` stylesheet into `src/style.css`, with its MIT notice retained,
+following the official [eject procedure](https://ui.shadcn.com/docs/changelog/2026-05-shadcn-eject).
+The UI uses Center's existing component source, not the shadcn generation CLI.
+Keeping that CLI as an application dependency unnecessarily included its MCP
+server and unpatched `braces` dependency chain. Future shared-style changes must
+be reviewed as source changes; they are not silently pulled in by CLI updates.
+CI audits the complete UI lockfile and rejects high or critical advisories.

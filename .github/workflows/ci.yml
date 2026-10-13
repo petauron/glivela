@@ -73,6 +73,8 @@ jobs:
         run: |
           npm ci --prefix vastora/web
           npm ci --prefix ui
+      - name: Audit application dependencies
+        run: npm audit --prefix ui --audit-level=high
       - name: Verify app interface
         env:
           VASTORA_WEB_SOURCE: ${{ github.workspace }}/vastora/web/src
