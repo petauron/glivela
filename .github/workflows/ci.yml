@@ -24,8 +24,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build pinned upstream core and run extension contract tests
-        run: docker build --file runtime/Dockerfile --tag glivela-selection-ci .
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validate generated composite configuration with official Xray
+        env:
+          GLIVELA_XRAY_IMAGE: ghcr.io/xtls/xray-core:26.7.28@sha256:b697cda1588faca696ab7f7755dd1161f60862af3ff6026300e44cff6aedd558
+        run: |
+          docker pull "$GLIVELA_XRAY_IMAGE"
+          go test -run '^TestCompositeOfficialCoreConfiguration$' -count=1 .
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

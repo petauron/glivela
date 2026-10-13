@@ -243,13 +243,26 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 
 	outbounds := []any{nativeXrayOutbound(plan.NativeEgress)}
 	rules := []any{map[string]any{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"}}
+	composite := false
 	for _, grant := range projection.grants {
 		peer := projection.peers[grant.EgressID]
 		tag := routeOutboundTag(grant.ID)
-		outbounds = append(outbounds, map[string]any{
+		outbound := map[string]any{
 			"protocol": "socks", "tag": tag,
 			"settings": map[string]any{"servers": []any{map[string]any{"address": peer.Address, "port": peer.Port}}},
-		})
+		}
+		if grant.IPv4EgressID != "" {
+			composite = true
+			outbound["targetStrategy"] = "ForceIPv6"
+			ipv4 := projection.peers[grant.IPv4EgressID]
+			outbounds = append(outbounds, outbound, map[string]any{
+				"protocol": "socks", "tag": tag + "-ipv4", "targetStrategy": "ForceIPv4",
+				"settings": map[string]any{"servers": []any{map[string]any{"address": ipv4.Address, "port": ipv4.Port}}},
+			})
+			rules = append(rules, compositeXrayRules(grant)...)
+			continue
+		}
+		outbounds = append(outbounds, outbound)
 		scope := func(network, outbound string) map[string]any {
 			return map[string]any{"type": "field", "inboundTag": []string{grant.InboundTag}, "user": []string{grant.Route.User}, "network": network, "outboundTag": outbound}
 		}
@@ -272,8 +285,14 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 		},
 		"routing": map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
 	}
-	if err := projectCompositeRuntime(plan, projection, config); err != nil {
-		return nil, err
+	if composite {
+		config["routing"] = map[string]any{"domainStrategy": "IPOnDemand", "rules": rules}
+		// Local DoH bypasses proxy routing and control-plane DNS. Xray owns
+		// resolution and caching; no Agent-side resolver or scripts are needed.
+		config["dns"] = map[string]any{
+			"queryStrategy": "UseIP",
+			"servers":       []string{"https+local://1.1.1.1/dns-query", "https+local://8.8.8.8/dns-query"},
+		}
 	}
 	encoded, err := json.Marshal(config)
 	if err != nil {

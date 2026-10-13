@@ -2,6 +2,8 @@ package meridian
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/netip"
 	"slices"
@@ -21,50 +23,30 @@ func compositePlanFixture() XrayPlan {
 	}
 }
 
-func TestCompositeSelectionMatrix(t *testing.T) {
-	ip6, ip4 := netip.MustParseAddr("2606:4700:4700::1111"), netip.MustParseAddr("1.1.1.1")
-	for _, test := range []struct {
-		name, target string
-		six, four    FamilyAnswer
-		family       EgressPolicy
-		fail         bool
-	}{
-		{"IPv6 only", "www.example.com", FamilyAnswer{DNSSuccess, []netip.Addr{ip6}}, FamilyAnswer{DNSNoData, nil}, EgressIPv6Only, false},
-		{"dual stack", "www.example.com", FamilyAnswer{DNSSuccess, []netip.Addr{ip6}}, FamilyAnswer{DNSSuccess, []netip.Addr{ip4}}, EgressIPv6Only, false},
-		{"A only", "www.example.com", FamilyAnswer{DNSNoData, nil}, FamilyAnswer{DNSSuccess, []netip.Addr{ip4}}, EgressIPv4Only, false},
-		{"AAAA failure with A", "www.example.com", FamilyAnswer{DNSFailure, nil}, FamilyAnswer{DNSSuccess, []netip.Addr{ip4}}, "", true},
-		{"AAAA timeout with A", "www.example.com", FamilyAnswer{DNSTimeout, nil}, FamilyAnswer{DNSSuccess, []netip.Addr{ip4}}, "", true},
-		{"NXDOMAIN", "www.example.com", FamilyAnswer{DNSNotFound, nil}, FamilyAnswer{DNSSuccess, []netip.Addr{ip4}}, "", true},
-		{"empty success", "www.example.com", FamilyAnswer{DNSSuccess, nil}, FamilyAnswer{DNSSuccess, []netip.Addr{ip4}}, "", true},
-		{"no address", "www.example.com", FamilyAnswer{DNSNoData, nil}, FamilyAnswer{DNSNoData, nil}, "", true},
-		{"false NODATA", "www.example.com", FamilyAnswer{DNSNoData, []netip.Addr{ip6}}, FamilyAnswer{DNSSuccess, []netip.Addr{ip4}}, "", true},
-		{"blocked AAAA with A", "www.example.com", FamilyAnswer{DNSSuccess, []netip.Addr{netip.MustParseAddr("fd00::1")}}, FamilyAnswer{DNSSuccess, []netip.Addr{ip4}}, "", true},
-		{"IPv4 literal", "1.1.1.1", FamilyAnswer{}, FamilyAnswer{}, EgressIPv4Only, false},
-		{"IPv6 literal", ip6.String(), FamilyAnswer{}, FamilyAnswer{}, EgressIPv6Only, false},
-		{"raw Fake IP", "198.18.0.1", FamilyAnswer{}, FamilyAnswer{}, "", true},
-		{"missing hostname", "", FamilyAnswer{}, FamilyAnswer{}, "", true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			selected, err := SelectCompositeDestination(test.target, 443, test.six, test.four)
-			if (err != nil) != test.fail || !test.fail && selected.Family != test.family {
-				t.Fatalf("selection=%+v error=%v", selected, err)
-			}
-		})
+func TestCompositeBlockedNetworks(t *testing.T) {
+	blocked := func(value string) bool {
+		address := netip.MustParseAddr(value).Unmap()
+		return slices.ContainsFunc(compositeBlockedCIDRs, func(cidr string) bool { return netip.MustParsePrefix(cidr).Contains(address) })
 	}
-	for _, address := range []string{"127.0.0.1", "100.64.0.1", "169.254.169.254", "10.0.0.1", "192.168.0.1", "2001:db8::1", "::1", "::ffff:127.0.0.1", "2606:4700:4700::1111%zone"} {
-		if _, err := SelectCompositeDestination(address, 443, FamilyAnswer{}, FamilyAnswer{}); err == nil {
+	for _, address := range []string{"1.1.1.1", "2606:4700:4700::1111"} {
+		if blocked(address) || !CompositePublicIP(netip.MustParseAddr(address)) {
+			t.Fatalf("public target blocked: %s", address)
+		}
+	}
+	for _, address := range []string{"127.0.0.1", "100.64.0.1", "169.254.169.254", "10.0.0.1", "192.168.0.1", "198.18.0.1", "2001:db8::1", "::1", "fd00::1", "::ffff:127.0.0.1"} {
+		if !blocked(address) || CompositePublicIP(netip.MustParseAddr(address)) {
 			t.Fatalf("unsafe literal accepted: %s", address)
 		}
 	}
-	if _, err := SelectCompositeDestination("www.example.com", 22, FamilyAnswer{DNSSuccess, []netip.Addr{ip6}}, FamilyAnswer{}); err == nil {
-		t.Fatal("management port accepted")
+	if CompositePublicIP(netip.Addr{}) || CompositePublicIP(netip.MustParseAddr("2606:4700:4700::1111%zone")) {
+		t.Fatal("invalid or scoped exit address accepted")
 	}
 }
 
 func TestCompositeArtifactIsDeterministicAndFailClosed(t *testing.T) {
 	plan := compositePlanFixture()
 	artifact, err := BuildDesiredArtifact(plan)
-	if err != nil || artifact.Validate() != nil || len(artifact.Files) != 1 {
+	if err != nil || artifact.Validate() != nil {
 		t.Fatalf("artifact: %v", err)
 	}
 	slices.Reverse(plan.Peers)
@@ -76,25 +58,25 @@ func TestCompositeArtifactIsDeterministicAndFailClosed(t *testing.T) {
 	var config struct {
 		Outbounds []struct{ Tag, Protocol, TargetStrategy string }
 		Routing   struct {
-			Script string
-			Rules  []any
+			Script, DomainStrategy string
+			Rules                  []struct {
+				Type, Network, OutboundTag, Port string
+				InboundTag, User, IP             []string
+			}
 		}
 		DNS struct {
-			Script  string
-			Servers []struct {
-				ID           string
-				SkipFallback bool
-			}
+			Script, QueryStrategy string
+			Servers               []string
 		}
 	}
 	if err := json.Unmarshal(artifact.Config, &config); err != nil {
 		t.Fatal(err)
 	}
-	if config.Outbounds[0].Protocol != "blackhole" || config.Routing.Script == "" || config.DNS.Script != "" || len(config.Routing.Rules) != 0 {
-		t.Fatal("script failure can escape through ordinary routing")
+	if config.Outbounds[0].Protocol != "freedom" || config.Routing.Script != "" || config.DNS.Script != "" || config.Routing.DomainStrategy != "IPOnDemand" {
+		t.Fatal("composite must use official routing without changing the native outbound")
 	}
-	if len(config.DNS.Servers) != 2 || config.DNS.Servers[0].ID != "native" || config.DNS.Servers[1].ID != "composite" || !config.DNS.Servers[1].SkipFallback {
-		t.Fatal("composite DNS changed native resolution")
+	if config.DNS.QueryStrategy != "UseIP" || !slices.Equal(config.DNS.Servers, []string{"https+local://1.1.1.1/dns-query", "https+local://8.8.8.8/dns-query"}) {
+		t.Fatal("composite must query both address families through official local DoH")
 	}
 	loops, socks := 0, 0
 	for _, out := range config.Outbounds {
@@ -103,24 +85,140 @@ func TestCompositeArtifactIsDeterministicAndFailClosed(t *testing.T) {
 		}
 		if out.Protocol == "socks" {
 			socks++
+			want := "ForceIPv6"
+			if strings.HasSuffix(out.Tag, "-ipv4") {
+				want = "ForceIPv4"
+			}
+			if out.TargetStrategy != want {
+				t.Fatal("SOCKS destination family is not forced")
+			}
 		}
 	}
 	if loops != 0 || socks != 2 {
-		t.Fatal("composite must pin one selected target without redispatch or duplicate user accounting")
+		t.Fatal("composite must select one outbound without redispatch or duplicate user accounting")
 	}
-	for name, contents := range artifact.Files {
-		changed := artifact
-		changed.Files = map[string][]byte{}
-		for key, data := range artifact.Files {
-			changed.Files[key] = bytes.Clone(data)
-		}
-		changed.Files[name] = append(changed.Files[name], ' ')
-		if changed.Validate() == nil {
-			t.Fatal("script mutation accepted")
-		}
-		if strings.Contains(name, "routing") && (!strings.Contains(string(contents), "tcp_only") || !strings.Contains(string(contents), "credential_scope")) {
+	if len(config.Routing.Rules) != 7 {
+		t.Fatal("missing composite rules")
+	}
+	rules := config.Routing.Rules[1:]
+	for _, rule := range rules[:5] {
+		if rule.Type != "field" || !slices.Equal(rule.InboundTag, []string{"entry-in"}) || !slices.Equal(rule.User, []string{"routed"}) {
 			t.Fatal("route authority boundary absent")
 		}
+	}
+	if rules[0].Network != "udp" || rules[0].OutboundTag != "blocked" || rules[1].Network != "tcp" || rules[1].OutboundTag != "blocked" || !strings.Contains(","+rules[1].Port+",", ",22,") || rules[2].OutboundTag != "blocked" || !slices.Equal(rules[2].IP, compositeBlockedCIDRs) {
+		t.Fatal("unsafe targets must be blocked before family selection")
+	}
+	if !slices.Equal(rules[3].IP, []string{"::/0"}) || rules[3].OutboundTag != routeOutboundTag("combo") || !slices.Equal(rules[4].IP, []string{"0.0.0.0/0"}) || rules[4].OutboundTag != routeOutboundTag("combo")+"-ipv4" {
+		t.Fatal("IPv6 must precede IPv4")
+	}
+	if rules[5].OutboundTag != "blocked" || len(rules[5].InboundTag) != 0 || !slices.Equal(rules[5].User, []string{"routed"}) {
+		t.Fatal("unresolved or incorrectly scoped credentials can fall through")
+	}
+	changed := artifact
+	changed.Config = append(bytes.Clone(artifact.Config), ' ')
+	if changed.Validate() == nil {
+		t.Fatal("configuration mutation accepted")
+	}
+	for _, section := range []string{"routing", "dns"} {
+		var candidate map[string]any
+		if err := json.Unmarshal(artifact.Config, &candidate); err != nil {
+			t.Fatal(err)
+		}
+		candidate[section].(map[string]any)["script"] = "/etc/vastora/obsolete.lua"
+		changed.Config, err = json.Marshal(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(changed.Config)
+		changed.ConfigSHA256 = hex.EncodeToString(digest[:])
+		if changed.Validate() == nil {
+			t.Fatal("custom script artifact accepted")
+		}
+	}
+}
+
+func TestCompositePreservesNativeAndFixedRoutes(t *testing.T) {
+	plan := compositePlanFixture()
+	fixed := plan.Grants[0]
+	fixed.ID, fixed.IPv4EgressID, fixed.Route.ID, fixed.Route.User = "fixed", "", "fixed-credential", "fixed-user"
+	fixedProtocol := "00000000-0000-4000-8000-000000000003"
+	fixed.Route.Identity = Identity(fixedProtocol)
+	plan.Grants = append(plan.Grants, fixed)
+	plan.Credentials = append(plan.Credentials, CredentialMaterial{Credential: fixed.Route, ProtocolID: fixedProtocol})
+	encoded, err := RenderXrayConfiguration(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Inbounds []struct {
+			Tag      string
+			Sniffing struct {
+				Enabled, RouteOnly bool
+				DestOverride       []string
+			}
+			Settings struct{ Clients []struct{ Email string } }
+		}
+		Outbounds []struct{ Tag, Protocol, TargetStrategy string }
+		Routing   struct {
+			Rules []struct {
+				User, IP             []string
+				Network, OutboundTag string
+			}
+		}
+	}
+	if err := json.Unmarshal(encoded, &config); err != nil {
+		t.Fatal(err)
+	}
+	for _, inbound := range config.Inbounds {
+		if inbound.Tag == "entry-in" && (!inbound.Sniffing.Enabled || inbound.Sniffing.RouteOnly || len(inbound.Settings.Clients) != 3 || !slices.Equal(inbound.Sniffing.DestOverride, []string{"http", "tls"})) {
+			t.Fatal("native credentials or existing hostname sniffing changed")
+		}
+	}
+	for _, outbound := range config.Outbounds {
+		if outbound.Tag == routeOutboundTag("fixed") && (outbound.Protocol != "socks" || outbound.TargetStrategy != "") {
+			t.Fatal("fixed exit acquired composite resolution")
+		}
+	}
+	fixedRules := 0
+	for _, rule := range config.Routing.Rules {
+		if !slices.Equal(rule.User, []string{"fixed-user"}) {
+			continue
+		}
+		fixedRules++
+		if len(rule.IP) != 0 {
+			t.Fatal("fixed route acquired a family rule")
+		}
+		if rule.Network == "tcp" && rule.OutboundTag != routeOutboundTag("fixed") {
+			t.Fatal("fixed TCP route changed")
+		}
+	}
+	if fixedRules != 3 {
+		t.Fatal("fixed routing boundary changed")
+	}
+}
+
+func TestWithoutCompositeKeepsExistingResolverAndRouting(t *testing.T) {
+	plan := compositePlanFixture()
+	plan.Grants[0].IPv4EgressID = ""
+	plan.Peers = plan.Peers[:1]
+	encoded, err := RenderXrayConfiguration(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		DNS     json.RawMessage
+		Routing struct {
+			DomainStrategy string
+			Rules          []json.RawMessage
+		}
+		Outbounds []struct{ Protocol, TargetStrategy string }
+	}
+	if err := json.Unmarshal(encoded, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.DNS) != 0 || config.Routing.DomainStrategy != "IPIfNonMatch" || len(config.Routing.Rules) != 4 || len(config.Outbounds) != 3 || config.Outbounds[0].Protocol != "freedom" || config.Outbounds[1].TargetStrategy != "" {
+		t.Fatal("single-exit configuration acquired composite DNS or family selection")
 	}
 }
 
