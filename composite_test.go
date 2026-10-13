@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func compositePlanFixture() XrayPlan {
@@ -280,5 +282,69 @@ func TestCompositeNamesDistinguishBothExitRegionsAndRepeatedPairs(t *testing.T) 
 	}
 	if routeName(first) != strings.TrimSuffix(labels["a"], "①") {
 		t.Fatal("a single combination should not have a sequence suffix")
+	}
+}
+
+func TestCompositePreservesNamedSingleExitSubscription(t *testing.T) {
+	plan := compositePlanFixture()
+	grant := plan.Grants[0]
+	base, err := LinkForCredential(plan.RealityEndpoints[0], plan.Credentials[0], "🇺🇸 美国｜AKKO-CN2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed, err := LinkForCredential(plan.RealityEndpoints[0], plan.Credentials[1], "ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication := PublishedRoute{
+		Grant: grant, Protocol: VLESSReality, EntryName: "🇺🇸 美国｜AKKO-CN2",
+		EgressNameSuffix: "家宽", EgressRegionPrefix: "🇺🇸 美国", IPv4EgressRegionPrefix: "🇺🇸 美国",
+		BaseLink: base, RouteLink: routed, BaseProtocolIdentity: grant.Base.Identity, RouteProtocolIdentity: grant.Route.Identity,
+	}
+	want := "🇺🇸 美国｜家宽·AKKO-CN2"
+	single := publication
+	single.Grant.IPv4EgressID = ""
+	if routeName(single) != want || routeName(publication) != want {
+		t.Fatal("adding an IPv4 exit changed the configured home route name")
+	}
+	entries := []NativeEntry{{Material: plan.Credentials[0], Protocol: VLESSReality, Link: base}}
+	links, err := RenderLinks(entries, "account", FixedMode, []PublishedRoute{publication}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(links)), "\n")
+	if len(lines) != 2 {
+		t.Fatal("converted home route must remain one subscription entry")
+	}
+	link, err := parseVLESSLink(lines[1])
+	if err != nil || link.Fragment != want || link.User.Username() != plan.Credentials[1].ProtocolID {
+		t.Fatal("converted home route name or credential changed")
+	}
+	mihomo, err := RenderMihomo(entries, "account", FixedMode, []PublishedRoute{publication})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Proxies []struct {
+			Name string `yaml:"name"`
+			UUID string `yaml:"uuid"`
+		}
+	}
+	if err := yaml.Unmarshal(mihomo, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Proxies) != 2 || config.Proxies[1].Name != want || config.Proxies[1].UUID != plan.Credentials[1].ProtocolID {
+		t.Fatal("Mihomo converted home route name or credential changed")
+	}
+}
+
+func TestCompositeNamedRouteCoexistsWithExistingSingleExit(t *testing.T) {
+	single := PublishedRoute{Grant: RouteGrant{ID: "home"}, EntryName: "AKKO-CN2", EgressNameSuffix: "家宽", EgressRegionPrefix: "🇺🇸 美国"}
+	combo := single
+	combo.Grant.ID, combo.Grant.IPv4EgressID = "test", "four"
+	combo.IPv4EgressRegionPrefix = "🇺🇸 美国"
+	labels := compositeRouteLabels([]PublishedRoute{single, combo})
+	if labels["test"] != routeName(single)+"①" || labels["home"] != "" {
+		t.Fatal("composite test route must not collide with or rename an existing home route")
 	}
 }

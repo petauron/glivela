@@ -438,7 +438,7 @@ func routeName(item PublishedRoute) string {
 	}
 	entry = compactEntryName(strings.TrimLeft(entry, "｜| "))
 	label := item.EgressNameSuffix
-	if item.Grant.IPv4EgressID != "" {
+	if item.Grant.IPv4EgressID != "" && label == "" {
 		label = "IPv6优先+IPv4"
 	}
 	if label == "" {
@@ -454,7 +454,9 @@ func routeName(item PublishedRoute) string {
 		if four == "" {
 			four = "IPv4落地"
 		}
-		prefix += " + " + four
+		if four != prefix {
+			prefix += " + " + four
+		}
 	}
 	return prefix + "｜" + entry
 }
@@ -463,10 +465,13 @@ func routeName(item PublishedRoute) string {
 // byte-for-byte unchanged. Never append credential IDs or opaque node hashes.
 func compositeRouteLabels(routes []PublishedRoute) map[string]string {
 	groups := map[string][]string{}
+	singleNames := map[string]bool{}
 	for _, route := range routes {
 		if route.Grant.IPv4EgressID != "" {
 			name := routeName(route)
 			groups[name] = append(groups[name], route.Grant.ID)
+		} else {
+			singleNames[routeName(route)] = true
 		}
 	}
 	labels := map[string]string{}
@@ -474,7 +479,7 @@ func compositeRouteLabels(routes []PublishedRoute) map[string]string {
 		slices.Sort(ids)
 		for i, id := range ids {
 			label := name
-			if len(ids) > 1 {
+			if len(ids) > 1 || singleNames[name] {
 				if i < 20 {
 					label += string(rune('①') + rune(i))
 				} else {
