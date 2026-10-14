@@ -21,7 +21,7 @@ func TestRenderXrayConfigurationProjectsNativeAndFixedCredentials(t *testing.T) 
 	grant := RouteGrant{ID: "grant", AccountID: "account", EntryID: "entry", EgressID: "egress", InboundTag: "meridian-entry", Base: native, Route: route, Mode: FixedMode, Enabled: true, DesiredRev: 2, AppliedRev: 1}
 	encoded, err := RenderXrayConfiguration(XrayPlan{
 		Revision:         2,
-		RealityEndpoints: []RealityEndpoint{{ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry", ListenPort: 443, AdvertiseHost: "entry.example.com", AdvertisePort: 443, Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"}, PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"}, Fingerprint: "chrome"}},
+		RealityEndpoints: []RealityEndpoint{{ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry", ListenAddress: "100.64.0.2", ListenPort: RealityBackendPort, AdvertiseHost: "entry.example.com", AdvertisePort: 443, Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"}, PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"}, Fingerprint: "chrome"}},
 		Credentials:      []CredentialMaterial{{Credential: native, ProtocolID: nativeID}, {Credential: route, ProtocolID: routeID}},
 		Grants:           []RouteGrant{grant},
 		Peers:            []RoutePeer{{EgressID: "egress", Address: "100.64.0.10", Port: 1080}},
@@ -49,8 +49,8 @@ func TestRenderXrayConfigurationProjectsNativeAndFixedCredentials(t *testing.T) 
 		t.Fatal("domain recovery must cover HTTP/TLS without changing the management inbound")
 	}
 	raw, ok := stream["rawSettings"].(map[string]any)
-	if config.Inbounds[1]["listen"] != "0.0.0.0" || stream["security"] != "reality" || stream["method"] != "raw" || !ok || raw["acceptProxyProtocol"] != true || stream["network"] != nil || stream["tcpSettings"] != nil || stream["sockopt"] != nil {
-		t.Fatalf("REALITY bridge contract missing: %#v", config.Inbounds[1])
+	if config.Inbounds[1]["listen"] != "100.64.0.2" || stream["security"] != "reality" || stream["method"] != "raw" || !ok || raw["acceptProxyProtocol"] != true || stream["network"] != nil || stream["tcpSettings"] != nil || stream["sockopt"] != nil {
+		t.Fatalf("REALITY host backend contract missing: %#v", config.Inbounds[1])
 	}
 	if config.Routing.Rules[2]["outboundTag"] != routeOutboundTag("grant") || config.Routing.Rules[3]["outboundTag"] != "blocked" {
 		t.Fatalf("fixed route is not fail closed: %#v", config.Routing.Rules)
@@ -60,7 +60,7 @@ func TestRenderXrayConfigurationProjectsNativeAndFixedCredentials(t *testing.T) 
 func TestRenderXrayConfigurationAcceptsEmptyAccountInventory(t *testing.T) {
 	endpoint := RealityEndpoint{
 		ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry",
-		ListenPort: 443, AdvertiseHost: "entry.example.com", AdvertisePort: 443,
+		ListenAddress: "100.64.0.2", ListenPort: RealityBackendPort, AdvertiseHost: "entry.example.com", AdvertisePort: 443,
 		Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"},
 		PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"},
 	}
@@ -95,7 +95,7 @@ func TestRenderXrayConfigurationRejectsOrphanedRouteCredential(t *testing.T) {
 	route := Credential{ID: "route", AccountID: "account", Kind: RouteCredential, User: RouteUser("grant"), Identity: Identity(identifier), EntryID: "entry", EgressID: "egress", Enabled: true}
 	_, err := RenderXrayConfiguration(XrayPlan{
 		Revision:         1,
-		RealityEndpoints: []RealityEndpoint{{ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry", ListenPort: 443, AdvertiseHost: "entry.example.com", AdvertisePort: 443, Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"}, PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"}}},
+		RealityEndpoints: []RealityEndpoint{{ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry", ListenAddress: "100.64.0.2", ListenPort: RealityBackendPort, AdvertiseHost: "entry.example.com", AdvertisePort: 443, Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"}, PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"}}},
 		Credentials:      []CredentialMaterial{{Credential: route, ProtocolID: identifier}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "orphaned") {
@@ -107,7 +107,7 @@ func TestLinkForCredentialPreservesSecretIdentity(t *testing.T) {
 	identifier := "00000000-0000-4000-8000-000000000001"
 	credential := Credential{ID: "native", AccountID: "account", Kind: NativeCredential, User: "phone", Identity: Identity(identifier), EntryID: "entry", Enabled: true}
 	link, err := LinkForCredential(
-		RealityEndpoint{ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry", ListenPort: 443, AdvertiseHost: "entry.example.com", AdvertisePort: 443, Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"}, PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"}},
+		RealityEndpoint{ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry", ListenAddress: "100.64.0.2", ListenPort: RealityBackendPort, AdvertiseHost: "entry.example.com", AdvertisePort: 443, Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"}, PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"}},
 		CredentialMaterial{Credential: credential, ProtocolID: identifier},
 		"🇺🇸｜Entry Alpha",
 	)
@@ -142,7 +142,7 @@ func TestRenderXrayConfigurationKeepsHysteriaNativeWhenVLESSIsRouted(t *testing.
 	hy2 := testHysteriaEndpoint(t)
 	encoded, err := RenderXrayConfiguration(XrayPlan{
 		Revision:          2,
-		RealityEndpoints:  []RealityEndpoint{{ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry", ListenPort: 443, AdvertiseHost: "entry.example.com", AdvertisePort: 443, Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"}, PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"}, Fingerprint: "chrome"}},
+		RealityEndpoints:  []RealityEndpoint{{ID: "endpoint", EntryID: "entry", InboundTag: "meridian-entry", ListenAddress: "100.64.0.2", ListenPort: RealityBackendPort, AdvertiseHost: "entry.example.com", AdvertisePort: 443, Target: "www.microsoft.com:443", ServerNames: []string{"www.microsoft.com"}, PrivateKey: "private", PublicKey: "public", ShortIDs: []string{"0123456789abcdef"}, Fingerprint: "chrome"}},
 		HysteriaEndpoints: []HysteriaEndpoint{hy2},
 		Credentials: []CredentialMaterial{
 			{Credential: native, ProtocolID: nativeID, HysteriaAuth: "native-hy2-secret", HysteriaIdentity: Identity("native-hy2-secret")},

@@ -1,0 +1,111 @@
+name: Release Please
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: release-please-main
+  cancel-in-progress: false
+jobs:
+  prepare:
+    name: Prepare release from checked main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      release_sha: ${{ steps.release.outputs.sha }}
+      release_tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Wait for the exact source CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          for attempt in $(seq 1 180); do
+            result=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$GITHUB_SHA&per_page=100" \
+              --jq '.workflow_runs | sort_by(.run_number) | last | if . == null then "waiting" elif .status == "completed" then .conclusion else "waiting" end')
+            case "$result" in
+              success) exit 0 ;;
+              waiting) sleep 10 ;;
+              *) echo "Source CI did not succeed: $result" >&2; exit 1 ;;
+            esac
+          done
+          echo "Timed out waiting for source CI" >&2
+          exit 1
+      - name: Require this run to match protected main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$current" = "$GITHUB_SHA" ]; then
+            echo "matches=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create release without updating the next version PR
+        if: steps.current.outputs.matches == 'true'
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        with:
+          token: ${{ github.token }}
+          target-branch: main
+          skip-github-pull-request: true
+      - name: Require the release to use this run's checked source
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: test "$RELEASE_SHA" = "$GITHUB_SHA"
+
+  publish:
+    name: Publish checked source release
+    needs: prepare
+    if: needs.prepare.outputs.release_created == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the prepared draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: |
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  release-pr:
+    name: Prepare next version PR and start its CI
+    needs: [prepare, publish]
+    if: always() && needs.prepare.result == 'success' && (needs.publish.result == 'success' || (needs.prepare.outputs.release_created != 'true' && needs.publish.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Maintain version PR without publishing
+        id: release_pr
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        with:
+          token: ${{ github.token }}
+          target-branch: main
+          skip-github-release: true
+      # GITHUB_TOKEN-created PR workflows can require manual approval.
+      # Explicit dispatch starts the existing CI on the version PR branch.
+      - name: Dispatch CI for the version PR
+        if: steps.release_pr.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR: ${{ steps.release_pr.outputs.pr }}
+        run: |
+          branch=$(printf '%s' "$RELEASE_PR" | jq -er '.headBranchName')
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"

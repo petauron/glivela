@@ -3,12 +3,11 @@ import { APIError, api } from "@/api";
 import { SelectControl } from "@/components/SelectControl";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { NodeDiagnosticCheck } from "@/node-diagnostics-types";
 import type { Language } from "@/translations";
 import type { InstalledAppInstance } from "@/views/installed-apps-model";
 import { useLanding } from "@/views/LandingControls";
 import { useIPQuality } from "@/views/IPQuality";
-import { bandwidthBands } from "@/views/LinkBandwidthSummary";
+import { bandwidthBands, linkBandwidthStatus, linkBandwidthStatusLabel } from "@/views/LinkBandwidthSummary";
 import { RegionFlag } from "./RegionFlag";
 import { landingLatencyColor } from "@/views/landingLatency";
 import { copy } from "@/views/shared";
@@ -19,12 +18,6 @@ function speedColor(value: number) {
 
 function Speed({ value }: { value?: number }) {
   return value === undefined ? <span className="text-muted-foreground">—</span> : <span className={`font-medium tabular-nums ${speedColor(value)}`}>{value.toFixed(1)} <span className="text-xs font-normal text-muted-foreground">Mbps</span></span>;
-}
-
-function lastResult(check?: NodeDiagnosticCheck) {
-  if (check?.state === "pending" || check?.state === "running") return "active";
-  if (check?.state === "failed" || check?.error) return "failed";
-  return check?.state === "succeeded" && check.link ? "succeeded" : "missing";
 }
 
 export function MeridianLinkTests({ instances, language, entryId, landingId, onEntryChange, onLandingChange }: { instances: InstalledAppInstance[]; language: Language; entryId: string; landingId: string; onEntryChange: (id: string) => void; onLandingChange: (id: string) => void }) {
@@ -52,7 +45,7 @@ export function MeridianLinkTests({ instances, language, entryId, landingId, onE
           : "";
   const checks = quality?.diagnostics.filter((check) => check.kind === "meridian.link-bandwidth") ?? [];
   const byPair = new Map(checks.map((check) => [`${check.agentId}:${check.landingNodeId}`, check]));
-  const busyNodes = new Set(quality?.diagnostics.filter((check) => lastResult(check) === "active").map((check) => check.agentId));
+  const busyNodes = new Set(quality?.diagnostics.filter((check) => linkBandwidthStatus(check) === "active").map((check) => check.agentId));
   const landingBusy = Boolean(selected && busyNodes.has(selected.nodeId));
 
   const start = async (nodeId: string) => {
@@ -85,7 +78,7 @@ export function MeridianLinkTests({ instances, language, entryId, landingId, onE
         </Select>
       </div>
       <div className="min-w-52 flex-1 sm:max-w-xs"><label className="mb-1 block text-xs font-medium text-muted-foreground">{copy(language, "线路机", "Entry node")}</label><SelectControl aria-label={copy(language, "选择线路机", "Choose entry node")} value={entryId} onValueChange={onEntryChange} options={[{ value: "", label: copy(language, "全部线路机", "All entry nodes") }, ...instances.map((instance) => ({ value: instance.application.nodeId, label: instance.agent?.name ?? instance.application.nodeId }))]} /></div>
-      <p className="pb-1 text-xs text-muted-foreground">{copy(language, "私网单线程 · 双向各 10 秒 · 结果单位 Mbps", "Private network, one stream · 10 s each way · Mbps")}</p>
+      <p className="pb-1 text-xs text-muted-foreground" title={copy(language, "流量随带宽变化，1 Gbps 双向合计约 2.5 GB；测试的是私网链路，不是完整代理线路。", "Traffic varies with throughput: about 2.5 GB total at 1 Gbps. This measures the private link, not the full proxy route.")}>{copy(language, "私网单线程 · 双向各 10 秒 · 结果单位 Mbps", "Private network, one stream · 10 s each way · Mbps")}</p>
     </div>
     {!servers.length ? <p className="rounded-lg border px-4 py-8 text-center text-sm text-muted-foreground">{copy(language, "尚未添加落地机", "No landing servers configured")}</p> : <>
       {(destinationIssue || landingBusy) && !quality?.loading ? <p role="status" className="text-xs text-muted-foreground">{destinationIssue || copy(language, "落地机有任务进行中，完成后可测速。", "The landing server has a running task. Test when it finishes.")} {copy(language, "历史结果仍可查看。", "Previous results remain visible.")}</p> : null}
@@ -100,7 +93,7 @@ export function MeridianLinkTests({ instances, language, entryId, landingId, onE
           const name = instance.agent?.name ?? nodeId;
           const self = nodeId === selected.nodeId;
           const check = byPair.get(`${nodeId}:${selected.nodeId}`);
-          const result = lastResult(check);
+          const result = linkBandwidthStatus(check);
           const active = result === "active" || submittingId === nodeId;
           const source = agents.find((agent) => agent.id === nodeId);
           const sourceIssue = !source?.connected
@@ -114,10 +107,10 @@ export function MeridianLinkTests({ instances, language, entryId, landingId, onE
           const sample = view.latencies.find((value) => value.nodeId === nodeId && value.landingNodeId === selected.nodeId);
           const latency = sample?.state === "direct" && sample.latencyMs != null && Number.isFinite(sample.latencyMs) && sample.latencyMs >= 0 ? sample.latencyMs : undefined;
           const stamp = check?.checkedAt || check?.updatedAt;
-          const stateLabel = self ? copy(language, "同一节点", "Same node") : result === "active" || submittingId === nodeId ? copy(language, "测速中…", "Testing…") : result === "failed" ? copy(language, "测速失败", "Test failed") : result === "missing" ? copy(language, "未测速", "Not tested") : "";
+          const stateLabel = self ? copy(language, "同一节点", "Same node") : result === "active" || submittingId === nodeId ? copy(language, "测速中…", "Testing…") : linkBandwidthStatusLabel(result, language);
           return <div key={instance.application.id} className="meridian-link-tests-row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-b px-4 py-3 last:border-b-0">
             <div className="min-w-0"><div className="flex items-center gap-2"><RegionFlag code={instance.realityServices[0]?.regionCode} language={language} /><span className="truncate text-sm font-medium" title={name}>{name}</span>{!self && sourceIssue ? <span className="shrink-0 text-xs text-muted-foreground">{sourceIssue}</span> : null}</div><div className="meridian-link-tests-mobile mt-0.5 text-xs text-muted-foreground">{latency === undefined ? "—" : <span className={landingLatencyColor(latency)}>{Math.round(latency)} ms</span>}{stamp ? ` · ${new Date(stamp).toLocaleString(language, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}</div></div>
-            <div className="meridian-link-tests-value col-start-1 row-start-2 text-xs">{!self && result === "succeeded" && check?.link ? <><span className="meridian-link-tests-mobile text-muted-foreground">{copy(language, "去", "Out")} </span><Speed value={check.link.uploadMbps} /></> : <span className={result === "failed" ? "text-destructive" : "text-muted-foreground"}>{stateLabel}</span>}</div>
+            <div className="meridian-link-tests-value col-start-1 row-start-2 text-xs">{!self && result === "succeeded" && check?.link ? <><span className="meridian-link-tests-mobile text-muted-foreground">{copy(language, "去", "Out")} </span><Speed value={check.link.uploadMbps} /></> : <span className={["failed", "non_direct", "identity_changed"].includes(result) ? "text-destructive" : "text-muted-foreground"}>{stateLabel}</span>}</div>
             <div className="meridian-link-tests-value col-start-1 row-start-3 text-xs">{!self && result === "succeeded" && check?.link ? <><span className="meridian-link-tests-mobile text-muted-foreground">{copy(language, "回", "Back")} </span><Speed value={check.link.downloadMbps} /></> : null}</div>
             <span className={`meridian-link-tests-desktop hidden text-xs tabular-nums ${landingLatencyColor(latency)}`}>{latency === undefined ? "—" : `${Math.round(latency)} ms`}</span>
             <time className="meridian-link-tests-desktop hidden text-xs text-muted-foreground" dateTime={stamp ?? ""}>{stamp ? new Date(stamp).toLocaleString(language, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</time>

@@ -19,6 +19,7 @@ import (
 
 const (
 	DefaultRealityPort      = 443
+	RealityBackendPort      = 10443
 	DefaultLandingSOCKSPort = 1080
 	XrayAPIListenPort       = 10085
 	XrayMinimumClient       = "0.0.0"
@@ -51,6 +52,7 @@ type RealityEndpoint struct {
 	ID            string   `json:"id"`
 	EntryID       string   `json:"entryId"`
 	InboundTag    string   `json:"inboundTag"`
+	ListenAddress string   `json:"listenAddress"`
 	ListenPort    int      `json:"listenPort"`
 	AdvertiseHost string   `json:"advertiseHost"`
 	AdvertisePort int      `json:"advertisePort"`
@@ -106,7 +108,8 @@ func HysteriaCertificateNotAfter(endpoint HysteriaEndpoint) (time.Time, error) {
 }
 
 func (e RealityEndpoint) Validate() error {
-	if e.validateSubscription() != nil || !validInboundTag(e.InboundTag) || !validPort(e.ListenPort) || !validRealityTarget(e.Target) || strings.TrimSpace(e.PrivateKey) == "" || len(e.PrivateKey) > 256 {
+	address, addressErr := netip.ParseAddr(e.ListenAddress)
+	if e.validateSubscription() != nil || !validInboundTag(e.InboundTag) || addressErr != nil || !privateServiceIPv4(address) || address.String() != e.ListenAddress || e.ListenPort < 1024 || !validPort(e.ListenPort) || !validRealityTarget(e.Target) || strings.TrimSpace(e.PrivateKey) == "" || len(e.PrivateKey) > 256 {
 		return errors.New("meridian: invalid REALITY endpoint")
 	}
 	return nil
@@ -136,9 +139,11 @@ func (e RealityEndpoint) validateSubscription() error {
 }
 
 type RoutePeer struct {
-	EgressID string `json:"egressId"`
-	Address  string `json:"address"`
-	Port     int    `json:"port"`
+	EgressID   string       `json:"egressId"`
+	Address    string       `json:"address"`
+	Port       int          `json:"port"`
+	ExitFamily EgressPolicy `json:"exitFamily,omitempty"`
+	Ready      bool         `json:"ready,omitempty"`
 }
 
 func (p RoutePeer) Validate() error {
@@ -151,6 +156,7 @@ func (p RoutePeer) Validate() error {
 
 type XrayPlan struct {
 	Revision          uint64               `json:"revision"`
+	NativeEgress      EgressPolicy         `json:"nativeEgress,omitempty"`
 	RealityEndpoints  []RealityEndpoint    `json:"realityEndpoints,omitempty"`
 	HysteriaEndpoints []HysteriaEndpoint   `json:"hysteriaEndpoints,omitempty"`
 	Credentials       []CredentialMaterial `json:"credentials"`
@@ -177,7 +183,7 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 			})
 		}
 		inbounds = append(inbounds, map[string]any{
-			"listen":   "0.0.0.0",
+			"listen":   endpoint.ListenAddress,
 			"port":     endpoint.ListenPort,
 			"protocol": "vless",
 			"tag":      endpoint.InboundTag,
@@ -235,15 +241,28 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 		})
 	}
 
-	outbounds := []any{map[string]any{"protocol": "freedom", "tag": "direct"}}
+	outbounds := []any{nativeXrayOutbound(plan.NativeEgress)}
 	rules := []any{map[string]any{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"}}
+	composite := false
 	for _, grant := range projection.grants {
 		peer := projection.peers[grant.EgressID]
 		tag := routeOutboundTag(grant.ID)
-		outbounds = append(outbounds, map[string]any{
+		outbound := map[string]any{
 			"protocol": "socks", "tag": tag,
 			"settings": map[string]any{"servers": []any{map[string]any{"address": peer.Address, "port": peer.Port}}},
-		})
+		}
+		if grant.IPv4EgressID != "" {
+			composite = true
+			outbound["targetStrategy"] = "ForceIPv6"
+			ipv4 := projection.peers[grant.IPv4EgressID]
+			outbounds = append(outbounds, outbound, map[string]any{
+				"protocol": "socks", "tag": tag + "-ipv4", "targetStrategy": "ForceIPv4",
+				"settings": map[string]any{"servers": []any{map[string]any{"address": ipv4.Address, "port": ipv4.Port}}},
+			})
+			rules = append(rules, compositeXrayRules(grant)...)
+			continue
+		}
+		outbounds = append(outbounds, outbound)
 		scope := func(network, outbound string) map[string]any {
 			return map[string]any{"type": "field", "inboundTag": []string{grant.InboundTag}, "user": []string{grant.Route.User}, "network": network, "outboundTag": outbound}
 		}
@@ -265,6 +284,15 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},
 		},
 		"routing": map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
+	}
+	if composite {
+		config["routing"] = map[string]any{"domainStrategy": "IPOnDemand", "rules": rules}
+		// Local DoH bypasses proxy routing and control-plane DNS. Xray owns
+		// resolution and caching; no Agent-side resolver or scripts are needed.
+		config["dns"] = map[string]any{
+			"queryStrategy": "UseIP",
+			"servers":       []string{"https+local://1.1.1.1/dns-query", "https+local://8.8.8.8/dns-query"},
+		}
 	}
 	encoded, err := json.Marshal(config)
 	if err != nil {
@@ -318,6 +346,9 @@ type xrayProjection struct {
 }
 
 func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
+	if err := plan.NativeEgress.Validate(); err != nil {
+		return xrayProjection{}, err
+	}
 	if plan.Revision == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) > 256 || len(plan.Credentials) > 65536 || len(plan.Grants) > 65536 || len(plan.Peers) > 1024 {
 		return xrayProjection{}, errors.New("meridian: invalid Xray plan")
 	}
@@ -385,6 +416,17 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 			return xrayProjection{}, errors.New("meridian: conflicting Xray route grant")
 		}
 		seenGrants[grant.ID], usedRoutes[grant.Route.ID] = true, true
+		if grant.IPv4EgressID != "" {
+			secondary := projection.peers[grant.IPv4EgressID]
+			if err := ValidateCompositePeers(grant, peer, secondary); err != nil {
+				return xrayProjection{}, err
+			}
+			for _, endpoint := range projection.realityEndpoints {
+				if endpoint.InboundTag == grant.InboundTag && (endpoint.ListenAddress == peer.Address || endpoint.ListenAddress == secondary.Address) {
+					return xrayProjection{}, errors.New("glivela: composite landing transport is the entry machine")
+				}
+			}
+		}
 	}
 	for _, material := range plan.Credentials {
 		if material.Credential.Kind == RouteCredential && material.Credential.Enabled && !usedRoutes[material.Credential.ID] {

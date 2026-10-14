@@ -14,14 +14,16 @@ import (
 const maxSubscriptionBytes = 4 << 20
 
 type PublishedRoute struct {
-	Grant                 RouteGrant   `json:"grant"`
-	Protocol              ProtocolKind `json:"protocol"`
-	EntryName             string       `json:"entryName"`
-	EgressRegionPrefix    string       `json:"egressRegionPrefix,omitempty"`
-	BaseLink              string       `json:"baseLink"`
-	RouteLink             string       `json:"routeLink"`
-	BaseProtocolIdentity  string       `json:"baseProtocolIdentity"`
-	RouteProtocolIdentity string       `json:"routeProtocolIdentity"`
+	Grant                  RouteGrant   `json:"grant"`
+	Protocol               ProtocolKind `json:"protocol"`
+	EntryName              string       `json:"entryName"`
+	EgressNameSuffix       string       `json:"egressNameSuffix,omitempty"`
+	EgressRegionPrefix     string       `json:"egressRegionPrefix,omitempty"`
+	IPv4EgressRegionPrefix string       `json:"ipv4EgressRegionPrefix,omitempty"`
+	BaseLink               string       `json:"baseLink"`
+	RouteLink              string       `json:"routeLink"`
+	BaseProtocolIdentity   string       `json:"baseProtocolIdentity"`
+	RouteProtocolIdentity  string       `json:"routeProtocolIdentity"`
 }
 
 type NativeEntry struct {
@@ -95,13 +97,18 @@ func nativeSubscriptionLines(entries []NativeEntry, accountID string) ([]byte, e
 		if portErr != nil || port < 1 || port > 65535 || totalBytes > maxSubscriptionBytes || protocolLinkIdentity(link, entry.Protocol) != expectedIdentity || strings.TrimSpace(link.Fragment) == "" || len([]rune(link.Fragment)) > MaxDisplayNameLength || link.Query().Get("sni") == "" || entry.Protocol == VLESSReality && link.Query().Get("pbk") == "" {
 			return nil, errors.New("meridian: native subscription identity changed")
 		}
-		name := strings.TrimSpace(link.Fragment)
+		name := compactSubscriptionName(strings.TrimSpace(link.Fragment))
 		routeKey := string(entry.Protocol) + "\x00" + link.Host + "\x00" + link.Query().Get("sni") + "\x00" + link.Query().Get("pbk") + "\x00" + link.Query().Get("sid")
 		if seenNames[name] || seenRoutes[routeKey] {
 			return nil, errors.New("meridian: ambiguous native subscription inventory")
 		}
 		seenNames[name], seenRoutes[routeKey], seenCredentials[credentialKey] = true, true, true
-		lines = append(lines, strings.TrimSpace(entry.Link))
+		line := strings.TrimSpace(entry.Link)
+		if name != strings.TrimSpace(link.Fragment) {
+			raw, _, _ := strings.Cut(line, "#")
+			line = raw + "#" + escapeLinkFragment(name)
+		}
+		lines = append(lines, line)
 	}
 	return []byte(strings.Join(lines, "\n") + "\n"), nil
 }
@@ -116,7 +123,7 @@ func mihomoProxy(entry NativeEntry) (map[string]any, string, error) {
 		return nil, "", errors.New("meridian: invalid subscription port")
 	}
 	query := link.Query()
-	name := strings.TrimSpace(link.Fragment)
+	name := compactSubscriptionName(strings.TrimSpace(link.Fragment))
 	if name == "" {
 		return nil, "", errors.New("meridian: subscription name is required")
 	}
@@ -157,6 +164,7 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 	}
 	lines := strings.Split(strings.TrimRight(string(plain), "\r\n"), "\n")
 	identities := map[string]bool{}
+	routeLabels := compositeRouteLabels(routes)
 	for _, line := range lines {
 		if link, err := parseVLESSLink(strings.TrimSpace(line)); err == nil {
 			identities[string(VLESSReality)+"\x00"+link.User.Username()] = true
@@ -191,7 +199,11 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 			return nil, errors.New("meridian: invalid routed credential")
 		}
 		routeLink, _, _ := strings.Cut(strings.TrimSpace(item.RouteLink), "#")
-		lines = append(lines, routeLink+"#"+escapeLinkFragment(routeName(item)))
+		name := routeName(item)
+		if label := routeLabels[item.Grant.ID]; label != "" {
+			name = label
+		}
+		lines = append(lines, routeLink+"#"+escapeLinkFragment(name))
 		identities[string(VLESSReality)+"\x00"+routed.User.Username()] = true
 	}
 	lines = slices.DeleteFunc(lines, func(line string) bool {
@@ -244,6 +256,7 @@ func composeMihomo(native []byte, accountID string, mode PublishingMode, routes 
 		return nil
 	}
 	baseProxies := slices.Clone(proxies)
+	routeLabels := compositeRouteLabels(routes)
 	routeNames := []any{}
 	replacements := map[string][]any{}
 	for _, item := range routes {
@@ -285,6 +298,9 @@ func composeMihomo(native []byte, accountID string, mode PublishingMode, routes 
 			}
 		}
 		name := routeName(item)
+		if label := routeLabels[item.Grant.ID]; label != "" {
+			name = label
+		}
 		if err := reserve(name); err != nil {
 			return nil, err
 		}
@@ -356,6 +372,9 @@ func composeMihomo(native []byte, accountID string, mode PublishingMode, routes 
 }
 
 func validatePublishedRouteScope(item PublishedRoute, accountID string) error {
+	if item.EgressNameSuffix != "" && (!validDisplayName(item.EgressNameSuffix) || strings.ContainsAny(item.EgressNameSuffix, "|｜")) {
+		return errors.New("meridian: invalid landing name suffix")
+	}
 	if item.Grant.Validate() != nil || item.Grant.AccountID != accountID || item.Protocol != VLESSReality || !ValidIdentity(item.BaseProtocolIdentity) || !ValidIdentity(item.RouteProtocolIdentity) || !validDisplayName(item.EntryName) || item.EgressRegionPrefix != "" && (!validDisplayName(item.EgressRegionPrefix) || strings.ContainsAny(item.EgressRegionPrefix, "|｜")) {
 		return errors.New("meridian: published route scope does not match")
 	}
@@ -377,15 +396,98 @@ func validatePublishedRouteLinks(item PublishedRoute) error {
 	return nil
 }
 
+// compactEntryName keeps distinct circuit types and instance numbers. Unknown
+// names remain unchanged rather than losing user-provided identification.
+func compactEntryName(name string) string {
+	switch strings.TrimSpace(name) {
+	case "AKKO-CN2":
+		return "AKKO-CN2"
+	case "VMISS-CN2":
+		return "VMISS-CN2"
+	case "DataWave-CN2":
+		return "DW-CN2"
+	case "ShanDun-CN2":
+		return "SD-CN2"
+	case "CN2 FXTRANSIT":
+		return "FX-CN2"
+	case "MatrixIDC CN2-1":
+		return "MX-CN2①"
+	case "MatrixIDC CN2-2":
+		return "MX-CN2②"
+	case "MatrixIDC 4837-1":
+		return "MX-4837①"
+	case "MatrixIDC 4837-2":
+		return "MX-4837②"
+	default:
+		return strings.TrimSpace(name)
+	}
+}
+
+func compactSubscriptionName(name string) string {
+	prefix, entry, ok := strings.Cut(name, "｜")
+	if !ok {
+		return compactEntryName(name)
+	}
+	return prefix + "｜" + compactEntryName(entry)
+}
+
 func routeName(item PublishedRoute) string {
 	entry := strings.TrimSpace(item.EntryName)
 	if _, name, ok := strings.Cut(entry, "｜"); ok && strings.TrimSpace(name) != "" {
 		entry = name
 	}
-	entry = strings.TrimLeft(entry, "｜| ")
-	prefix := "落地"
-	if item.EgressRegionPrefix != "" {
-		prefix = item.EgressRegionPrefix + "·落地"
+	entry = compactEntryName(strings.TrimLeft(entry, "｜| "))
+	label := item.EgressNameSuffix
+	if item.Grant.IPv4EgressID != "" && label == "" {
+		label = "IPv6优先+IPv4"
 	}
-	return prefix + "｜" + strings.TrimSpace(entry)
+	if label == "" {
+		label = "双跳"
+	}
+	entry = label + "·" + entry
+	prefix := item.EgressRegionPrefix
+	if prefix == "" {
+		prefix = "落地"
+	}
+	if item.Grant.IPv4EgressID != "" {
+		four := item.IPv4EgressRegionPrefix
+		if four == "" {
+			four = "IPv4落地"
+		}
+		if four != prefix {
+			prefix += " + " + four
+		}
+	}
+	return prefix + "｜" + entry
+}
+
+// Only new combinations are disambiguated; existing single-exit names stay
+// byte-for-byte unchanged. Never append credential IDs or opaque node hashes.
+func compositeRouteLabels(routes []PublishedRoute) map[string]string {
+	groups := map[string][]string{}
+	singleNames := map[string]bool{}
+	for _, route := range routes {
+		if route.Grant.IPv4EgressID != "" {
+			name := routeName(route)
+			groups[name] = append(groups[name], route.Grant.ID)
+		} else {
+			singleNames[routeName(route)] = true
+		}
+	}
+	labels := map[string]string{}
+	for name, ids := range groups {
+		slices.Sort(ids)
+		for i, id := range ids {
+			label := name
+			if len(ids) > 1 || singleNames[name] {
+				if i < 20 {
+					label += string(rune('①') + rune(i))
+				} else {
+					label += "·" + strconv.Itoa(i+1)
+				}
+			}
+			labels[id] = label
+		}
+	}
+	return labels
 }

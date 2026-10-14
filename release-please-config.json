@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "package-name": "meridian",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "bump-minor-pre-major": true,
+      "prerelease": true,
+      "prerelease-type": "alpha",
+      "versioning": "prerelease",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "ui/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "ui/package-lock.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "ui/package-lock.json",
+          "jsonpath": "$.packages[''].version"
+        }
+      ],
+      "draft": true
+    }
+  }
+}

@@ -35,6 +35,13 @@ func (a DesiredArtifact) Validate() error {
 	if subtle.ConstantTimeCompare([]byte(a.ConfigSHA256), []byte(hex.EncodeToString(digest[:]))) != 1 {
 		return errors.New("meridian: desired artifact digest changed")
 	}
+	var runtime struct {
+		Routing struct{ Script string }
+		DNS     struct{ Script string }
+	}
+	if json.Unmarshal(a.Config, &runtime) != nil || runtime.Routing.Script != "" || runtime.DNS.Script != "" {
+		return errors.New("glivela: runtime artifacts must use official Xray configuration without scripts")
+	}
 	return nil
 }
 

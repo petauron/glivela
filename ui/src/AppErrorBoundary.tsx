@@ -8,13 +8,13 @@ export class AppErrorBoundary extends Component<{ children: ReactNode; language:
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    if (import.meta.env.DEV) console.error("Meridian interface failed", error, info.componentStack);
+    if (import.meta.env.DEV) console.error("Glivela interface failed", error, info.componentStack);
   }
 
   render() {
     if (this.state.failed) {
       return <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-        {this.props.language === "zh-CN" ? "Meridian 界面暂时无法显示。请重新打开应用页面。" : "Meridian could not be displayed. Reopen the application page."}
+        {this.props.language === "zh-CN" ? "Glivela 界面暂时无法显示。请重新打开应用页面。" : "Glivela could not be displayed. Reopen the application page."}
       </div>;
     }
     return this.props.children;

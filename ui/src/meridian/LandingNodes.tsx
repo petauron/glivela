@@ -20,6 +20,7 @@ import { IPQualityComparison } from "@/views/IPQualityComparison";
 import { useLanding } from "@/views/LandingControls";
 import { RegionFlag } from "./RegionFlag";
 import { copy, userError } from "@/views/shared";
+import { LandingNameSuffix } from "./LandingNameSuffix";
 import { LandingEgressIP } from "./EgressIP";
 import { NodeLocation } from "./NodeLocation";
 
@@ -69,7 +70,10 @@ export function LandingTableRows({ language, search, purpose, order, siteNames, 
           <TableCell><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={copy(language, `${server.name} 操作`, `${server.name} actions`)} />}><EllipsisIcon aria-hidden="true" /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuGroup><DropdownMenuItem onClick={() => { setExpanded(open ? null : server.nodeId); }}>{copy(language, "落地设置", "Landing settings")}</DropdownMenuItem><DropdownMenuItem onClick={() => onCompare(server.nodeId)}>{copy(language, "比较线路速度", "Compare route speeds")}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
         </TableRow>
         {open ? <TableRow className="bg-muted/20 hover:bg-muted/20"><TableCell colSpan={nodeTableColumns} className="p-3 whitespace-normal"><div id={panelId} className="grid gap-4 rounded-lg border bg-background p-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] xl:gap-x-6">
+          <div className="grid content-start gap-4">
           <LandingEgressIP key={`${server.nodeId}:${server.egressRevision}`} server={server} language={language} disabled={state.busy || state.failed || !["ready", "failed"].includes(server.status)} save={(address) => state.change((signal) => api.setLandingEgress(server.nodeId, server.egressRevision ?? 0, address, signal))} />
+          <LandingNameSuffix key={`${server.nodeId}:${state.view?.revision}`} language={language} value={state.view?.landingNameSuffixes?.[server.nodeId] ?? ""} disabled={state.busy || state.failed} save={(suffix) => state.change((signal) => api.selectLanding(state.view!.nodeIds, state.view!.revision, selectedRegions(state, state.view!.nodeIds), signal, { ...state.view!.landingNameSuffixes, [server.nodeId]: suffix }))} />
+          </div>
           <MeridianRoutes data={data} language={language} mutate={mutate} egressNodeId={server.nodeId} landingServers={state.view?.servers} />
           <details className="border-t pt-2 text-xs text-muted-foreground xl:col-span-2"><summary className="w-fit cursor-pointer">{copy(language, "落地管理", "Manage exit")}</summary><div className="mt-2">
             <Button variant="ghost" size="sm" disabled={state.busy || state.failed || server.status === "draining"} aria-label={copy(language, `移除 ${server.name}`, `Remove ${server.name}`)} onClick={() => {

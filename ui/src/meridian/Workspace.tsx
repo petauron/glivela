@@ -16,6 +16,7 @@ import { api } from "@/api";
 import type { InstalledAppInstance } from "@/views/installed-apps-model";
 import { publicationNeedsAttention, showInstalledNode } from "@/views/installed-apps-model";
 import { catalogInstallBlocked, copy } from "@/views/shared";
+import { MeridianTrafficPanel } from "./Traffic";
 import { MeridianLinkTests } from "./LinkTests";
 import { SelectControl } from "@/components/SelectControl";
 import { ipQualityCheckForAddress } from "@/views/ipQualityModel";
@@ -44,7 +45,7 @@ export function MeridianWorkspace({ group, data, language, mutate, onManage, onU
   const controllerWebIDs = new Set(controller?.services.filter((service) => service.protocol === "http" || service.protocol === "https").map((service) => service.id));
   const controllerAttention = controller?.publications.some((publication) => controllerWebIDs.has(publication.serviceId) && publicationNeedsAttention(publication));
   const accounts = manifest.pages.find((item) => item.surface === "manager")!;
-  return <section aria-label="Meridian" className="apps-three-xui flex min-w-0 flex-col gap-3" data-app-workspace={manifest.appKey}>
+  return <section aria-label="Glivela" className="apps-three-xui flex min-w-0 flex-col gap-3" data-app-workspace={manifest.appKey}>
     <LandingNotice language={language} />
     <div className="apps-three-xui-toolbar flex flex-wrap items-center gap-3">
       {page === "nodes" ? <><InputGroup className="w-full sm:w-48"><InputGroupInput type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label={copy(language, "搜索节点", "Search nodes")} placeholder={copy(language, "搜索节点…", "Search nodes…")} /><InputGroupAddon><SearchIcon aria-hidden="true" /></InputGroupAddon></InputGroup>
@@ -62,8 +63,8 @@ export function MeridianWorkspace({ group, data, language, mutate, onManage, onU
       {controller ? <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{controller.activeChange || controller.application.status !== "running" ? <ApplicationPrimaryStatus instance={controller} language={language} /> : null}{controllerAttention ? <span className="text-xs text-destructive">{copy(language, "入口待处理", "Access needs attention")}</span> : null}<div className="ml-auto flex items-center gap-2"><MeridianUpdates group={group} language={language} onUpgrade={onUpgrade} /><Button disabled={controller.locked} size="sm" variant="secondary" onClick={() => onClients(controller.application)}>{accounts.title[language]}</Button><Button size="icon-sm" variant="ghost" aria-label={copy(language, "管理订阅主机", "Manage subscription controller")} onClick={() => onManage(controller.application)}><EllipsisIcon aria-hidden="true" /></Button></div></div> : null}
     </div>
     <Tabs value={page} onValueChange={(value) => { if (typeof value === "string") setPage(value); }}>
-      <div className="meridian-view-bar"><TabsList variant="line" aria-label={copy(language, "Meridian 视图", "Meridian views")}>{manifest.pages.filter((item) => item.surface === "tab").map((item) => <TabsTrigger key={item.id} value={item.id}>{item.title[language]}</TabsTrigger>)}</TabsList><span className="text-xs text-muted-foreground">{copy(language, `共 ${entries.length} 个线路机 · ${landing?.view?.servers.length ?? "—"} 个落地机`, `Total: ${entries.length} entry nodes · ${landing?.view?.servers.length ?? "—"} landing nodes`)}</span></div>
-      <TabsContent value="nodes"><div className="meridian-evidence-bar"><QualityNotice instances={instances} data={data} language={language} purpose={purpose} search={search} /><UnlockLegend language={language} /></div><div className="meridian-node-list"><Table aria-label={copy(language, "Meridian 节点", "Meridian nodes")} className="apps-instance-table meridian-comparison-table">
+      <div className="meridian-view-bar"><TabsList variant="line" aria-label={copy(language, "Glivela 视图", "Glivela views")}>{manifest.pages.filter((item) => item.surface === "tab").map((item) => <TabsTrigger key={item.id} value={item.id}>{item.title[language]}</TabsTrigger>)}</TabsList><span className="text-xs text-muted-foreground">{copy(language, `共 ${entries.length} 个线路机 · ${landing?.view?.servers.length ?? "—"} 个落地机`, `Total: ${entries.length} entry nodes · ${landing?.view?.servers.length ?? "—"} landing nodes`)}</span></div>
+      <TabsContent value="nodes"><div className="meridian-evidence-bar"><QualityNotice instances={instances} data={data} language={language} purpose={purpose} search={search} /><UnlockLegend language={language} /></div><div className="meridian-node-list"><Table aria-label={copy(language, "Glivela 节点", "Glivela nodes")} className="apps-instance-table meridian-comparison-table">
         <colgroup><col className="meridian-node-column" /><col className="meridian-quality-column" /><col span={nodeTableColumns - 4} className="meridian-service-column" /><col className="meridian-state-column" /><col className="meridian-actions-column" /></colgroup>
         <TableHeader><TableRow><TableHead scope="col">{copy(language, "节点", "Node")}</TableHead><TableHead scope="col" title={copy(language, "分数仅表示出口 IP 质量，不代表速度。", "Scores describe exit IP quality, not speed.")}>{copy(language, "IP 质量", "IP quality")}</TableHead><UnlockHeaders /><TableHead scope="col">{copy(language, "状态", "Status")}</TableHead><TableHead scope="col"><span className="sr-only">{copy(language, "操作", "Actions")}</span></TableHead></TableRow></TableHeader>
         <TableBody><TableRow className="meridian-node-group"><TableCell colSpan={nodeTableColumns} className="text-xs">{copy(language, "线路机", "Entry nodes")} {instances.length}</TableCell></TableRow>
@@ -86,6 +87,7 @@ export function MeridianWorkspace({ group, data, language, mutate, onManage, onU
           <LandingTableRows language={language} search={search} purpose={purpose} order={order} siteNames={siteNames} data={data} mutate={mutate} onCompare={(nodeId) => compareRoute("", nodeId)} />
         </TableBody>
       </Table></div></TabsContent>
+      <TabsContent value="traffic"><MeridianTrafficPanel data={data} language={language} /></TabsContent>
       <TabsContent value="network"><MeridianLinkTests instances={entries} language={language} entryId={entryId} landingId={landingId} onEntryChange={setEntryId} onLandingChange={setLandingId} /></TabsContent>
     </Tabs>
   </section>;

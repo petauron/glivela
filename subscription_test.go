@@ -36,7 +36,7 @@ func TestRenderLinksReplacesEntryRegionWithLandingRegion(t *testing.T) {
 		t.Fatalf("native subscription changed: %q", text)
 	}
 	routed, err := parseVLESSLink(lines[1])
-	if err != nil || routed.Fragment != "🇹🇼 台湾·落地｜Entry-Alpha" || strings.Contains(routed.Fragment, "🇺🇸") || strings.Contains(routed.Fragment, "｜｜") {
+	if err != nil || routed.Fragment != "🇹🇼 台湾｜双跳·Entry-Alpha" || strings.Contains(routed.Fragment, "🇺🇸") || strings.Contains(routed.Fragment, "｜｜") {
 		t.Fatalf("rendered subscription = %q", text)
 	}
 }
@@ -87,5 +87,71 @@ func TestRenderSubscriptionsRejectRoutedHysteria(t *testing.T) {
 	}
 	if _, err := RenderMihomo(entries, "account-a", FixedMode, routes); err == nil {
 		t.Fatal("routed Hysteria Mihomo subscription was accepted")
+	}
+}
+
+func TestRouteNameLandingSuffix(t *testing.T) {
+	for _, suffix := range []string{"", "家宽", "双跳"} {
+		item := PublishedRoute{EntryName: "🇺🇸 美国｜Entry", EgressRegionPrefix: "🇺🇸 美国", EgressNameSuffix: suffix}
+		want := "🇺🇸 美国｜双跳·Entry"
+		if suffix != "" {
+			want = "🇺🇸 美国｜" + suffix + "·Entry"
+		}
+		if got := routeName(item); got != want {
+			t.Fatalf("got %q want %q", got, want)
+		}
+	}
+}
+
+func TestCompactSubscriptionNames(t *testing.T) {
+	cases := []struct{ entry, native, routed string }{
+		{"DataWave-CN2", "DW-CN2", "DW-CN2"},
+		{"ShanDun-CN2", "SD-CN2", "SD-CN2"},
+		{"CN2 FXTRANSIT", "FX-CN2", "FX-CN2"},
+		{"AKKO-CN2", "AKKO-CN2", "AKKO-CN2"},
+		{"MatrixIDC CN2-1", "MX-CN2①", "MX-CN2①"},
+		{"MatrixIDC CN2-2", "MX-CN2②", "MX-CN2②"},
+		{"MatrixIDC 4837-1", "MX-4837①", "MX-4837①"},
+		{"MatrixIDC 4837-2", "MX-4837②", "MX-4837②"},
+	}
+	seen := map[string]bool{}
+	reserve := func(name string) {
+		t.Helper()
+		if seen[name] {
+			t.Fatalf("duplicate display name: %s", name)
+		}
+		seen[name] = true
+	}
+	for _, tc := range cases {
+		original := "🇺🇸 美国｜" + tc.entry
+		got := compactSubscriptionName(original)
+		if got != "🇺🇸 美国｜"+tc.native {
+			t.Fatalf("native name: %s", got)
+		}
+		reserve(got)
+		for _, landing := range []struct{ region, suffix string }{
+			{"🇺🇸 美国", "家宽"}, {"🇺🇸 美国", "双跳"},
+			{"🇨🇳 台湾", ""}, {"🇭🇰 香港", ""},
+		} {
+			got = routeName(PublishedRoute{EntryName: original, EgressRegionPrefix: landing.region, EgressNameSuffix: landing.suffix})
+			want := landing.region + "｜"
+			if landing.suffix != "" {
+				want += landing.suffix + "·" + tc.routed
+			} else {
+				want += "双跳·" + tc.routed
+			}
+			if got != want {
+				t.Fatalf("routed name: got %s, want %s", got, want)
+			}
+			reserve(got)
+		}
+	}
+	reserve(compactSubscriptionName("🇺🇸 美国｜VMISS-CN2"))
+	if len(seen) != 41 {
+		t.Fatalf("inventory size: %d", len(seen))
+	}
+	unknown := "🇺🇸 美国｜Custom-CN2-9"
+	if compactSubscriptionName(unknown) != unknown {
+		t.Fatal("custom name was changed")
 	}
 }
