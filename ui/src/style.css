@@ -791,7 +791,7 @@
 [data-app-workspace="vastora-official/meridian"] .meridian-comparison-table {
     display: table;
     width: 100%;
-    min-width: 980px;
+    min-width: 900px;
     table-layout: fixed;
 }
 [data-app-workspace="vastora-official/meridian"] .meridian-comparison-table th {
@@ -809,8 +809,8 @@
     padding-right: 8px;
 }
 [data-app-workspace="vastora-official/meridian"] .meridian-quality-column { width: 146px; }
-[data-app-workspace="vastora-official/meridian"] .meridian-node-column { width: 24%; }
-[data-app-workspace="vastora-official/meridian"] .meridian-state-column { width: 142px; }
+[data-app-workspace="vastora-official/meridian"] .meridian-node-column { width: 22%; }
+[data-app-workspace="vastora-official/meridian"] .meridian-state-column { width: 112px; }
 [data-app-workspace="vastora-official/meridian"] .meridian-actions-column { width: 44px; }
 [data-app-workspace="vastora-official/meridian"] .meridian-comparison-table .meridian-service-cell {
     padding-inline: 4px;
@@ -826,9 +826,16 @@
     align-items: center;
     gap: 5px;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-quality-score > button {
+[data-app-workspace="vastora-official/meridian"] .meridian-quality-score > button:not(.meridian-score-button) {
     margin-left: auto;
     flex-shrink: 0;
+}
+[data-app-workspace="vastora-official/meridian"] .meridian-score-button {
+    min-width: 30px;
+    min-height: 28px;
+    height: auto;
+    padding: 0 3px;
+    margin-left: -3px;
 }
 [data-app-workspace="vastora-official/meridian"] .meridian-quality-score .quality-grade {
     border: 0;
@@ -928,5 +935,5 @@
 [data-app-workspace="vastora-official/meridian"] .meridian-node-list .meridian-comparison-table :is(th, td) { padding-block: 4px; }
 [data-app-workspace="vastora-official/meridian"] .meridian-node-list [data-slot="table-container"] { scrollbar-width: thin; scrollbar-color: var(--input) var(--card); }
 @media (min-width: 1024px) {
-    [data-app-workspace="vastora-official/meridian"] .meridian-quality-score > button { height: 24px; min-height: 24px; width: 24px; }
+    [data-app-workspace="vastora-official/meridian"] .meridian-quality-score > button:not(.meridian-score-button) { height: 24px; min-height: 24px; width: 24px; }
 }
