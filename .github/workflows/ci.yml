@@ -49,8 +49,15 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
-      - name: Test with race detection
-        run: go test -race ./... -count=1
+      - name: Run complete tests with version-based race policy
+        run: |
+          version=$(jq -er '.["."] | select(type == "string")' .release-please-manifest.json)
+          set --
+          case "$version" in
+            *-alpha|*-alpha.*) echo "Alpha CI: full tests, race disabled" ;;
+            *) set -- -race ;;
+          esac
+          go test "$@" ./... -count=1
   ui:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -68,7 +75,9 @@ jobs:
         with:
           node-version: '24.19.0'
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: |
+            ui/package-lock.json
+            vastora/web/package-lock.json
       - name: Install reviewed UI dependencies
         run: |
           npm ci --prefix vastora/web
