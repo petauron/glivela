@@ -2,6 +2,9 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
+/* Shared components are linked into a gitignored directory. Tailwind must scan
+   them explicitly so this independently delivered UI includes portal styles. */
+@source "../.center-src";
 /*
  * Ejected unchanged from shadcn@4.21.0 dist/tailwind.css.
  * Official procedure: https://ui.shadcn.com/docs/changelog/2026-05-shadcn-eject
