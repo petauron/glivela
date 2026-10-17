@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.21](https://github.com/petauron/glivela/compare/v0.1.0-alpha.20...v0.1.0-alpha.21) (2026-10-17)
+
+
+### Bug Fixes
+
+* **ui:** sort node quality by score and restore vertical scrolling ([#46](https://github.com/petauron/glivela/issues/46)) ([aae951f](https://github.com/petauron/glivela/commit/aae951f1d2cad0cf81ae64102f4f3e5973d43553))
+
 ## [0.1.0-alpha.20](https://github.com/petauron/glivela/compare/v0.1.0-alpha.19...v0.1.0-alpha.20) (2026-10-17)
 
 
