@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { reviewedCenterSource } from "../platform-source.mjs";
 
 const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-const css = readFileSync(new URL(`../dist/ui-meridian-${manifest.version}.css`, import.meta.url), "utf8");
+const css = readFileSync(new URL(`../dist/ui-glivela-${manifest.version}.css`, import.meta.url), "utf8");
 
 // The newly reviewed Center uses a centered property panel, not the former
 // left/right edge drawer. Validate its actual source AND generated utilities;

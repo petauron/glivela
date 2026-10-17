@@ -97,7 +97,7 @@ jobs:
         run: |
           npm run build --prefix ui
           version=$(jq -er .version ui/package.json)
-          bundle="ui/dist/ui-meridian-$version"
+          bundle="ui/dist/ui-glivela-$version"
           test -s "$bundle.js"
           test -s "$bundle.css"
           test "$(wc -c < "$bundle.js")" -le 4194304

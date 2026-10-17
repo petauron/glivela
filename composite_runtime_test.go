@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import (
 	"context"

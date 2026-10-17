@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import (
 	"crypto/sha256"
@@ -29,7 +29,7 @@ type ImportPlan struct {
 // caller must move the raw token directly between encrypted stores.
 func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 	if len(accounts) > 10000 {
-		return ImportPlan{}, errors.New("meridian: invalid import inventory")
+		return ImportPlan{}, errors.New("glivela: invalid import inventory")
 	}
 	plan := ImportPlan{Accounts: slices.Clone(accounts)}
 	if plan.Accounts == nil {
@@ -46,7 +46,7 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 	for accountIndex := range plan.Accounts {
 		item := &plan.Accounts[accountIndex]
 		if item.Account.Validate() != nil || seenAccounts[item.Account.ID] || !validTokenFingerprint(item.SubscriptionTokenFingerprint) || seenTokens[item.SubscriptionTokenFingerprint] || len(item.Credentials) == 0 || len(item.Credentials) > 1024 {
-			return ImportPlan{}, errors.New("meridian: conflicting import account")
+			return ImportPlan{}, errors.New("glivela: conflicting import account")
 		}
 		seenAccounts[item.Account.ID], seenTokens[item.SubscriptionTokenFingerprint] = true, true
 		item.Credentials = slices.Clone(item.Credentials)
@@ -60,7 +60,7 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 		for _, credential := range item.Credentials {
 			entryIdentity := credential.EntryID + "\x00" + string(credential.Identity)
 			if credential.Validate() != nil || credential.AccountID != item.Account.ID || seenCredentialIDs[credential.ID] || seenUsers[credential.User] || seenEntryIdentities[entryIdentity] {
-				return ImportPlan{}, errors.New("meridian: conflicting import credential")
+				return ImportPlan{}, errors.New("glivela: conflicting import credential")
 			}
 			seenCredentialIDs[credential.ID], seenUsers[credential.User], seenEntryIdentities[entryIdentity] = true, true, true
 			credentialByID[credential.ID] = credential
@@ -69,7 +69,7 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 			credential, exists := credentialByID[credentialID]
 			entryIdentity := credential.EntryID + "\x00" + identity
 			if !exists || credential.Kind != NativeCredential || !ValidIdentity(identity) || seenHysteriaIdentities[entryIdentity] {
-				return ImportPlan{}, errors.New("meridian: conflicting import Hysteria credential")
+				return ImportPlan{}, errors.New("glivela: conflicting import Hysteria credential")
 			}
 			seenHysteriaIdentities[entryIdentity] = true
 		}
@@ -77,16 +77,16 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 			base, hasBase := credentialByID[grant.Base.ID]
 			route, hasRoute := credentialByID[grant.Route.ID]
 			if grant.Validate() != nil || grant.AccountID != item.Account.ID || seenGrantIDs[grant.ID] || !hasBase || !hasRoute || base != grant.Base || route != grant.Route {
-				return ImportPlan{}, errors.New("meridian: conflicting import route grant")
+				return ImportPlan{}, errors.New("glivela: conflicting import route grant")
 			}
 			seenGrantIDs[grant.ID] = true
 		}
 		if len(item.Usage) != len(item.Credentials) {
-			return ImportPlan{}, errors.New("meridian: incomplete import usage ledger")
+			return ImportPlan{}, errors.New("glivela: incomplete import usage ledger")
 		}
 		for _, member := range item.Usage {
 			if _, exists := credentialByID[member.CredentialID]; !exists || member.Baseline < 0 || member.Observed < member.Baseline {
-				return ImportPlan{}, errors.New("meridian: invalid import usage ledger")
+				return ImportPlan{}, errors.New("glivela: invalid import usage ledger")
 			}
 		}
 		if _, err := ProjectQuota(item.Account.Plan, item.Usage); err != nil {
@@ -95,7 +95,7 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 	}
 	encoded, err := json.Marshal(plan.Accounts)
 	if err != nil {
-		return ImportPlan{}, errors.New("meridian: cannot encode import plan")
+		return ImportPlan{}, errors.New("glivela: cannot encode import plan")
 	}
 	digest := sha256.Sum256(encoded)
 	plan.SHA256 = hex.EncodeToString(digest[:])

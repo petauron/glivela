@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import (
 	"crypto/sha256"
@@ -28,7 +28,7 @@ type AccountPlan struct {
 
 func (p AccountPlan) Validate() error {
 	if p.TotalBytes < 0 || p.ExpiryTime < 0 || p.ResetDays < 0 || p.ResetDays > MaxResetDays {
-		return errors.New("meridian: invalid account plan")
+		return errors.New("glivela: invalid account plan")
 	}
 	return nil
 }
@@ -43,7 +43,7 @@ type Account struct {
 
 func (a Account) Validate() error {
 	if !ValidIdentifier(a.ID) || !validDisplayName(a.DisplayName) || a.Plan.Validate() != nil || a.DesiredRevision == 0 || a.AppliedRevision > a.DesiredRevision {
-		return errors.New("meridian: invalid account")
+		return errors.New("glivela: invalid account")
 	}
 	return nil
 }
@@ -68,19 +68,19 @@ type Credential struct {
 
 func (c Credential) Validate() error {
 	if !ValidIdentifier(c.ID) || !ValidIdentifier(c.AccountID) || !ValidIdentifier(c.EntryID) || !validUser(c.User) || !ValidIdentity(c.Identity) {
-		return errors.New("meridian: invalid access credential")
+		return errors.New("glivela: invalid access credential")
 	}
 	switch c.Kind {
 	case NativeCredential:
 		if c.EgressID != "" {
-			return errors.New("meridian: native credential cannot select an egress")
+			return errors.New("glivela: native credential cannot select an egress")
 		}
 	case RouteCredential:
 		if !ValidIdentifier(c.EgressID) {
-			return errors.New("meridian: route credential requires an egress")
+			return errors.New("glivela: route credential requires an egress")
 		}
 	default:
-		return errors.New("meridian: unsupported credential kind")
+		return errors.New("glivela: unsupported credential kind")
 	}
 	return nil
 }
@@ -104,16 +104,16 @@ type RouteGrant struct {
 
 func (g RouteGrant) Validate() error {
 	if !ValidIdentifier(g.ID) || !ValidIdentifier(g.AccountID) || !ValidIdentifier(g.EntryID) || !ValidIdentifier(g.EgressID) || !g.Mode.Valid() || !validInboundTag(g.InboundTag) || g.DesiredRev == 0 || g.AppliedRev > g.DesiredRev {
-		return errors.New("meridian: invalid route grant")
+		return errors.New("glivela: invalid route grant")
 	}
 	if g.IPv4EgressID != "" && (!ValidIdentifier(g.IPv4EgressID) || g.IPv4EgressID == g.EgressID || g.IPv4EgressID == g.EntryID || g.EgressID == g.EntryID) {
 		return errors.New("glivela: a composite route requires two independent exits")
 	}
 	if g.Base.Validate() != nil || g.Base.Kind != NativeCredential || g.Base.AccountID != g.AccountID || g.Base.EntryID != g.EntryID {
-		return errors.New("meridian: invalid native route credential")
+		return errors.New("glivela: invalid native route credential")
 	}
 	if g.Route.Validate() != nil || g.Route.Kind != RouteCredential || g.Route.AccountID != g.AccountID || g.Route.EntryID != g.EntryID || g.Route.EgressID != g.EgressID || g.Route.Identity == g.Base.Identity {
-		return errors.New("meridian: invalid routed credential")
+		return errors.New("glivela: invalid routed credential")
 	}
 	return nil
 }

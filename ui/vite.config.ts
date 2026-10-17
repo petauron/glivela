@@ -20,8 +20,8 @@ export default defineConfig(({ command }) => ({
     lib: {
       entry: fileURLToPath(new URL("./src/index.tsx", import.meta.url)),
       formats: ["es"],
-      fileName: () => `ui-meridian-${manifest.version}.js`,
-      cssFileName: `ui-meridian-${manifest.version}`,
+      fileName: () => `ui-glivela-${manifest.version}.js`,
+      cssFileName: `ui-glivela-${manifest.version}`,
     },
     rollupOptions: { output: { inlineDynamicImports: true } },
   },

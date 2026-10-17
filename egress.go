@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import "errors"
 
@@ -19,7 +19,7 @@ func (p EgressPolicy) Validate() error {
 	case "", EgressAuto, EgressIPv4Only, EgressIPv6Only:
 		return nil
 	default:
-		return errors.New("meridian: unsupported native egress policy")
+		return errors.New("glivela: unsupported native egress policy")
 	}
 }
 

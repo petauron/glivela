@@ -8,6 +8,6 @@ export function reviewedCenterSource() {
   if (!source) throw new Error("VASTORA_WEB_SOURCE must point to the pinned Vastora web/src checkout");
   const directory = resolve(source);
   const commit = execFileSync("git", ["-C", directory, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  if (commit !== pinnedCenterCommit) throw new Error("Meridian UI requires its reviewed Vastora UI dependency revision");
+  if (commit !== pinnedCenterCommit) throw new Error("Glivela UI requires its reviewed Vastora UI dependency revision");
   return directory;
 }

@@ -15,7 +15,7 @@ function bytes(value: number) {
   return `${(value / 1024 ** index).toLocaleString(undefined, { maximumFractionDigits: index ? 2 : 0 })} ${units[index]}`;
 }
 
-export function MeridianTrafficPanel({ data, language }: { data: AppData; language: Language }) {
+export function GlivelaTrafficPanel({ data, language }: { data: AppData; language: Language }) {
   const [traffic, setTraffic] = useState<MeridianTraffic | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");

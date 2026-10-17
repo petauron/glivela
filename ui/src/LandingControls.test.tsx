@@ -10,8 +10,8 @@ const mutate = vi.fn(async (operation: () => Promise<unknown>) => { await operat
 import type { LandingView } from "@/landing-types";
 import type { AgentView } from "@/types";
 import { LandingProvider } from "@/views/LandingControls";
-import { LandingTableRows } from "./meridian/LandingNodes";
-import { MeridianLinkTests } from "./meridian/LinkTests";
+import { LandingTableRows } from "./glivela/LandingNodes";
+import { GlivelaLinkTests } from "./glivela/LinkTests";
 import type { InstalledAppInstance } from "@/views/installed-apps-model";
 import { selectedLandingLatencies } from "@/views/landingLatency";
 
@@ -120,7 +120,7 @@ it("shows the selected landing's latency without mixing other landings", async (
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => { root?.render(<LandingProvider enabled><MeridianLinkTests instances={[{ application: { id: "entry-one", nodeId: "source-one" }, realityServices: [] } as unknown as InstalledAppInstance]} language="zh-CN" entryId="" landingId="a" onEntryChange={vi.fn()} onLandingChange={vi.fn()} /></LandingProvider>); });
+  await act(async () => { root?.render(<LandingProvider enabled><GlivelaLinkTests instances={[{ application: { id: "entry-one", nodeId: "source-one" }, realityServices: [] } as unknown as InstalledAppInstance]} language="zh-CN" entryId="" landingId="a" onEntryChange={vi.fn()} onLandingChange={vi.fn()} /></LandingProvider>); });
   expect(container.textContent).toContain("12 ms");
   expect(container.textContent).not.toContain("128 ms");
 });

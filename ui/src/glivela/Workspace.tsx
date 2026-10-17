@@ -16,17 +16,17 @@ import { api } from "@/api";
 import type { InstalledAppInstance } from "@/views/installed-apps-model";
 import { publicationNeedsAttention, showInstalledNode } from "@/views/installed-apps-model";
 import { catalogInstallBlocked, copy } from "@/views/shared";
-import { MeridianTrafficPanel } from "./Traffic";
-import { MeridianLinkTests } from "./LinkTests";
+import { GlivelaTrafficPanel } from "./Traffic";
+import { GlivelaLinkTests } from "./LinkTests";
 import { SelectControl } from "@/components/SelectControl";
 import { ipQualityCheckForAddress } from "@/views/ipQualityModel";
 import { compareSelection, entryAvailable, entryState, matchesEntryPurpose } from "./selection";
 import { NodeQualityCells, UnlockHeaders, nodeTableColumns } from "./NodeQuality";
-import { MeridianUpdates } from "./Updates";
+import { GlivelaUpdates } from "./Updates";
 import { QualityNotice, UnlockLegend } from "./QualityNotice";
 import { manifest } from "./manifest";
 
-export function MeridianWorkspace({ group, data, language, mutate, onManage, onUpgrade, onClients, showSite }: AppWorkspaceProps) {
+export function GlivelaWorkspace({ group, data, language, mutate, onManage, onUpgrade, onClients, showSite }: AppWorkspaceProps) {
   const landing = useLanding();
   const [entryId, setEntryId] = useState("");
   const [landingId, setLandingId] = useState("");
@@ -60,14 +60,14 @@ export function MeridianWorkspace({ group, data, language, mutate, onManage, onU
         { value: "name", label: copy(language, "按名称", "By name") },
       ]} />
       {query || purpose !== "all" ? <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setPurpose("all"); }}>{copy(language, "清除筛选", "Clear filters")}</Button> : null}</> : null}
-      {controller ? <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{controller.activeChange || controller.application.status !== "running" ? <ApplicationPrimaryStatus instance={controller} language={language} /> : null}{controllerAttention ? <span className="text-xs text-destructive">{copy(language, "入口待处理", "Access needs attention")}</span> : null}<div className="ml-auto flex items-center gap-2"><MeridianUpdates group={group} language={language} onUpgrade={onUpgrade} /><Button disabled={controller.locked} size="sm" variant="secondary" onClick={() => onClients(controller.application)}>{accounts.title[language]}</Button><Button size="icon-sm" variant="ghost" aria-label={copy(language, "管理订阅主机", "Manage subscription controller")} onClick={() => onManage(controller.application)}><EllipsisIcon aria-hidden="true" /></Button></div></div> : null}
+      {controller ? <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{controller.activeChange || controller.application.status !== "running" ? <ApplicationPrimaryStatus instance={controller} language={language} /> : null}{controllerAttention ? <span className="text-xs text-destructive">{copy(language, "入口待处理", "Access needs attention")}</span> : null}<div className="ml-auto flex items-center gap-2"><GlivelaUpdates group={group} language={language} onUpgrade={onUpgrade} /><Button disabled={controller.locked} size="sm" variant="secondary" onClick={() => onClients(controller.application)}>{accounts.title[language]}</Button><Button size="icon-sm" variant="ghost" aria-label={copy(language, "管理订阅主机", "Manage subscription controller")} onClick={() => onManage(controller.application)}><EllipsisIcon aria-hidden="true" /></Button></div></div> : null}
     </div>
     <Tabs value={page} onValueChange={(value) => { if (typeof value === "string") setPage(value); }}>
-      <div className="meridian-view-bar"><TabsList variant="line" aria-label={copy(language, "Glivela 视图", "Glivela views")}>{manifest.pages.filter((item) => item.surface === "tab").map((item) => <TabsTrigger key={item.id} value={item.id}>{item.title[language]}</TabsTrigger>)}</TabsList><span className="text-xs text-muted-foreground">{copy(language, `共 ${entries.length} 个线路机 · ${landing?.view?.servers.length ?? "—"} 个落地机`, `Total: ${entries.length} entry nodes · ${landing?.view?.servers.length ?? "—"} landing nodes`)}</span></div>
-      <TabsContent value="nodes"><div className="meridian-evidence-bar"><QualityNotice instances={instances} data={data} language={language} purpose={purpose} search={search} /><UnlockLegend language={language} /></div><div className="meridian-node-list"><Table aria-label={copy(language, "Glivela 节点", "Glivela nodes")} className="apps-instance-table meridian-comparison-table">
-        <colgroup><col className="meridian-node-column" /><col className="meridian-quality-column" /><col span={nodeTableColumns - 4} className="meridian-service-column" /><col className="meridian-state-column" /><col className="meridian-actions-column" /></colgroup>
+      <div className="glivela-view-bar"><TabsList variant="line" aria-label={copy(language, "Glivela 视图", "Glivela views")}>{manifest.pages.filter((item) => item.surface === "tab").map((item) => <TabsTrigger key={item.id} value={item.id}>{item.title[language]}</TabsTrigger>)}</TabsList><span className="text-xs text-muted-foreground">{copy(language, `共 ${entries.length} 个线路机 · ${landing?.view?.servers.length ?? "—"} 个落地机`, `Total: ${entries.length} entry nodes · ${landing?.view?.servers.length ?? "—"} landing nodes`)}</span></div>
+      <TabsContent value="nodes"><div className="glivela-evidence-bar"><QualityNotice instances={instances} data={data} language={language} purpose={purpose} search={search} /><UnlockLegend language={language} /></div><div className="glivela-node-list"><Table aria-label={copy(language, "Glivela 节点", "Glivela nodes")} className="apps-instance-table glivela-comparison-table">
+        <colgroup><col className="glivela-node-column" /><col className="glivela-quality-column" /><col span={nodeTableColumns - 4} className="glivela-service-column" /><col className="glivela-state-column" /><col className="glivela-actions-column" /></colgroup>
         <TableHeader><TableRow><TableHead scope="col">{copy(language, "节点", "Node")}</TableHead><TableHead scope="col" title={copy(language, "分数仅表示出口 IP 质量，不代表速度。", "Scores describe exit IP quality, not speed.")}>{copy(language, "IP 质量", "IP quality")}</TableHead><UnlockHeaders /><TableHead scope="col">{copy(language, "状态", "Status")}</TableHead><TableHead scope="col"><span className="sr-only">{copy(language, "操作", "Actions")}</span></TableHead></TableRow></TableHeader>
-        <TableBody><TableRow className="meridian-node-group"><TableCell colSpan={nodeTableColumns} className="text-xs">{copy(language, "线路机", "Entry nodes")} {instances.length}</TableCell></TableRow>
+        <TableBody><TableRow className="glivela-node-group"><TableCell colSpan={nodeTableColumns} className="text-xs">{copy(language, "线路机", "Entry nodes")} {instances.length}</TableCell></TableRow>
           {instances.map((instance) => {
             const name = instance.agent?.name ?? instance.application.nodeId;
             const service = instance.realityServices[0];
@@ -75,7 +75,7 @@ export function MeridianWorkspace({ group, data, language, mutate, onManage, onU
             return <TableRow key={instance.application.id} data-application-id={instance.application.id}>
               <TableCell className="whitespace-normal"><div className="flex items-center gap-2"><RegionFlag code={service?.regionCode} language={language} /><span className="font-medium">{name}</span></div><p className="mt-1 text-xs text-muted-foreground"><NodeLocation regionCode={service?.regionCode} siteName={showSite ? instance.siteName : undefined} language={language} />{service?.protocols?.length ? ` · ${service.protocols.map((protocol) => protocol.toUpperCase()).join(" / ")}` : ""}</p></TableCell>
               <NodeQualityCells nodeId={instance.application.nodeId} name={name} language={language} address={instance.agent?.publicEgress?.address} check={checkFor(instance)} />
-              <TableCell className="whitespace-normal"><div className="meridian-entry-status"><EntryStatus instance={instance} language={language} />{state === "access_error" ? <VerifyEntry instance={instance} language={language} mutate={mutate} /> : null}{state === "unconfigured" ? <Button disabled={instance.locked} variant="ghost" size="sm" onClick={() => onManage(instance.application)}>{copy(language, "配置", "Configure")}</Button> : null}</div></TableCell>
+              <TableCell className="whitespace-normal"><div className="glivela-entry-status"><EntryStatus instance={instance} language={language} />{state === "access_error" ? <VerifyEntry instance={instance} language={language} mutate={mutate} /> : null}{state === "unconfigured" ? <Button disabled={instance.locked} variant="ghost" size="sm" onClick={() => onManage(instance.application)}>{copy(language, "配置", "Configure")}</Button> : null}</div></TableCell>
               <TableCell><DropdownMenu><DropdownMenuTrigger render={<Button aria-label={copy(language, `${name} 操作`, `${name} actions`)} size="icon-sm" variant="ghost" />}><EllipsisIcon aria-hidden="true" /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => compareRoute(instance.application.nodeId, landingId)}>{copy(language, "比较线路速度", "Compare route speeds")}</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onManage(instance.application)}>{copy(language, "管理应用", "Manage application")}</DropdownMenuItem>
@@ -87,8 +87,8 @@ export function MeridianWorkspace({ group, data, language, mutate, onManage, onU
           <LandingTableRows language={language} search={search} purpose={purpose} order={order} siteNames={siteNames} data={data} mutate={mutate} onCompare={(nodeId) => compareRoute("", nodeId)} />
         </TableBody>
       </Table></div></TabsContent>
-      <TabsContent value="traffic"><MeridianTrafficPanel data={data} language={language} /></TabsContent>
-      <TabsContent value="network"><MeridianLinkTests instances={entries} language={language} entryId={entryId} landingId={landingId} onEntryChange={setEntryId} onLandingChange={setLandingId} /></TabsContent>
+      <TabsContent value="traffic"><GlivelaTrafficPanel data={data} language={language} /></TabsContent>
+      <TabsContent value="network"><GlivelaLinkTests instances={entries} language={language} entryId={entryId} landingId={landingId} onEntryChange={setEntryId} onLandingChange={setLandingId} /></TabsContent>
     </Tabs>
   </section>;
 }

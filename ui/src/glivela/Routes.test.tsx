@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { api } from "@/api";
 import type { AppData } from "@/App";
 import type { LandingView } from "@/landing-types";
-import { MeridianRoutes } from "./Routes";
+import { GlivelaRoutes } from "./Routes";
 
 vi.mock("@/components/SelectControl", () => ({
   SelectControl: ({ id, value, onValueChange, disabled, options, "aria-label": label }: {
@@ -29,7 +29,7 @@ const servers = [
 ] as LandingView["servers"];
 async function mount(landings = servers) {
   const container = document.createElement("div"); document.body.append(container); root = createRoot(container);
-  await act(async () => { root?.render(<MeridianRoutes data={data} language="zh-CN" endpointId="endpoint" landingServers={landings} mutate={async (operation) => { await operation(); }} />); });
+  await act(async () => { root?.render(<GlivelaRoutes data={data} language="zh-CN" endpointId="endpoint" landingServers={landings} mutate={async (operation) => { await operation(); }} />); });
 }
 async function select(element: HTMLSelectElement, value: string) {
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("change", { bubbles: true })); });

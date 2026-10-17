@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import (
 	"bytes"
@@ -29,11 +29,11 @@ func BuildDesiredArtifact(plan XrayPlan) (DesiredArtifact, error) {
 
 func (a DesiredArtifact) Validate() error {
 	if a.Revision == 0 || len(a.Config) == 0 || len(a.Config) > maxSubscriptionBytes || !json.Valid(a.Config) || !ValidIdentity(a.ConfigSHA256) {
-		return errors.New("meridian: invalid desired artifact")
+		return errors.New("glivela: invalid desired artifact")
 	}
 	digest := sha256.Sum256(a.Config)
 	if subtle.ConstantTimeCompare([]byte(a.ConfigSHA256), []byte(hex.EncodeToString(digest[:]))) != 1 {
-		return errors.New("meridian: desired artifact digest changed")
+		return errors.New("glivela: desired artifact digest changed")
 	}
 	var runtime struct {
 		Routing struct{ Script string }
@@ -53,7 +53,7 @@ type AppliedReceipt struct {
 
 func VerifyAppliedReceipt(desired DesiredArtifact, receipt AppliedReceipt) error {
 	if desired.Validate() != nil || receipt.Revision != desired.Revision || !receipt.RuntimeReady || !ValidIdentity(receipt.ConfigSHA256) || subtle.ConstantTimeCompare([]byte(desired.ConfigSHA256), []byte(receipt.ConfigSHA256)) != 1 {
-		return errors.New("meridian: applied receipt does not match desired Xray state")
+		return errors.New("glivela: applied receipt does not match desired Xray state")
 	}
 	return nil
 }
@@ -78,7 +78,7 @@ const maxInt64 = int64(^uint64(0) >> 1)
 // user label containing Xray's delimiter remains unambiguous.
 func ParseXrayUserCounters(materials []CredentialMaterial, payload []byte) ([]CounterSnapshot, error) {
 	if len(materials) > 65536 || len(payload) == 0 || len(payload) > maxSubscriptionBytes {
-		return nil, errors.New("meridian: invalid Xray statistics input")
+		return nil, errors.New("glivela: invalid Xray statistics input")
 	}
 	var response struct {
 		Stats []struct {
@@ -88,13 +88,13 @@ func ParseXrayUserCounters(materials []CredentialMaterial, payload []byte) ([]Co
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	if decoder.Decode(&response) != nil {
-		return nil, errors.New("meridian: invalid Xray statistics response")
+		return nil, errors.New("glivela: invalid Xray statistics response")
 	}
 	values := map[string]int64{}
 	seenStats := map[string]bool{}
 	for _, stat := range response.Stats {
 		if stat.Name == "" || !strings.HasPrefix(stat.Name, "user>>>") || seenStats[stat.Name] {
-			return nil, errors.New("meridian: ambiguous Xray statistics response")
+			return nil, errors.New("glivela: ambiguous Xray statistics response")
 		}
 		value, err := parseCounter(stat.Value)
 		if err != nil {
@@ -111,7 +111,7 @@ func ParseXrayUserCounters(materials []CredentialMaterial, payload []byte) ([]Co
 	result := make([]CounterSnapshot, 0, len(ordered))
 	for _, material := range ordered {
 		if material.Validate() != nil || seen[material.Credential.ID] {
-			return nil, errors.New("meridian: invalid Xray statistics credential")
+			return nil, errors.New("glivela: invalid Xray statistics credential")
 		}
 		seen[material.Credential.ID] = true
 		prefix := "user>>>" + material.Credential.User + ">>>traffic>>>"
@@ -145,5 +145,5 @@ func parseCounter(raw json.RawMessage) (int64, error) {
 			return value, nil
 		}
 	}
-	return 0, errors.New("meridian: invalid Xray traffic counter")
+	return 0, errors.New("glivela: invalid Xray traffic counter")
 }

@@ -4,14 +4,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "@/api";
 import type { AppData } from "@/App";
-import { MeridianTrafficPanel } from "./Traffic";
+import { GlivelaTrafficPanel } from "./Traffic";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
 afterEach(() => { if (root) act(() => root?.unmount()); root=undefined; document.body.replaceChildren(); vi.restoreAllMocks(); });
 const data = { applications: [], services: [], publications: [] } as unknown as AppData;
 const line = { entryNodeId: "entry-test", entryName: "Entry A", uploadBytes: 1024, downloadBytes: 2048, totalBytes: 3072, credentialCount: 2, trackedCredentials: 2, startedAt: "2026-10-01T00:00:00Z", observedAt: "2026-10-01T01:00:00Z", state: "stale" as const };
-async function mount() { const div=document.createElement("div"); document.body.append(div); root=createRoot(div); await act(async()=>{root?.render(<MeridianTrafficPanel data={data} language="zh-CN" />);}); }
+async function mount() { const div=document.createElement("div"); document.body.append(div); root=createRoot(div); await act(async()=>{root?.render(<GlivelaTrafficPanel data={data} language="zh-CN" />);}); }
 it("shows historical direction totals and coverage without probes or quota changes", async()=>{
  const read=vi.spyOn(api,"meridianTraffic").mockResolvedValue({lines:[line,{...line,entryNodeId:"unknown",entryName:"Entry B",state:"missing",trackedCredentials:0}],period:"since_tracking_started",checkedAt:line.observedAt});
  const probe=vi.spyOn(api,"checkMeridianLinkBandwidth");
