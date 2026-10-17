@@ -18,15 +18,32 @@ describe("node selection evidence", () => {
     const values = [choice("offline", 99, false), choice("ready", 60)];
     expect(values.sort((a, b) => compareSelection(a, b, "quality")).map((item) => item.name)).toEqual(["ready", "offline"]);
   });
-  it("keeps historical results below current results even before backend expiry refresh", () => {
+  it("sorts historical and current scores together regardless of report age", () => {
     const values = [choice("old", 99, true, { checkedAt: "2020-01-01T00:00:00Z" }), choice("current", 60)];
-    expect(values.sort((a, b) => compareSelection(a, b, "quality"))[0].name).toBe("current");
+    expect(values.sort((a, b) => compareSelection(a, b, "quality"))[0].name).toBe("old");
   });
-  it("does not give incomplete evidence priority over a complete score", () => {
+  it("sorts conservative scores by their displayed value", () => {
     const conservative = report(90);
     conservative.assessment!.status = "conservative";
     const values = [{ name: "incomplete", ready: true, check: conservative }, choice("complete", 60)];
-    expect(values.sort((a, b) => compareSelection(a, b, "quality"))[0].name).toBe("complete");
+    expect(values.sort((a, b) => compareSelection(a, b, "quality"))[0].name).toBe("incomplete");
+  });
+  it("uses names to break equal scores, not freshness", () => {
+    const values = [choice("Zulu", 70), choice("Alpha", 70, true, { checkedAt: "2020-01-01T00:00:00Z" })];
+    expect(values.sort((a, b) => compareSelection(a, b, "quality")).map((item) => item.name)).toEqual(["Alpha", "Zulu"]);
+  });
+  it("puts unscored, changed-IP, failed and partial reports after scored nodes", () => {
+    const changed = report(99); changed.assessment!.status = "ip_changed";
+    const partial = report(99); partial.assessment!.status = "partial";
+    const values = [
+      { name: "changed", ready: true, check: changed },
+      { name: "partial", ready: true, check: partial },
+      { name: "missing", ready: true },
+      choice("failed", 99, true, { state: "failed" }),
+      choice("stale", 99, true, { stale: true }),
+      choice("scored", 0),
+    ];
+    expect(values.sort((a, b) => compareSelection(a, b, "quality"))[0].name).toBe("scored");
   });
   it("does not match a changed IP or failed report to a service filter", () => {
     expect(matchesPurpose(report(90, { stale: true }), "ai")).toBe(false);

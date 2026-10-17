@@ -41,13 +41,10 @@ export function matchesEntryPurpose(instance: InstalledAppInstance, check: IPQua
   return purpose === "all" || entryAvailable(instance) && matchesPurpose(check, purpose);
 }
 
-// Keep unavailable nodes last; historical reports never outrank current reports.
+// Keep unavailable nodes last; quality order follows scores, not report age.
 export function compareSelection(a: { ready: boolean; check?: IPQualityCheck; name: string }, b: { ready: boolean; check?: IPQualityCheck; name: string }, order: string) {
   if (a.ready !== b.ready) return a.ready ? -1 : 1;
   if (order === "quality") {
-    const tier = (check?: IPQualityCheck) => !usableReport(check) ? 0 : historicalReport(check) ? 1 : check?.assessment?.status === "complete" ? 3 : 2;
-    const difference = tier(b.check) - tier(a.check);
-    if (difference) return difference;
     const score = (check?: IPQualityCheck) => usableReport(check) ? (check?.assessment?.status === "partial" ? -1 : check?.assessment?.score ?? -1) : -1;
     const differenceScore = score(b.check) - score(a.check);
     if (differenceScore) return differenceScore;
