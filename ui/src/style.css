@@ -893,7 +893,10 @@
 [data-app-workspace="vastora-official/meridian"] .meridian-node-list [data-slot="table-container"] {
     max-height: 76vh;
     overflow: auto;
-    overscroll-behavior: contain;
+    /* Keep horizontal panning local, but let wheel/touch scrolling reach the
+       desktop window when this table cannot scroll further vertically. */
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
 }
 [data-app-workspace="vastora-official/meridian"] .meridian-comparison-table thead th {
     position: sticky;
