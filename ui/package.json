@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node scripts/check-bundle-styles.mjs",
     "check": "node scripts/prepare-platform.mjs && tsc --noEmit",
     "test": "vitest run"
   },
