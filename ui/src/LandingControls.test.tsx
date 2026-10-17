@@ -18,16 +18,22 @@ import { selectedLandingLatencies } from "@/views/landingLatency";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
 class LatencyEventSource {
+  static instances: LatencyEventSource[] = [];
+  constructor() { LatencyEventSource.instances.push(this); }
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   close = vi.fn();
 }
-beforeEach(() => vi.stubGlobal("EventSource", LatencyEventSource));
+beforeEach(() => {
+  LatencyEventSource.instances = [];
+  vi.stubGlobal("EventSource", LatencyEventSource);
+});
 afterEach(() => {
   if (root) act(() => root?.unmount());
   root = undefined;
   document.body.replaceChildren();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 function overview(): LandingView {
@@ -123,4 +129,38 @@ it("shows the selected landing's latency without mixing other landings", async (
   await act(async () => { root?.render(<LandingProvider enabled><GlivelaLinkTests instances={[{ application: { id: "entry-one", nodeId: "source-one" }, realityServices: [] } as unknown as InstalledAppInstance]} language="zh-CN" entryId="" landingId="a" onEntryChange={vi.fn()} onLandingChange={vi.fn()} /></LandingProvider>); });
   expect(container.textContent).toContain("12 ms");
   expect(container.textContent).not.toContain("128 ms");
+});
+
+it("keeps the independently built link view live after its event stream stalls", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-18T00:00:00Z"));
+  const request = vi.spyOn(api, "landing").mockResolvedValue(overview());
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => { root?.render(<LandingProvider enabled><GlivelaLinkTests instances={[{ application: { id: "entry-one", nodeId: "source-one" }, realityServices: [] } as unknown as InstalledAppInstance]} language="zh-CN" entryId="" landingId="a" onEntryChange={vi.fn()} onLandingChange={vi.fn()} /></LandingProvider>); });
+  await act(async () => { LatencyEventSource.instances[0].onmessage?.(new MessageEvent("message", { data: JSON.stringify({ revision: 4, reset: true, upserts: overview().latencies, removed: [] }) })); });
+  request.mockImplementation(async () => {
+    const next = overview();
+    next.latencies[0].latencyMs = 24;
+    return next;
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(195_000); });
+  expect(container.textContent).toContain("24 ms");
+  expect(container.textContent).not.toContain("12 ms");
+});
+
+it("retains display evidence across a 60 second sample gap but expires it after three minutes", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-18T00:00:00Z"));
+  const request = vi.spyOn(api, "landing").mockResolvedValue(overview());
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => { root?.render(<LandingProvider enabled><GlivelaLinkTests instances={[{ application: { id: "entry-one", nodeId: "source-one" }, realityServices: [] } as unknown as InstalledAppInstance]} language="zh-CN" entryId="" landingId="a" onEntryChange={vi.fn()} onLandingChange={vi.fn()} /></LandingProvider>); });
+  request.mockRejectedValue(new Error("offline"));
+  await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
+  expect(container.textContent).toContain("12 ms");
+  await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+  expect(container.textContent).not.toContain("12 ms");
 });

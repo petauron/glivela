@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: petauron/vastora
-          ref: c85888a7d98717fdd4143dd4c70f022f6563632c
+          ref: 513d7bb0235e5cfdf8c112c5952b2aef32fee640
           path: vastora
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
