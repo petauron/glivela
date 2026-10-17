@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.0-alpha.20](https://github.com/petauron/glivela/compare/v0.1.0-alpha.19...v0.1.0-alpha.20) (2026-10-17)
+
+
+### Bug Fixes
+
+* **routes:** expose lazy per-leg health diagnostics ([9ea520d](https://github.com/petauron/glivela/commit/9ea520d19d7d4aae6ef9e0c82fc33b04ede7aed0))
+* **ui:** explain IP scores and fit node comparison columns ([#17](https://github.com/petauron/glivela/issues/17)) ([e4950e2](https://github.com/petauron/glivela/commit/e4950e262df3cdfcc114ec8c961c0d9950ddef3d))
+* **ui:** include shared component styles in application bundle ([#45](https://github.com/petauron/glivela/issues/45)) ([ecaf8ef](https://github.com/petauron/glivela/commit/ecaf8ef1c730759935b466d10c6f7755d72424b8))
+
 ## [0.1.0-alpha.19](https://github.com/petauron/glivela/compare/v0.1.0-alpha.18...v0.1.0-alpha.19) (2026-10-13)
 
 
