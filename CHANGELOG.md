@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.23](https://github.com/petauron/glivela/compare/v0.1.0-alpha.22...v0.1.0-alpha.23) (2026-10-17)
+
+
+### Bug Fixes
+
+* refresh bundled landing latency provider and cover stalled streams ([f29fdbb](https://github.com/petauron/glivela/commit/f29fdbb2f2385abf9bb4dd3104cc89d27c5a9524))
+
 ## [0.1.0-alpha.22](https://github.com/petauron/glivela/compare/v0.1.0-alpha.21...v0.1.0-alpha.22) (2026-10-17)
 
 
