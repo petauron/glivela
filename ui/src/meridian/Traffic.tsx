@@ -6,7 +6,7 @@ import type { MeridianTraffic } from "@/meridian-types";
 import type { Language } from "@/translations";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { pulsePrivateAccess, secureDashboardURL } from "@/views/appAccess";
+import { senulunPrivateAccess, secureDashboardURL } from "@/views/appAccess";
 import { copy, userError } from "@/views/shared";
 
 function bytes(value: number) {
@@ -30,8 +30,8 @@ export function MeridianTrafficPanel({ data, language }: { data: AppData; langua
     }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
   }, [revision, language]);
-  const publication = pulsePrivateAccess(data);
-  const pulseURL = publication && !publication.actionRequired && !publication.lastError ? secureDashboardURL(publication.accessUrl) : undefined;
+  const publication = senulunPrivateAccess(data);
+  const senulunURL = publication && !publication.actionRequired && !publication.lastError ? secureDashboardURL(publication.accessUrl) : undefined;
   const labels = {
     current: copy(language, "最近采样", "Recent sample"), missing: copy(language, "待采集", "Not sampled"),
     partial: copy(language, "部分凭据未采集", "Some credentials not sampled"), stale: copy(language, "历史用量", "Historical usage"),
@@ -56,7 +56,7 @@ export function MeridianTrafficPanel({ data, language }: { data: AppData; langua
     </Table></div> : null}
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
       <div className="min-w-0 flex-1"><h3 className="text-sm font-medium">{copy(language, "服务器套餐 · Senulun", "Server traffic budgets · Senulun")}</h3><p className="mt-1 text-xs text-muted-foreground">{copy(language, "查看主机已用 / 剩余流量，设置额度、UTC 月度重置日（1–28）及双向 / 仅出站计费。阈值提醒不自动停用线路。", "View host used / remaining traffic; configure budget, monthly UTC reset day (1–28), and total / outbound counting. Threshold alerts do not disable routes.")}</p><p className="mt-1 text-xs text-muted-foreground">{copy(language, "主机计量包含其他应用及传输开销，与线路业务用量分开统计；供应商账单为准。", "Host monitoring includes other applications and transport overhead, separately from route usage; provider billing remains authoritative.")}</p></div>
-      {pulseURL ? <Button size="sm" variant="outline" nativeButton={false} render={<a href={pulseURL} rel="noreferrer" target="_blank" />}><ExternalLinkIcon />{copy(language, "查看 / 设置服务器流量", "View / configure server traffic")}</Button> : <span role="status" className="text-xs text-muted-foreground">{copy(language, "Senulun 入口不可用，请先配置监控访问。", "Senulun access is unavailable; configure monitoring access first.")}</span>}
+      {senulunURL ? <Button size="sm" variant="outline" nativeButton={false} render={<a href={senulunURL} rel="noreferrer" target="_blank" />}><ExternalLinkIcon />{copy(language, "查看 / 设置服务器流量", "View / configure server traffic")}</Button> : <span role="status" className="text-xs text-muted-foreground">{copy(language, "Senulun 入口不可用，请先配置监控访问。", "Senulun access is unavailable; configure monitoring access first.")}</span>}
     </div>
   </section>;
 }
