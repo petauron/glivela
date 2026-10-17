@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { ApplicationPrimaryStatus, ApplicationUpdate } from "@/views/apps/InstalledApplicationPrimitives";
 import { copy } from "@/views/shared";
 
-export function MeridianUpdates({ group, language, onUpgrade }: Pick<AppWorkspaceProps, "group" | "language" | "onUpgrade">) {
+export function GlivelaUpdates({ group, language, onUpgrade }: Pick<AppWorkspaceProps, "group" | "language" | "onUpgrade">) {
   const [open, setOpen] = useState(false);
   const instances = group.instances.filter((instance) => instance.application.updateAvailable || instance.activeChange?.operation === "upgrade");
   if (!instances.length) return null;

@@ -3,7 +3,7 @@ set -eu
 lab=${1:?pass an absolute prepared lab directory}
 case "$lab" in /*) ;; *) echo 'absolute lab directory required' >&2; exit 1;; esac
 [ "$(uname -s)" = Linux ] || { echo 'Linux is required' >&2; exit 1; }
-prefix=meridian-egress-$$
+prefix=glivela-egress-$$
 network=$prefix-network
 xray=ghcr.io/xtls/xray-core:26.9.30@sha256:6d30597c3e729b5dc1faac8dbc0138fbbe6d4d787bfb54120ea48f14e2e7b5ca
 python=python@sha256:399babc8b49529dabfd9c922f2b5eea81d611e4512e3ed250d75bd2e7683f4b0

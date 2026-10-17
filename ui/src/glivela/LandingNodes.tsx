@@ -1,7 +1,7 @@
 import { Fragment, useId, useState } from "react";
 import { EllipsisIcon, PlusIcon } from "lucide-react";
 import type { AppData, Mutate } from "@/App";
-import { MeridianRoutes } from "./Routes";
+import { GlivelaRoutes } from "./Routes";
 import { api } from "@/api";
 import type { LandingView } from "@/landing-types";
 import type { Language } from "@/translations";
@@ -51,7 +51,7 @@ export function LandingTableRows({ language, search, purpose, order, siteNames, 
   };
   const servers = state?.view?.servers.filter((server) => !search || [server.name, server.nodeId, state.regions[server.nodeId] ? regionName(state.regions[server.nodeId], [language]) : ""].some((value) => value.toLocaleLowerCase().includes(search))).filter((server) => (purpose === "all" || server.status === "ready") && matchesPurpose(checkFor(server), purpose)).sort((a, b) => compareSelection({ ready: a.status === "ready", check: checkFor(a), name: a.name }, { ready: b.status === "ready", check: checkFor(b), name: b.name }, order)) ?? [];
   return <>
-    <TableRow className="meridian-node-group"><TableCell colSpan={nodeTableColumns} >
+    <TableRow className="glivela-node-group"><TableCell colSpan={nodeTableColumns} >
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-xs font-medium">{copy(language, "落地机", "Landing nodes")} <span className="ml-1 text-muted-foreground">{servers.length}</span></h3><Button variant="ghost" size="sm" aria-expanded={adding} aria-controls={`${id}-add`} onClick={() => setAdding(!adding)}><PlusIcon data-icon="inline-start" />{copy(language, "添加落地机", "Add landing node")}</Button></div>
     </TableCell></TableRow>
     {adding && state ? <TableRow className="hover:bg-transparent"><TableCell colSpan={nodeTableColumns} className="whitespace-normal"><div id={`${id}-add`} className="max-w-xl py-3"><AddLandingNode state={state} language={language} onAdded={(nodeId) => { setAdding(false); setExpanded(nodeId); }} /></div></TableCell></TableRow> : null}
@@ -74,7 +74,7 @@ export function LandingTableRows({ language, search, purpose, order, siteNames, 
           <LandingEgressIP key={`${server.nodeId}:${server.egressRevision}`} server={server} language={language} disabled={state.busy || state.failed || !["ready", "failed"].includes(server.status)} save={(address) => state.change((signal) => api.setLandingEgress(server.nodeId, server.egressRevision ?? 0, address, signal))} />
           <LandingNameSuffix key={`${server.nodeId}:${state.view?.revision}`} language={language} value={state.view?.landingNameSuffixes?.[server.nodeId] ?? ""} disabled={state.busy || state.failed} save={(suffix) => state.change((signal) => api.selectLanding(state.view!.nodeIds, state.view!.revision, selectedRegions(state, state.view!.nodeIds), signal, { ...state.view!.landingNameSuffixes, [server.nodeId]: suffix }))} />
           </div>
-          <MeridianRoutes data={data} language={language} mutate={mutate} egressNodeId={server.nodeId} landingServers={state.view?.servers} />
+          <GlivelaRoutes data={data} language={language} mutate={mutate} egressNodeId={server.nodeId} landingServers={state.view?.servers} />
           <details className="border-t pt-2 text-xs text-muted-foreground xl:col-span-2"><summary className="w-fit cursor-pointer">{copy(language, "落地管理", "Manage exit")}</summary><div className="mt-2">
             <Button variant="ghost" size="sm" disabled={state.busy || state.failed || server.status === "draining"} aria-label={copy(language, `移除 ${server.name}`, `Remove ${server.name}`)} onClick={() => {
               const view = state.view;

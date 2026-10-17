@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import (
 	"crypto/tls"
@@ -34,16 +34,16 @@ type CredentialMaterial struct {
 
 func (m CredentialMaterial) Validate() error {
 	if m.Credential.Validate() != nil {
-		return errors.New("meridian: invalid credential material")
+		return errors.New("glivela: invalid credential material")
 	}
 	if _, err := uuid.Parse(m.ProtocolID); err != nil || Identity(m.ProtocolID) != m.Credential.Identity {
-		return errors.New("meridian: credential secret does not match its identity")
+		return errors.New("glivela: credential secret does not match its identity")
 	}
 	if (m.HysteriaAuth == "") != (m.HysteriaIdentity == "") || m.HysteriaAuth != "" && (len(m.HysteriaAuth) > 512 || Identity(m.HysteriaAuth) != m.HysteriaIdentity) {
-		return errors.New("meridian: Hysteria credential secret does not match its identity")
+		return errors.New("glivela: Hysteria credential secret does not match its identity")
 	}
 	if m.Credential.Kind == RouteCredential && m.HysteriaAuth != "" {
-		return errors.New("meridian: routed credentials cannot use Hysteria")
+		return errors.New("glivela: routed credentials cannot use Hysteria")
 	}
 	return nil
 }
@@ -78,29 +78,29 @@ type HysteriaEndpoint struct {
 
 func (e HysteriaEndpoint) Validate() error {
 	if e.validateSubscription() != nil || !validInboundTag(e.InboundTag) || !validPort(e.ListenPort) || len(e.CertificatePEM) > 64<<10 || len(e.PrivateKeyPEM) > 64<<10 {
-		return errors.New("meridian: invalid Hysteria endpoint")
+		return errors.New("glivela: invalid Hysteria endpoint")
 	}
 	pair, err := tls.X509KeyPair([]byte(e.CertificatePEM), []byte(e.PrivateKeyPEM))
 	if err != nil || len(pair.Certificate) == 0 {
-		return errors.New("meridian: invalid Hysteria certificate")
+		return errors.New("glivela: invalid Hysteria certificate")
 	}
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil || leaf.VerifyHostname(e.ServerName) != nil {
-		return errors.New("meridian: Hysteria certificate does not cover its server name")
+		return errors.New("glivela: Hysteria certificate does not cover its server name")
 	}
 	return nil
 }
 
 func (e HysteriaEndpoint) validateSubscription() error {
 	if !ValidIdentifier(e.ID) || !ValidIdentifier(e.EntryID) || !validPort(e.AdvertisePort) || !validShareHost(e.AdvertiseHost) || !validServerName(e.ServerName) {
-		return errors.New("meridian: invalid Hysteria subscription endpoint")
+		return errors.New("glivela: invalid Hysteria subscription endpoint")
 	}
 	return nil
 }
 
 func HysteriaCertificateNotAfter(endpoint HysteriaEndpoint) (time.Time, error) {
 	if endpoint.Validate() != nil {
-		return time.Time{}, errors.New("meridian: invalid Hysteria endpoint")
+		return time.Time{}, errors.New("glivela: invalid Hysteria endpoint")
 	}
 	pair, _ := tls.X509KeyPair([]byte(endpoint.CertificatePEM), []byte(endpoint.PrivateKeyPEM))
 	leaf, _ := x509.ParseCertificate(pair.Certificate[0])
@@ -110,30 +110,30 @@ func HysteriaCertificateNotAfter(endpoint HysteriaEndpoint) (time.Time, error) {
 func (e RealityEndpoint) Validate() error {
 	address, addressErr := netip.ParseAddr(e.ListenAddress)
 	if e.validateSubscription() != nil || !validInboundTag(e.InboundTag) || addressErr != nil || !privateServiceIPv4(address) || address.String() != e.ListenAddress || e.ListenPort < 1024 || !validPort(e.ListenPort) || !validRealityTarget(e.Target) || strings.TrimSpace(e.PrivateKey) == "" || len(e.PrivateKey) > 256 {
-		return errors.New("meridian: invalid REALITY endpoint")
+		return errors.New("glivela: invalid REALITY endpoint")
 	}
 	return nil
 }
 
 func (e RealityEndpoint) validateSubscription() error {
 	if !ValidIdentifier(e.ID) || !ValidIdentifier(e.EntryID) || !validPort(e.AdvertisePort) || !validShareHost(e.AdvertiseHost) || strings.TrimSpace(e.PublicKey) == "" || len(e.PublicKey) > 256 || len(e.ServerNames) == 0 || len(e.ServerNames) > 16 || len(e.ShortIDs) == 0 || len(e.ShortIDs) > 16 {
-		return errors.New("meridian: invalid REALITY subscription endpoint")
+		return errors.New("glivela: invalid REALITY subscription endpoint")
 	}
 	seenNames, seenIDs := map[string]bool{}, map[string]bool{}
 	for _, name := range e.ServerNames {
 		if !validServerName(name) || seenNames[name] {
-			return errors.New("meridian: invalid REALITY server name")
+			return errors.New("glivela: invalid REALITY server name")
 		}
 		seenNames[name] = true
 	}
 	for _, shortID := range e.ShortIDs {
 		if !validShortID(shortID) || seenIDs[shortID] {
-			return errors.New("meridian: invalid REALITY short ID")
+			return errors.New("glivela: invalid REALITY short ID")
 		}
 		seenIDs[shortID] = true
 	}
 	if e.Fingerprint != "" && !ValidIdentifier(e.Fingerprint) {
-		return errors.New("meridian: invalid REALITY fingerprint")
+		return errors.New("glivela: invalid REALITY fingerprint")
 	}
 	return nil
 }
@@ -149,7 +149,7 @@ type RoutePeer struct {
 func (p RoutePeer) Validate() error {
 	address, err := netip.ParseAddr(p.Address)
 	if !ValidIdentifier(p.EgressID) || err != nil || !privateServiceIPv4(address) || !validPort(p.Port) {
-		return errors.New("meridian: invalid route peer")
+		return errors.New("glivela: invalid route peer")
 	}
 	return nil
 }
@@ -296,14 +296,14 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 	}
 	encoded, err := json.Marshal(config)
 	if err != nil {
-		return nil, errors.New("meridian: cannot encode Xray configuration")
+		return nil, errors.New("glivela: cannot encode Xray configuration")
 	}
 	return encoded, nil
 }
 
 func LinkForCredential(endpoint RealityEndpoint, material CredentialMaterial, name string) (string, error) {
 	if endpoint.validateSubscription() != nil || material.Validate() != nil || material.Credential.EntryID != endpoint.EntryID || !validDisplayName(name) {
-		return "", errors.New("meridian: invalid subscription link input")
+		return "", errors.New("glivela: invalid subscription link input")
 	}
 	fingerprint := endpoint.Fingerprint
 	if fingerprint == "" {
@@ -325,7 +325,7 @@ func LinkForCredential(endpoint RealityEndpoint, material CredentialMaterial, na
 
 func Hysteria2LinkForCredential(endpoint HysteriaEndpoint, material CredentialMaterial, name string) (string, error) {
 	if endpoint.validateSubscription() != nil || material.Validate() != nil || material.Credential.EntryID != endpoint.EntryID || material.HysteriaAuth == "" || !validDisplayName(name) {
-		return "", errors.New("meridian: invalid Hysteria subscription link input")
+		return "", errors.New("glivela: invalid Hysteria subscription link input")
 	}
 	link := url.URL{
 		Scheme:   "hysteria2",
@@ -350,7 +350,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 		return xrayProjection{}, err
 	}
 	if plan.Revision == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) > 256 || len(plan.Credentials) > 65536 || len(plan.Grants) > 65536 || len(plan.Peers) > 1024 {
-		return xrayProjection{}, errors.New("meridian: invalid Xray plan")
+		return xrayProjection{}, errors.New("glivela: invalid Xray plan")
 	}
 	projection := xrayProjection{credentials: map[string][]CredentialMaterial{}, peers: map[string]RoutePeer{}}
 	entryTags, routeTags, tags, ports := map[string][]string{}, map[string]string{}, map[string]bool{}, map[string]bool{}
@@ -359,11 +359,11 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	for _, endpoint := range projection.realityEndpoints {
 		portKey := "tcp/" + strconv.Itoa(endpoint.ListenPort)
 		if endpoint.Validate() != nil || tags[endpoint.InboundTag] || ports[portKey] || endpoint.ListenPort == XrayAPIListenPort {
-			return xrayProjection{}, errors.New("meridian: conflicting Xray endpoint")
+			return xrayProjection{}, errors.New("glivela: conflicting Xray endpoint")
 		}
 		entryTags[endpoint.EntryID] = append(entryTags[endpoint.EntryID], endpoint.InboundTag)
 		if routeTags[endpoint.EntryID] != "" {
-			return xrayProjection{}, errors.New("meridian: multiple routable inbounds share one entry")
+			return xrayProjection{}, errors.New("glivela: multiple routable inbounds share one entry")
 		}
 		routeTags[endpoint.EntryID] = endpoint.InboundTag
 		tags[endpoint.InboundTag], ports[portKey] = true, true
@@ -373,14 +373,14 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	for _, endpoint := range projection.hysteriaEndpoints {
 		portKey := "udp/" + strconv.Itoa(endpoint.ListenPort)
 		if endpoint.Validate() != nil || tags[endpoint.InboundTag] || ports[portKey] || endpoint.ListenPort == XrayAPIListenPort {
-			return xrayProjection{}, errors.New("meridian: conflicting Xray endpoint")
+			return xrayProjection{}, errors.New("glivela: conflicting Xray endpoint")
 		}
 		entryTags[endpoint.EntryID] = append(entryTags[endpoint.EntryID], endpoint.InboundTag)
 		tags[endpoint.InboundTag], ports[portKey] = true, true
 	}
 	for _, peer := range plan.Peers {
 		if peer.Validate() != nil || projection.peers[peer.EgressID].EgressID != "" {
-			return xrayProjection{}, errors.New("meridian: conflicting route peer")
+			return xrayProjection{}, errors.New("glivela: conflicting route peer")
 		}
 		projection.peers[peer.EgressID] = peer
 	}
@@ -389,7 +389,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	for _, material := range plan.Credentials {
 		credential := material.Credential
 		if material.Validate() != nil || len(entryTags[credential.EntryID]) == 0 || materialByID[credential.ID].Credential.ID != "" || users[credential.User] || identities[credential.Identity] || material.HysteriaIdentity != "" && hysteriaIdentities[material.HysteriaIdentity] {
-			return xrayProjection{}, errors.New("meridian: conflicting Xray credential")
+			return xrayProjection{}, errors.New("glivela: conflicting Xray credential")
 		}
 		materialByID[credential.ID], users[credential.User], identities[credential.Identity] = material, true, true
 		if material.HysteriaIdentity != "" {
@@ -397,7 +397,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 		}
 		if credential.Enabled {
 			if credential.Kind == NativeCredential && slices.ContainsFunc(projection.hysteriaEndpoints, func(endpoint HysteriaEndpoint) bool { return endpoint.EntryID == credential.EntryID }) && material.HysteriaAuth == "" {
-				return xrayProjection{}, errors.New("meridian: Hysteria endpoint credential is incomplete")
+				return xrayProjection{}, errors.New("glivela: Hysteria endpoint credential is incomplete")
 			}
 			projection.credentials[credential.EntryID] = append(projection.credentials[credential.EntryID], material)
 		}
@@ -413,7 +413,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 		route, hasRoute := materialByID[grant.Route.ID]
 		peer, hasPeer := projection.peers[grant.EgressID]
 		if !grant.Deployable() || seenGrants[grant.ID] || !hasBase || !hasRoute || base.Credential != grant.Base || route.Credential != grant.Route || usedRoutes[grant.Route.ID] || !hasPeer || peer.EgressID != grant.EgressID || routeTags[grant.EntryID] != grant.InboundTag {
-			return xrayProjection{}, errors.New("meridian: conflicting Xray route grant")
+			return xrayProjection{}, errors.New("glivela: conflicting Xray route grant")
 		}
 		seenGrants[grant.ID], usedRoutes[grant.Route.ID] = true, true
 		if grant.IPv4EgressID != "" {
@@ -430,7 +430,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	}
 	for _, material := range plan.Credentials {
 		if material.Credential.Kind == RouteCredential && material.Credential.Enabled && !usedRoutes[material.Credential.ID] {
-			return xrayProjection{}, errors.New("meridian: orphaned routed credential")
+			return xrayProjection{}, errors.New("glivela: orphaned routed credential")
 		}
 	}
 	return projection, nil

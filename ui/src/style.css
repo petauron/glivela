@@ -715,45 +715,45 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Center owns shared components and theme tokens; Meridian owns its layout. */
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list {
+/* Center owns shared components and theme tokens; Glivela owns its layout. */
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list {
     overflow: hidden;
     border: 1px solid color-mix(in oklab, var(--foreground) 22%, var(--card));
     border-radius: var(--radius);
     background: var(--card);
 }
 
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list [data-slot="table-header"] {
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list [data-slot="table-header"] {
     background: color-mix(in oklab, var(--muted) 45%, var(--card));
 }
 
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list [data-slot="table-header"] [data-slot="table-row"] {
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list [data-slot="table-header"] [data-slot="table-row"] {
     border-bottom-color: var(--input);
 }
 
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list .meridian-node-group {
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list .glivela-node-group {
     border-bottom-color: var(--input);
     background: color-mix(in oklab, var(--muted) 65%, var(--card));
 }
 
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list .meridian-node-group:hover {
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list .glivela-node-group:hover {
     background: color-mix(in oklab, var(--muted) 65%, var(--card));
 }
 
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list :is([data-application-id], [data-landing-node-id]) {
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list :is([data-application-id], [data-landing-node-id]) {
     border-bottom-color: var(--border);
 }
 
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list .meridian-node-group > [data-slot="table-cell"] {
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list .glivela-node-group > [data-slot="table-cell"] {
     padding-inline: 16px;
 }
 
 @media (min-width: 1024px) {
-    [data-app-workspace="vastora-official/meridian"] .meridian-node-list .apps-instance-table :is(th, td):first-child {
+    [data-app-workspace="vastora-official/meridian"] .glivela-node-list .apps-instance-table :is(th, td):first-child {
         padding-left: 16px;
     }
 
-    [data-app-workspace="vastora-official/meridian"] .meridian-node-list .apps-instance-table :is(th, td):last-child {
+    [data-app-workspace="vastora-official/meridian"] .glivela-node-list .apps-instance-table :is(th, td):last-child {
         padding-right: 16px;
     }
 }
@@ -761,86 +761,86 @@
 /* The official UI stylesheet loads before Center's utilities. Keep the desktop
    table layout scoped here so later mobile utility rules cannot override it. */
 @media (min-width: 768px) {
-    [data-app-workspace="vastora-official/meridian"] .meridian-link-tests-header,
-    [data-app-workspace="vastora-official/meridian"] .meridian-link-tests-row {
+    [data-app-workspace="vastora-official/meridian"] .glivela-link-tests-header,
+    [data-app-workspace="vastora-official/meridian"] .glivela-link-tests-row {
         display: grid;
         grid-template-columns: minmax(150px, 1.4fr) minmax(100px, 1fr) minmax(100px, 1fr) 80px 100px 80px;
     }
 
-    [data-app-workspace="vastora-official/meridian"] .meridian-link-tests-row {
+    [data-app-workspace="vastora-official/meridian"] .glivela-link-tests-row {
         padding-block: 10px;
     }
 
-    [data-app-workspace="vastora-official/meridian"] .meridian-link-tests-mobile {
+    [data-app-workspace="vastora-official/meridian"] .glivela-link-tests-mobile {
         display: none;
     }
 
-    [data-app-workspace="vastora-official/meridian"] .meridian-link-tests-value,
-    [data-app-workspace="vastora-official/meridian"] .meridian-link-tests-action {
+    [data-app-workspace="vastora-official/meridian"] .glivela-link-tests-value,
+    [data-app-workspace="vastora-official/meridian"] .glivela-link-tests-action {
         grid-column: auto;
         grid-row: auto;
     }
 
-    [data-app-workspace="vastora-official/meridian"] .meridian-link-tests-desktop {
+    [data-app-workspace="vastora-official/meridian"] .glivela-link-tests-desktop {
         display: block;
     }
 
-    [data-app-workspace="vastora-official/meridian"] .meridian-link-tests-action {
+    [data-app-workspace="vastora-official/meridian"] .glivela-link-tests-action {
         min-height: 32px;
     }
 }
 
 /* Keep comparison columns aligned at every viewport; only this table scrolls. */
-[data-app-workspace="vastora-official/meridian"] .meridian-comparison-table {
+[data-app-workspace="vastora-official/meridian"] .glivela-comparison-table {
     display: table;
     width: 100%;
     min-width: 900px;
     table-layout: fixed;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-comparison-table th {
+[data-app-workspace="vastora-official/meridian"] .glivela-comparison-table th {
     font-size: 12px;
     font-weight: 500;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-comparison-table :is(th, td) {
+[data-app-workspace="vastora-official/meridian"] .glivela-comparison-table :is(th, td) {
     padding: 5px 6px;
     vertical-align: middle;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-comparison-table :is(th, td):first-child {
+[data-app-workspace="vastora-official/meridian"] .glivela-comparison-table :is(th, td):first-child {
     padding-left: 12px;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-comparison-table :is(th, td):last-child {
+[data-app-workspace="vastora-official/meridian"] .glivela-comparison-table :is(th, td):last-child {
     padding-right: 8px;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-quality-column { width: 146px; }
-[data-app-workspace="vastora-official/meridian"] .meridian-node-column { width: 22%; }
-[data-app-workspace="vastora-official/meridian"] .meridian-state-column { width: 112px; }
-[data-app-workspace="vastora-official/meridian"] .meridian-actions-column { width: 44px; }
-[data-app-workspace="vastora-official/meridian"] .meridian-comparison-table .meridian-service-cell {
+[data-app-workspace="vastora-official/meridian"] .glivela-quality-column { width: 146px; }
+[data-app-workspace="vastora-official/meridian"] .glivela-node-column { width: 22%; }
+[data-app-workspace="vastora-official/meridian"] .glivela-state-column { width: 112px; }
+[data-app-workspace="vastora-official/meridian"] .glivela-actions-column { width: 44px; }
+[data-app-workspace="vastora-official/meridian"] .glivela-comparison-table .glivela-service-cell {
     padding-inline: 4px;
     text-align: center;
     white-space: nowrap;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-service-cell strong {
+[data-app-workspace="vastora-official/meridian"] .glivela-service-cell strong {
     font-size: 13px;
     font-weight: 500;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-quality-score {
+[data-app-workspace="vastora-official/meridian"] .glivela-quality-score {
     display: flex;
     align-items: center;
     gap: 5px;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-quality-score > button:not(.meridian-score-button) {
+[data-app-workspace="vastora-official/meridian"] .glivela-quality-score > button:not(.glivela-score-button) {
     margin-left: auto;
     flex-shrink: 0;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-score-button {
+[data-app-workspace="vastora-official/meridian"] .glivela-score-button {
     min-width: 30px;
     min-height: 28px;
     height: auto;
     padding: 0 3px;
     margin-left: -3px;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-quality-score .quality-grade {
+[data-app-workspace="vastora-official/meridian"] .glivela-quality-score .quality-grade {
     border: 0;
     padding: 0;
     background: transparent;
@@ -849,11 +849,11 @@
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-quality-score .quality-grade-unknown {
+[data-app-workspace="vastora-official/meridian"] .glivela-quality-score .quality-grade-unknown {
     font-size: 12px;
     font-weight: 400;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-quality-meta {
+[data-app-workspace="vastora-official/meridian"] .glivela-quality-meta {
     font-size: 12px;
     line-height: 18px;
     white-space: nowrap;
@@ -880,8 +880,8 @@
 }
 
 @media (max-width: 1023px) {
-    [data-app-workspace="vastora-official/meridian"] .meridian-comparison-table :is([data-application-id], [data-landing-node-id]) > td:first-child,
-    [data-app-workspace="vastora-official/meridian"] .meridian-comparison-table thead th:first-child {
+    [data-app-workspace="vastora-official/meridian"] .glivela-comparison-table :is([data-application-id], [data-landing-node-id]) > td:first-child,
+    [data-app-workspace="vastora-official/meridian"] .glivela-comparison-table thead th:first-child {
         position: sticky;
         left: 0;
         z-index: 1;
@@ -890,7 +890,7 @@
     }
 }
 
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list [data-slot="table-container"] {
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list [data-slot="table-container"] {
     max-height: 76vh;
     overflow: auto;
     /* Keep horizontal panning local, but let wheel/touch scrolling reach the
@@ -898,31 +898,31 @@
     overscroll-behavior-x: contain;
     overscroll-behavior-y: auto;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-comparison-table thead th {
+[data-app-workspace="vastora-official/meridian"] .glivela-comparison-table thead th {
     position: sticky;
     top: 0;
     z-index: 2;
     background: color-mix(in oklab, var(--muted) 45%, var(--card));
     box-shadow: inset 0 -1px var(--input);
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-comparison-table thead th:first-child { z-index: 3; }
-[data-app-workspace="vastora-official/meridian"] .meridian-unlock-status {
+[data-app-workspace="vastora-official/meridian"] .glivela-comparison-table thead th:first-child { z-index: 3; }
+[data-app-workspace="vastora-official/meridian"] .glivela-unlock-status {
     min-width: 32px;
     min-height: 32px;
     padding-inline: 3px;
     font-size: 13px;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-view-bar,
-[data-app-workspace="vastora-official/meridian"] .meridian-evidence-bar {
+[data-app-workspace="vastora-official/meridian"] .glivela-view-bar,
+[data-app-workspace="vastora-official/meridian"] .glivela-evidence-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 4px 12px;
 }
-[data-app-workspace="vastora-official/meridian"] .meridian-evidence-bar { margin-bottom: 4px; }
-[data-app-workspace="vastora-official/meridian"] .meridian-history-label { color: var(--foreground); }
-[data-app-workspace="vastora-official/meridian"] .meridian-entry-status {
+[data-app-workspace="vastora-official/meridian"] .glivela-evidence-bar { margin-bottom: 4px; }
+[data-app-workspace="vastora-official/meridian"] .glivela-history-label { color: var(--foreground); }
+[data-app-workspace="vastora-official/meridian"] .glivela-entry-status {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -930,16 +930,16 @@
     font-size: 12px;
 }
 @media (max-width: 1023px) {
-    [data-app-workspace="vastora-official/meridian"] .meridian-node-column { width: 190px; }
-    [data-app-workspace="vastora-official/meridian"] .meridian-unlock-status,
+    [data-app-workspace="vastora-official/meridian"] .glivela-node-column { width: 190px; }
+    [data-app-workspace="vastora-official/meridian"] .glivela-unlock-status,
     [data-app-workspace="vastora-official/meridian"] [data-slot="dropdown-menu-trigger"] {
         min-height: 44px;
         min-width: 44px;
     }
 }
 
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list .meridian-comparison-table :is(th, td) { padding-block: 4px; }
-[data-app-workspace="vastora-official/meridian"] .meridian-node-list [data-slot="table-container"] { scrollbar-width: thin; scrollbar-color: var(--input) var(--card); }
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list .glivela-comparison-table :is(th, td) { padding-block: 4px; }
+[data-app-workspace="vastora-official/meridian"] .glivela-node-list [data-slot="table-container"] { scrollbar-width: thin; scrollbar-color: var(--input) var(--card); }
 @media (min-width: 1024px) {
-    [data-app-workspace="vastora-official/meridian"] .meridian-quality-score > button:not(.meridian-score-button) { height: 24px; min-height: 24px; width: 24px; }
+    [data-app-workspace="vastora-official/meridian"] .glivela-quality-score > button:not(.glivela-score-button) { height: 24px; min-height: 24px; width: 24px; }
 }

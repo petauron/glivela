@@ -16,7 +16,7 @@ are pinned by digest and remain cached. Generated files contain no credentials.
 Prepare from the repository root with Go 1.26:
 
 ```sh
-lab=$(mktemp -d /tmp/meridian-egress.XXXXXX)
+lab=$(mktemp -d /tmp/glivela-egress.XXXXXX)
 go run scripts/egress-lab/generate.go "$lab"
 cp scripts/egress-lab/*.py "$lab/"
 sh scripts/egress-lab/run.sh "$lab"

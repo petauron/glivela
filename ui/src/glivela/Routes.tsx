@@ -14,7 +14,7 @@ import { RouteHealth } from "./RouteHealth";
 type CompositeGrant = AppData["meridian"]["grants"][number] & { ipv4EgressNodeId?: string; ipv4EgressNodeName?: string };
 const ipv6Exit = (server: LandingView["servers"][number]) => Boolean(server.egressIp?.includes(":") && !server.egressIp?.toLowerCase().startsWith("::ffff:"));
 
-export function MeridianRoutes({ data, language, mutate, endpointId: fixedEntry, egressNodeId: fixedExit, landingServers }: {
+export function GlivelaRoutes({ data, language, mutate, endpointId: fixedEntry, egressNodeId: fixedExit, landingServers }: {
   data: AppData; language: Language; mutate: Mutate; endpointId?: string; egressNodeId?: string; landingServers?: LandingView["servers"];
 }) {
   const id = useId();

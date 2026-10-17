@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import (
 	"encoding/base64"
@@ -65,14 +65,14 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 	}
 	native, err := yaml.Marshal(config)
 	if err != nil {
-		return nil, errors.New("meridian: cannot encode Mihomo subscription")
+		return nil, errors.New("glivela: cannot encode Mihomo subscription")
 	}
 	return composeMihomo(native, accountID, mode, routes)
 }
 
 func nativeSubscriptionLines(entries []NativeEntry, accountID string) ([]byte, error) {
 	if !ValidIdentifier(accountID) || len(entries) == 0 || len(entries) > 1024 {
-		return nil, errors.New("meridian: invalid native subscription inventory")
+		return nil, errors.New("glivela: invalid native subscription inventory")
 	}
 	seenNames, seenRoutes := map[string]bool{}, map[string]bool{}
 	seenCredentials := map[string]bool{}
@@ -83,11 +83,11 @@ func nativeSubscriptionLines(entries []NativeEntry, accountID string) ([]byte, e
 		credential := entry.Material.Credential
 		credentialKey := credential.ID + "\x00" + string(entry.Protocol)
 		if entry.Material.Validate() != nil || !entry.Protocol.Valid() || credential.Kind != NativeCredential || credential.AccountID != accountID || !credential.Enabled || seenCredentials[credentialKey] {
-			return nil, errors.New("meridian: invalid native subscription credential")
+			return nil, errors.New("glivela: invalid native subscription credential")
 		}
 		link, err := parseProtocolLink(strings.TrimSpace(entry.Link), entry.Protocol)
 		if err != nil {
-			return nil, errors.New("meridian: native subscription identity changed")
+			return nil, errors.New("glivela: native subscription identity changed")
 		}
 		port, portErr := strconv.Atoi(link.Port())
 		expectedIdentity := credential.Identity
@@ -95,12 +95,12 @@ func nativeSubscriptionLines(entries []NativeEntry, accountID string) ([]byte, e
 			expectedIdentity = entry.Material.HysteriaIdentity
 		}
 		if portErr != nil || port < 1 || port > 65535 || totalBytes > maxSubscriptionBytes || protocolLinkIdentity(link, entry.Protocol) != expectedIdentity || strings.TrimSpace(link.Fragment) == "" || len([]rune(link.Fragment)) > MaxDisplayNameLength || link.Query().Get("sni") == "" || entry.Protocol == VLESSReality && link.Query().Get("pbk") == "" {
-			return nil, errors.New("meridian: native subscription identity changed")
+			return nil, errors.New("glivela: native subscription identity changed")
 		}
 		name := compactSubscriptionName(strings.TrimSpace(link.Fragment))
 		routeKey := string(entry.Protocol) + "\x00" + link.Host + "\x00" + link.Query().Get("sni") + "\x00" + link.Query().Get("pbk") + "\x00" + link.Query().Get("sid")
 		if seenNames[name] || seenRoutes[routeKey] {
-			return nil, errors.New("meridian: ambiguous native subscription inventory")
+			return nil, errors.New("glivela: ambiguous native subscription inventory")
 		}
 		seenNames[name], seenRoutes[routeKey], seenCredentials[credentialKey] = true, true, true
 		line := strings.TrimSpace(entry.Link)
@@ -120,12 +120,12 @@ func mihomoProxy(entry NativeEntry) (map[string]any, string, error) {
 	}
 	port, err := strconv.Atoi(link.Port())
 	if err != nil || !validPort(port) {
-		return nil, "", errors.New("meridian: invalid subscription port")
+		return nil, "", errors.New("glivela: invalid subscription port")
 	}
 	query := link.Query()
 	name := compactSubscriptionName(strings.TrimSpace(link.Fragment))
 	if name == "" {
-		return nil, "", errors.New("meridian: subscription name is required")
+		return nil, "", errors.New("glivela: subscription name is required")
 	}
 	if entry.Protocol == Hysteria2 {
 		return map[string]any{
@@ -152,14 +152,14 @@ func mihomoProxy(entry NativeEntry) (map[string]any, string, error) {
 
 func composeLinks(native []byte, accountID string, mode PublishingMode, routes []PublishedRoute, encoded bool) ([]byte, error) {
 	if len(native) > maxSubscriptionBytes || !ValidIdentifier(accountID) || !mode.Valid() {
-		return nil, errors.New("meridian: invalid subscription input")
+		return nil, errors.New("glivela: invalid subscription input")
 	}
 	plain := native
 	if encoded {
 		var err error
 		plain, err = base64.StdEncoding.DecodeString(strings.TrimSpace(string(native)))
 		if err != nil {
-			return nil, errors.New("meridian: invalid native subscription")
+			return nil, errors.New("glivela: invalid native subscription")
 		}
 	}
 	lines := strings.Split(strings.TrimRight(string(plain), "\r\n"), "\n")
@@ -186,17 +186,17 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 		}
 		base, err := parseVLESSLink(item.BaseLink)
 		if err != nil {
-			return nil, errors.New("meridian: route does not belong to this subscription")
+			return nil, errors.New("glivela: route does not belong to this subscription")
 		}
 		baseKey := string(VLESSReality) + "\x00" + base.User.Username()
 		if !identities[baseKey] || !slices.ContainsFunc(lines, func(line string) bool {
 			return sameProtocolLinkIdentity(strings.TrimSpace(line), item.BaseLink, VLESSReality)
 		}) {
-			return nil, errors.New("meridian: route does not belong to this subscription")
+			return nil, errors.New("glivela: route does not belong to this subscription")
 		}
 		routed, err := parseVLESSLink(item.RouteLink)
 		if err != nil || !sameProtocolTransport(routed, base, VLESSReality) || routed.User.Username() == base.User.Username() || identities[string(VLESSReality)+"\x00"+routed.User.Username()] {
-			return nil, errors.New("meridian: invalid routed credential")
+			return nil, errors.New("glivela: invalid routed credential")
 		}
 		routeLink, _, _ := strings.Cut(strings.TrimSpace(item.RouteLink), "#")
 		name := routeName(item)
@@ -220,37 +220,37 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 
 func composeMihomo(native []byte, accountID string, mode PublishingMode, routes []PublishedRoute) ([]byte, error) {
 	if len(native) > maxSubscriptionBytes || !ValidIdentifier(accountID) || !mode.Valid() {
-		return nil, errors.New("meridian: invalid subscription input")
+		return nil, errors.New("glivela: invalid subscription input")
 	}
 	var config map[string]any
 	if yaml.Unmarshal(native, &config) != nil || config == nil {
-		return nil, errors.New("meridian: invalid native Mihomo configuration")
+		return nil, errors.New("glivela: invalid native Mihomo configuration")
 	}
 	proxies, ok := config["proxies"].([]any)
 	if !ok {
-		return nil, errors.New("meridian: native subscription has no proxy inventory")
+		return nil, errors.New("glivela: native subscription has no proxy inventory")
 	}
 	groups, ok := config["proxy-groups"].([]any)
 	if !ok && config["proxy-groups"] != nil {
-		return nil, errors.New("meridian: invalid native proxy groups")
+		return nil, errors.New("glivela: invalid native proxy groups")
 	}
 	names := map[string]bool{"DIRECT": true, "REJECT": true}
 	for _, values := range [][]any{proxies, groups} {
 		for _, value := range values {
 			entry, ok := value.(map[string]any)
 			if !ok {
-				return nil, errors.New("meridian: invalid native subscription entry")
+				return nil, errors.New("glivela: invalid native subscription entry")
 			}
 			name, _ := entry["name"].(string)
 			if name == "" || names[name] {
-				return nil, errors.New("meridian: ambiguous native subscription names")
+				return nil, errors.New("glivela: ambiguous native subscription names")
 			}
 			names[name] = true
 		}
 	}
 	reserve := func(name string) error {
 		if names[name] {
-			return errors.New("meridian: managed subscription name conflicts with native configuration")
+			return errors.New("glivela: managed subscription name conflicts with native configuration")
 		}
 		names[name] = true
 		return nil
@@ -279,22 +279,22 @@ func composeMihomo(native []byte, accountID string, mode PublishingMode, routes 
 			candidate := value.(map[string]any)
 			if candidate["type"] == proxyType && candidate[credentialField] == base.User.Username() && candidate["server"] == base.Hostname() && fmt.Sprint(candidate["port"]) == base.Port() {
 				if proxy != nil {
-					return nil, errors.New("meridian: ambiguous native entry identity")
+					return nil, errors.New("glivela: ambiguous native entry identity")
 				}
 				proxy = candidate
 			}
 		}
 		if proxy == nil || proxy["dialer-proxy"] != nil || !sameMihomoRealityTransport(proxy, base) {
-			return nil, errors.New("meridian: native entry does not match this account")
+			return nil, errors.New("glivela: native entry does not match this account")
 		}
 		routed, err := parseVLESSLink(item.RouteLink)
 		if err != nil || !sameProtocolTransport(routed, base, VLESSReality) || routed.User.Username() == base.User.Username() {
-			return nil, errors.New("meridian: invalid routed subscription identity")
+			return nil, errors.New("glivela: invalid routed subscription identity")
 		}
 		for _, value := range proxies {
 			candidate := value.(map[string]any)
 			if candidate["type"] == proxyType && candidate[credentialField] == routed.User.Username() {
-				return nil, errors.New("meridian: duplicated routed subscription identity")
+				return nil, errors.New("glivela: duplicated routed subscription identity")
 			}
 		}
 		name := routeName(item)
@@ -323,7 +323,7 @@ func composeMihomo(native []byte, accountID string, mode PublishingMode, routes 
 			for _, member := range members {
 				name, ok := member.(string)
 				if !ok {
-					return nil, errors.New("meridian: invalid native group member")
+					return nil, errors.New("glivela: invalid native group member")
 				}
 				if replacement := replacements[name]; len(replacement) > 0 {
 					updated = append(updated, replacement...)
@@ -366,17 +366,17 @@ func composeMihomo(native []byte, accountID string, mode PublishingMode, routes 
 	config["proxies"], config["proxy-groups"] = proxies, groups
 	output, err := yaml.Marshal(config)
 	if err != nil {
-		return nil, errors.New("meridian: cannot encode Mihomo subscription")
+		return nil, errors.New("glivela: cannot encode Mihomo subscription")
 	}
 	return output, nil
 }
 
 func validatePublishedRouteScope(item PublishedRoute, accountID string) error {
 	if item.EgressNameSuffix != "" && (!validDisplayName(item.EgressNameSuffix) || strings.ContainsAny(item.EgressNameSuffix, "|｜")) {
-		return errors.New("meridian: invalid landing name suffix")
+		return errors.New("glivela: invalid landing name suffix")
 	}
 	if item.Grant.Validate() != nil || item.Grant.AccountID != accountID || item.Protocol != VLESSReality || !ValidIdentity(item.BaseProtocolIdentity) || !ValidIdentity(item.RouteProtocolIdentity) || !validDisplayName(item.EntryName) || item.EgressRegionPrefix != "" && (!validDisplayName(item.EgressRegionPrefix) || strings.ContainsAny(item.EgressRegionPrefix, "|｜")) {
-		return errors.New("meridian: published route scope does not match")
+		return errors.New("glivela: published route scope does not match")
 	}
 	return nil
 }
@@ -384,14 +384,14 @@ func validatePublishedRouteScope(item PublishedRoute, accountID string) error {
 func validatePublishedRouteLinks(item PublishedRoute) error {
 	base, err := parseVLESSLink(item.BaseLink)
 	if err != nil || protocolLinkIdentity(base, VLESSReality) != item.BaseProtocolIdentity {
-		return errors.New("meridian: native credential changed")
+		return errors.New("glivela: native credential changed")
 	}
 	routed, err := parseVLESSLink(item.RouteLink)
 	if err != nil || protocolLinkIdentity(routed, VLESSReality) != item.RouteProtocolIdentity {
-		return errors.New("meridian: routed credential changed")
+		return errors.New("glivela: routed credential changed")
 	}
 	if item.BaseProtocolIdentity != item.Grant.Base.Identity || item.RouteProtocolIdentity != item.Grant.Route.Identity {
-		return errors.New("meridian: VLESS route credential changed")
+		return errors.New("glivela: VLESS route credential changed")
 	}
 	return nil
 }

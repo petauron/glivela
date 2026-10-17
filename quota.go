@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import (
 	"errors"
@@ -30,14 +30,14 @@ type QuotaProjection struct {
 // credentials, which would duplicate the plan or rewrite Xray on every sample.
 func ProjectQuota(plan AccountPlan, members []UsageMember) (QuotaProjection, error) {
 	if plan.Validate() != nil || len(members) == 0 || len(members) > 1024 {
-		return QuotaProjection{}, errors.New("meridian: invalid shared quota")
+		return QuotaProjection{}, errors.New("glivela: invalid shared quota")
 	}
 	ordered := slices.Clone(members)
 	slices.SortFunc(ordered, func(a, b UsageMember) int { return strings.Compare(a.CredentialID, b.CredentialID) })
 	var used int64
 	for index, member := range ordered {
 		if !ValidIdentifier(member.CredentialID) || index > 0 && member.CredentialID == ordered[index-1].CredentialID || member.Baseline < 0 || member.Observed < member.Baseline || member.Observed-member.Baseline > math.MaxInt64-used {
-			return QuotaProjection{}, errors.New("meridian: invalid usage watermark")
+			return QuotaProjection{}, errors.New("glivela: invalid usage watermark")
 		}
 		used += member.Observed - member.Baseline
 	}
@@ -54,7 +54,7 @@ func ObserveUsage(members []UsageMember, counters map[string]int64) ([]UsageMemb
 	for index, member := range result {
 		value, ok := counters[member.CredentialID]
 		if !ok || value < member.Observed {
-			return nil, errors.New("meridian: usage counters changed or are incomplete")
+			return nil, errors.New("glivela: usage counters changed or are incomplete")
 		}
 		result[index].Observed = value
 	}

@@ -6,10 +6,9 @@ the monitoring product.
 
 ## Stable installation identity
 
-The following are permanent machine contracts, not old implementations or
-runtime aliases: the Go package name `meridian`, catalog ID `meridian`,
-capability `meridian-runtime`, `/api/v1/meridian` routes, persisted
-field names, and `ui-meridian-<version>` signed asset names. Changing a display
+The catalog ID `meridian`, capability `meridian-runtime`, `/api/v1/meridian`
+routes and persisted field names identify existing installations and records.
+They are not reasons to retain obsolete source implementations. Changing a
 name must not create new accounts, subscriptions, credentials or installations.
 There is one implementation and one set of endpoints. Do not introduce a second
 `glivela` application ID, shadow database or fallback API.
@@ -17,7 +16,9 @@ There is one implementation and one set of endpoints. Do not introduce a second
 ## Canonical source identity
 
 The source repository is `petauron/glivela` and the Go module path is
-`github.com/petauron/glivela`. Consumers must update their imports and pin a
+`github.com/petauron/glivela`, with Go package name `glivela`. React components,
+source directories, CSS classes and diagnostics use Glivela as well. Consumers
+must update their imports and pin a
 commit containing the new module declaration (or a later reviewed release).
 Do not add an old-path module alias or `replace` fallback. A pinned pseudo-version
 can integrate the source migration without publishing a version or catalog.
@@ -25,8 +26,18 @@ can integrate the source migration without publishing a version or catalog.
 The rename preserves Git history, tags, issues and PRs. Historical tags still
 contain their original module declaration; do not move them or republish old
 assets under the new identity. The catalog's existing UI source SHA and signed
-asset names remain unchanged until a separately reviewed UI release. Release
-Please keeps its existing component key `meridian` and version history.
+asset names remain unchanged. New builds emit `ui-glivela-<version>` assets;
+the paired catalog change binds versions after alpha.21 to that name. Release
+Please uses the `glivela` package name while retaining the root manifest key,
+tag format and version history.
+
+Route-user and outbound-tag derivations retain their original byte values:
+they connect deployed Xray counters and grants to the existing quota ledger.
+Renaming those values without a coordinated ledger migration would reset the
+accounting baseline. Published signed asset names remain immutable. Upgrade the
+paired catalog library in Center before publishing the first canonical UI;
+the protected publication workflow must then pin the released Glivela source
+and matching Center dependency. It must not publish this PR under alpha.21.
 
 ## Release and managed upgrade
 

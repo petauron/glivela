@@ -1,4 +1,4 @@
-package meridian
+package glivela
 
 import (
 	"errors"
@@ -19,10 +19,10 @@ func (p ProtocolKind) Valid() bool { return p == VLESSReality || p == Hysteria2 
 func parseVLESSLink(raw string) (*url.URL, error) {
 	link, err := url.Parse(raw)
 	if err != nil || link.Scheme != "vless" || link.User == nil || link.User.Username() == "" || link.Hostname() == "" || link.Port() == "" || link.Query().Get("security") != "reality" || link.Path != "" {
-		return nil, errors.New("meridian: a managed VLESS REALITY link is required")
+		return nil, errors.New("glivela: a managed VLESS REALITY link is required")
 	}
 	if _, password := link.User.Password(); password {
-		return nil, errors.New("meridian: invalid VLESS identity")
+		return nil, errors.New("glivela: invalid VLESS identity")
 	}
 	return link, nil
 }
@@ -30,14 +30,14 @@ func parseVLESSLink(raw string) (*url.URL, error) {
 func parseHysteria2Link(raw string) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Scheme != "hysteria2" && parsed.Scheme != "hy2" || parsed.User == nil || parsed.User.Username() == "" || parsed.Hostname() == "" || parsed.Port() == "" || parsed.Query().Get("sni") == "" || parsed.Query().Get("alpn") != "h3" || parsed.Query().Has("insecure") {
-		return nil, errors.New("meridian: a managed Hysteria2 link is required")
+		return nil, errors.New("glivela: a managed Hysteria2 link is required")
 	}
 	if _, password := parsed.User.Password(); password {
-		return nil, errors.New("meridian: invalid Hysteria2 identity")
+		return nil, errors.New("glivela: invalid Hysteria2 identity")
 	}
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil || !validPort(port) {
-		return nil, errors.New("meridian: invalid Hysteria2 port")
+		return nil, errors.New("glivela: invalid Hysteria2 port")
 	}
 	parsed.Scheme = "hysteria2"
 	return parsed, nil
@@ -50,7 +50,7 @@ func parseProtocolLink(raw string, protocol ProtocolKind) (*url.URL, error) {
 	case Hysteria2:
 		return parseHysteria2Link(raw)
 	default:
-		return nil, errors.New("meridian: unsupported subscription protocol")
+		return nil, errors.New("glivela: unsupported subscription protocol")
 	}
 }
 

@@ -19,12 +19,12 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CopyButton, StateBadge, TechnicalError, copy, userError } from "@/views/shared";
 import { RegionCombobox, regionBaseName } from "@/views/RegionCombobox";
-import { MeridianRoutes } from "./Routes";
+import { GlivelaRoutes } from "./Routes";
 import { SourceRecovery } from "./SourceRecovery";
 
 const gibibyte = 1024 ** 3;
 
-export function MeridianManagerSheet({ application, data, language, mutate, onClose }: { application: Application | null; data: AppData; language: Language; mutate: Mutate; onClose: () => void }) {
+export function GlivelaManagerSheet({ application, data, language, mutate, onClose }: { application: Application | null; data: AppData; language: Language; mutate: Mutate; onClose: () => void }) {
   const [tab, setTab] = useState("overview");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -69,7 +69,7 @@ export function MeridianManagerSheet({ application, data, language, mutate, onCl
           {inventory.cutover.lastError ? <Alert className="mb-4" variant="destructive"><ShieldAlertIcon /><AlertTitle>{copy(language, "迁移需要处理", "Migration needs attention")}</AlertTitle><AlertDescription>{inventory.cutover.lastError}</AlertDescription></Alert> : null}
           <TabsContent value="overview"><div className="flex flex-col gap-4">{inventory.cutover.state === "complete" ? <details><summary className="cursor-pointer text-sm text-muted-foreground">{copy(language, "迁移记录", "Migration history")}</summary><CutoverPanel cutover={inventory.cutover} language={language} busy={busy} error={error} onRun={run} /></details> : <CutoverPanel cutover={inventory.cutover} language={language} busy={busy} error={error} onRun={run} />}{managementReady || endpoint?.status === "failed" ? <EndpointPanel application={application} endpoint={endpoint} publication={endpointPublication} language={language} busy={busy} error={error} onRun={run} /> : null}</div></TabsContent>
           <TabsContent value="accounts"><AccountsPanel created={created} data={data} language={language} busy={busy} error={error} onCreated={setCreated} onRun={run} /></TabsContent>
-          <TabsContent value="routes"><MeridianRoutes key={endpoint?.id ?? "all"} data={data} endpointId={endpoint?.id} language={language} mutate={mutate} /></TabsContent>
+          <TabsContent value="routes"><GlivelaRoutes key={endpoint?.id ?? "all"} data={data} endpointId={endpoint?.id} language={language} mutate={mutate} /></TabsContent>
         </div>
       </Tabs>
       <SheetFooter><Button onClick={onClose}>{copy(language, "关闭", "Close")}</Button></SheetFooter>

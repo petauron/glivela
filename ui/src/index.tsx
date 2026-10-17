@@ -4,32 +4,32 @@ import type { AppWorkspaceProps } from "@/app-workspaces/types";
 import type { AppManagerProps } from "@/app-workspaces/types";
 import { IPQualityProvider } from "@/views/IPQuality";
 import { LandingProvider } from "@/views/LandingControls";
-import { MeridianWorkspace } from "./meridian/Workspace";
-import { MeridianManagerSheet } from "./meridian/Manager";
+import { GlivelaWorkspace } from "./glivela/Workspace";
+import { GlivelaManagerSheet } from "./glivela/Manager";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 import "./style.css";
 
 export const apiVersion = 1;
 
-type MeridianHostProps = AppWorkspaceProps & {
+type GlivelaHostProps = AppWorkspaceProps & {
   managerApplication?: Application | null;
   onManagerClose?: () => void;
 };
 
 // The app bundle owns the React tree. Center passes platform data and actions,
 // but does not import or compile Glivela's page components.
-export function mount(element: HTMLElement, initial: MeridianHostProps) {
+export function mount(element: HTMLElement, initial: GlivelaHostProps) {
   const root = createRoot(element);
   let props = initial;
   let localManager: Application | null = null;
   const render = () => root.render(
     <AppErrorBoundary language={props.language}><IPQualityProvider enabled agents={props.data.agents}>
       <LandingProvider enabled agents={props.data.agents}>
-        <MeridianWorkspace {...props} onClients={(application) => {
+        <GlivelaWorkspace {...props} onClients={(application) => {
           localManager = application;
           render();
         }} />
-        <MeridianManagerSheet
+        <GlivelaManagerSheet
           application={props.managerApplication ?? localManager}
           data={props.data}
           language={props.language}
@@ -46,7 +46,7 @@ export function mount(element: HTMLElement, initial: MeridianHostProps) {
   );
   render();
   return {
-    update(next: MeridianHostProps) {
+    update(next: GlivelaHostProps) {
       props = next;
       render();
     },
@@ -61,7 +61,7 @@ export function mountManager(element: HTMLElement, initial: AppManagerProps) {
   let props = initial;
   const render = () => root.render(
     <AppErrorBoundary language={props.language}><LandingProvider enabled agents={props.data.agents}>
-      <MeridianManagerSheet {...props} />
+      <GlivelaManagerSheet {...props} />
     </LandingProvider></AppErrorBoundary>,
   );
   render();
