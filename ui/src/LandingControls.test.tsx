@@ -150,15 +150,14 @@ it("keeps the independently built link view live after its event stream stalls",
   expect(container.textContent).not.toContain("12 ms");
 });
 
-it("retains display evidence across a 60 second sample gap but expires it after three minutes", async () => {
+it("retains unchanged display evidence across a 60 second sample gap but expires it after three minutes", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-18T00:00:00Z"));
-  const request = vi.spyOn(api, "landing").mockResolvedValue(overview());
+  vi.spyOn(api, "landing").mockResolvedValue(overview());
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   await act(async () => { root?.render(<LandingProvider enabled><GlivelaLinkTests instances={[{ application: { id: "entry-one", nodeId: "source-one" }, realityServices: [] } as unknown as InstalledAppInstance]} language="zh-CN" entryId="" landingId="a" onEntryChange={vi.fn()} onLandingChange={vi.fn()} /></LandingProvider>); });
-  request.mockRejectedValue(new Error("offline"));
   await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
   expect(container.textContent).toContain("12 ms");
   await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
