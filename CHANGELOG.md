@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.0-alpha.22](https://github.com/petauron/glivela/compare/v0.1.0-alpha.21...v0.1.0-alpha.22) (2026-10-17)
+
+
+### Bug Fixes
+
+* **glivela:** complete canonical source and UI artifact naming ([fb82981](https://github.com/petauron/glivela/commit/fb829816747807e8a3f77030c2e475583b2f4a08))
+* **glivela:** migrate source and UI naming while preserving runtime identities ([#48](https://github.com/petauron/glivela/issues/48)) ([1ea7a12](https://github.com/petauron/glivela/commit/1ea7a12d24631c44bdf8d7960d51b717f893e006))
+* **senulun:** pin canonical monitoring UI integration ([9c152e6](https://github.com/petauron/glivela/commit/9c152e64e1c1b162349e4aa442a79f21947122ce))
+* **ui:** verify the reviewed centered Sheet layout after source pin update ([1de6932](https://github.com/petauron/glivela/commit/1de6932f0ffb6619e0eee29adc040afbdedb5233))
+
 ## [0.1.0-alpha.21](https://github.com/petauron/glivela/compare/v0.1.0-alpha.20...v0.1.0-alpha.21) (2026-10-17)
 
 
