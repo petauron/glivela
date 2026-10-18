@@ -376,4 +376,32 @@ func TestRealLegacyAccountStagingFixture(t *testing.T) {
 	if len(got.Plan.Accounts) != 2 || credentials != 3 || routes != 1 {
 		t.Fatal("incomplete real legacy inventory")
 	}
+	// Exercise the runtime controller's own loader, not only the offline
+	// staging reader. No source database or transfer key enters the controller.
+	controllerDir := filepath.Join(dir, "controller")
+	unlock, err := control.LockDirectory(controllerDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	controller, err := control.OpenStore(filepath.Join(controllerDir, "nodes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.LoadBusiness(filepath.Join(dir, "storage.key")); err != nil {
+		t.Fatal(err)
+	}
+	view := controller.Business()
+	if view.State != "awaiting-handover" || view.SnapshotID != id || len(view.Accounts) != 2 || len(view.Endpoints) != 1 {
+		t.Fatal("real source checkpoint did not reach owned controller inventory")
+	}
+	for i, item := range view.Accounts {
+		if item.Account != got.Plan.Accounts[i].Account || !reflect.DeepEqual(item.Usage, got.Plan.Accounts[i].Usage) || item.Schedule != got.ResetSchedules[item.Account.ID] {
+			t.Fatal("runtime loading changed source account or ledger")
+		}
+	}
+	rawView, err := json.Marshal(view)
+	if err != nil || !bytes.Contains(rawView, []byte(`"totalBytes":"9007199254740993"`)) || bytes.Contains(rawView, []byte("retainedSource")) || bytes.Contains(rawView, []byte("protocolSecrets")) {
+		t.Fatal("runtime view lost precision or disclosed migration secrets")
+	}
 }

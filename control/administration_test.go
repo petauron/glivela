@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,10 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 	landingIdentity, landingCert, _ := identity(t, ca, key, false)
 	roots := x509.NewCertPool()
 	roots.AddCert(ca)
-	s := store(t)
+	s, businessKey, _ := stagedBusinessStore(t)
+	if err := s.LoadBusiness(businessKey); err != nil {
+		t.Fatal(err)
+	}
 	d := artifact(1)
 	landingCertificate := CertificateID(landingCert)
 	server, err := NewServer("127.0.0.1:0", s, serverIdentity, roots, []string{CertificateID(adminCert)})
@@ -57,6 +61,27 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 		return response
 	}
 	enrollment := map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": d.Landing, "routeEntries": map[string]RouteEntry{"entry-a": {CertificateID: CertificateID(entryCert), Address: "100.64.0.3"}}}
+	post(entryHTTP, "/v1/admin/business", map[string]any{}, http.StatusForbidden)
+	post(admin, "/v1/admin/business", map[string]any{"activate": true}, http.StatusBadRequest)
+	businessResponse := post(admin, "/v1/admin/business", map[string]any{}, http.StatusOK)
+	businessRaw, err := io.ReadAll(businessResponse.Body)
+	businessResponse.Body.Close()
+	var business struct {
+		State    string
+		Accounts []struct {
+			Account struct{ ID string }
+			Usage   []struct {
+				Baseline string
+				Observed string
+			}
+		}
+	}
+	if err != nil || json.Unmarshal(businessRaw, &business) != nil || business.State != "awaiting-handover" || len(business.Accounts) != 1 || business.Accounts[0].Account.ID != "account-example" || len(business.Accounts[0].Usage) != 1 || business.Accounts[0].Usage[0].Observed != "5000" || businessResponse.Header.Get("Cache-Control") != "no-store" {
+		t.Fatal("private business inventory unavailable through own management channel", err)
+	}
+	if bytes.Contains(businessRaw, []byte("example-token")) || bytes.Contains(businessRaw, []byte("synthetic-private-key")) {
+		t.Fatal("management channel leaked credentials")
+	}
 	post(entryHTTP, "/v1/admin/landings", enrollment, http.StatusForbidden)
 	response := post(admin, "/v1/admin/landings", enrollment, http.StatusAccepted)
 	var revision struct {

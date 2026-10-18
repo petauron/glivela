@@ -26,11 +26,14 @@ type Node struct {
 
 // Store is a bounded single-process state file for the MVP. Callers must run
 // one controller per directory; it is not a multi-writer database protocol.
-// No private keys are stored here. Configuration files remain private (0600).
+// The node JSON file contains no private keys. Business import material is
+// stored separately under authenticated encryption and loaded only in memory.
+// Configuration files remain private (0600).
 type Store struct {
-	mu    sync.Mutex
-	path  string
-	nodes map[string]Node
+	mu       sync.Mutex
+	path     string
+	nodes    map[string]Node
+	business *businessState
 }
 
 func OpenStore(path string) (*Store, error) {

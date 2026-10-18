@@ -32,6 +32,7 @@ type configuration struct {
 	Listen         string                `json:"listen,omitempty"`
 	Controller     string                `json:"controller,omitempty"`
 	Administrators []string              `json:"administrators,omitempty"`
+	BusinessKey    string                `json:"businessKey,omitempty"`
 	Xray           control.SystemdDriver `json:"xray,omitempty"`
 }
 
@@ -85,6 +86,9 @@ func readConfiguration(path string) (configuration, error) {
 	var extra any
 	if decoder.Decode(&extra) != io.EOF || cfg.Mode != "controller" && cfg.Mode != "node" && cfg.Mode != "verifier" {
 		return cfg, errors.New("invalid bootstrap mode")
+	}
+	if cfg.Mode != "controller" && cfg.BusinessKey != "" {
+		return cfg, errors.New("only controller may load business data")
 	}
 	return cfg, nil
 }
@@ -169,6 +173,9 @@ func run(ctx context.Context, path string) error {
 	}
 	store, err := control.OpenStore(filepath.Join(cfg.Directory, "nodes.json"))
 	if err != nil {
+		return err
+	}
+	if err := store.LoadBusiness(cfg.BusinessKey); err != nil {
 		return err
 	}
 	server, err := control.NewServer(cfg.Listen, store, identity, roots, cfg.Administrators)

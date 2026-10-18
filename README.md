@@ -27,6 +27,26 @@ leaf-certificate fingerprints. It does not contain node business state. Existing
 `nodes.json` remains authoritative across restarts; the obsolete bootstrap
 `nodes` field is rejected, not replayed over managed updates.
 
+For a staged legacy import, controller bootstrap must also reference its
+independent raw 32-byte storage key using `businessKey` (an absolute private
+file path, never the key contents). Controller startup decrypts and validates
+the complete `business.pending.json` under the existing directory lease before
+opening its listener. A missing/wrong/unsafe key or corrupt checkpoint aborts
+startup instead of creating an empty inventory. Node and verifier bootstraps
+cannot select a business key. With no checkpoint and no key, a new controller
+starts empty. Loading does not rewrite the checkpoint or activate subscriptions.
+
+An enrolled administrator can POST `{}` to `/v1/admin/business` on the same
+private mTLS listener to inspect the original accounts, reset schedules, quota
+watermarks, directional counters and endpoint/node bindings. This detached view
+excludes protocol secrets, subscription tokens, private keys and the raw source
+archive. 64-bit quota, revision and traffic values use decimal strings in this
+API to avoid browser-number rounding; persisted typed values remain unchanged.
+Imported data remains `awaiting-handover`: historical status and successful
+decryption do not prove that the old business writer is fenced, that final usage
+is reconciled, or that all routes passed. This read-only slice is not the complete
+business UI/API replacement or permission to clear migration/health alerts.
+
 On the same private mTLS listener, a separately authorized management identity
 can POST `/v1/admin/landings` with `id`, `certificateId`, `plan` and
 `routeEntries` (entry ID to `{certificateId,address}`). A configured entry

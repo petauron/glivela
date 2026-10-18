@@ -27,6 +27,27 @@ func TestBootstrapCannotOverwriteManagedBusinessState(t *testing.T) {
 	}
 }
 
+func TestBusinessKeyIsControllerStorageSettingOnly(t *testing.T) {
+	for _, mode := range []string{"controller", "node", "verifier"} {
+		path := filepath.Join(t.TempDir(), "bootstrap.json")
+		raw, err := json.Marshal(configuration{Mode: mode, BusinessKey: "/private/example/business.key"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := readConfiguration(path)
+		if mode == "controller" {
+			if err != nil || cfg.BusinessKey != "/private/example/business.key" {
+				t.Fatal("controller storage key reference lost", err)
+			}
+		} else if err == nil {
+			t.Fatal("node/verifier accepted controller business key")
+		}
+	}
+}
+
 func TestBootstrapFailsClosed(t *testing.T) {
 	for _, body := range []string{`{}`, `{"mode":"arbitrary"}`, `{"mode":"node","unknown":true}`, `{"mode":"node"} {}`} {
 		path := filepath.Join(t.TempDir(), "bootstrap.json")

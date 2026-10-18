@@ -66,6 +66,19 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/admin/business":
+			var request struct{}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil {
+				http.Error(w, "invalid business inventory request", http.StatusBadRequest)
+				return
+			}
+			raw, err := json.Marshal(store.Business())
+			if err != nil || len(raw) > maxMessage {
+				http.Error(w, "business inventory unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
 		case "/v1/admin/landings":
 			var request struct {
 				ID            string                `json:"id"`
