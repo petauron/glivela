@@ -12,6 +12,7 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 type RouteCheck struct {
@@ -24,6 +25,13 @@ type RouteCheck struct {
 
 func runtimeFresh(node Node, now time.Time) bool {
 	return node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, *node.Receipt) == nil && !node.ReportedAt.IsZero() && !node.ReportedAt.After(now) && now.Sub(node.ReportedAt) <= time.Minute
+}
+
+func routeTargetsLanding(p RouteProbe, node Node) bool {
+	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)
+	address, addressErr := netip.ParseAddr(node.Desired.Landing.Address)
+	return err == nil && addressErr == nil && endpoint.Addr() == address && endpoint.Port() == landing.SOCKSPort &&
+		p.LandingID == node.ID && p.Revision == node.Desired.Revision && p.ConfigSHA256 == node.Desired.ConfigSHA256
 }
 
 // AssignRouteChecks atomically fixes the complete entry inventory for one
@@ -59,6 +67,11 @@ func (s *Store) AssignRouteChecks(assignments []RouteCheck) error {
 		}
 		if node.Desired.Revision != request.Revision || node.Desired.ConfigSHA256 != request.ConfigSHA256 {
 			return errors.New("control: route assignment is stale")
+		}
+		for _, check := range checks {
+			if !routeTargetsLanding(check.Request, node) {
+				return errors.New("control: route endpoint differs from assigned landing")
+			}
 		}
 		if !runtimeFresh(node, time.Now().UTC()) {
 			return errors.New("control: applied runtime proof required before route check")
@@ -111,7 +124,7 @@ func (s *Store) RouteExchange(ctx context.Context, certificate string, report *R
 				continue
 			}
 			check, ok := node.Checks[report.EntryID]
-			if !ok || check.CertificateID != certificate || validateRouteResult(check.Request, *report) != nil || node.Desired.Revision != report.Revision || node.Desired.ConfigSHA256 != report.ConfigSHA256 {
+			if !ok || check.CertificateID != certificate || !routeTargetsLanding(check.Request, node) || validateRouteResult(check.Request, *report) != nil || node.Desired.Revision != report.Revision || node.Desired.ConfigSHA256 != report.ConfigSHA256 {
 				return nil, errors.New("control: route report refused")
 			}
 			if check.Result != nil {
@@ -150,7 +163,7 @@ func (s *Store) RouteExchange(ctx context.Context, certificate string, report *R
 			continue
 		}
 		for _, check := range node.Checks {
-			if check.CertificateID == certificate && check.Result == nil && now.Sub(check.IssuedAt) <= 5*time.Minute && check.Request.Revision == node.Desired.Revision && check.Request.ConfigSHA256 == node.Desired.ConfigSHA256 {
+			if check.CertificateID == certificate && check.Result == nil && now.Sub(check.IssuedAt) <= 5*time.Minute && routeTargetsLanding(check.Request, node) {
 				pending = append(pending, check.Request)
 			}
 		}

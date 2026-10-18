@@ -40,7 +40,7 @@ func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint6
 			return status, nil
 		}
 		for _, check := range node.Checks {
-			if check.Request.SnapshotID != snapshotID || check.Request.Revision != revision || check.Request.ConfigSHA256 != digest || check.Result == nil {
+			if !routeTargetsLanding(check.Request, node) || check.Request.SnapshotID != snapshotID || check.Request.Revision != revision || check.Request.ConfigSHA256 != digest || check.Result == nil {
 				status.Reason = "routes-incomplete"
 				return status, nil
 			}

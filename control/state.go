@@ -72,7 +72,7 @@ func OpenStore(path string) (*Store, error) {
 			return nil, errors.New("control: invalid stored receipt")
 		}
 		for entry, check := range node.Checks {
-			if entry != check.Request.EntryID || check.Request.LandingID != node.ID || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
+			if entry != check.Request.EntryID || !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
 				return nil, errors.New("control: invalid stored route check")
 			}
 			if len(node.Checks) > 64 || check.Request.Revision != node.Desired.Revision || check.Request.ConfigSHA256 != node.Desired.ConfigSHA256 || (check.Result == nil) != check.ReceivedAt.IsZero() {
