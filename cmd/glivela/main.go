@@ -90,6 +90,10 @@ func run(ctx context.Context, path string) error {
 		if len(cfg.Nodes) != 0 || cfg.Listen != "" {
 			return errors.New("node cannot enroll peers or listen")
 		}
+		cfg.Xray, err = cfg.Xray.ResolveWorker()
+		if err != nil {
+			return err
+		}
 		client, err := control.NewClient(cfg.Controller, identity, roots)
 		if err != nil {
 			return err

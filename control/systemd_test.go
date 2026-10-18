@@ -1,6 +1,11 @@
 package control
 
-import "testing"
+import (
+	"encoding/json"
+	"os/user"
+	"strings"
+	"testing"
+)
 
 func TestSystemdInstallationIdentityIsExplicitAndScoped(t *testing.T) {
 	d := SystemdDriver{Unit: "example-app-worker.service", WorkerUser: "example-worker", WorkerUID: 1234, Interface: "mesh0"}
@@ -16,7 +21,6 @@ func TestSystemdInstallationIdentityIsExplicitAndScoped(t *testing.T) {
 		func(d *SystemdDriver) { d.Unit = "worker.service\n" },
 		func(d *SystemdDriver) { d.WorkerUser = "root" },
 		func(d *SystemdDriver) { d.WorkerUser = "" },
-		func(d *SystemdDriver) { d.WorkerUID = 0 },
 	} {
 		bad := d
 		change(&bad)
@@ -35,5 +39,33 @@ func TestSystemdInstallationIdentityIsExplicitAndScoped(t *testing.T) {
 		if other.Binding() == d.Binding() {
 			t.Fatal("ownership change would silently reuse runtime journal")
 		}
+	}
+}
+
+func TestSystemdWorkerUIDComesFromLocalAccount(t *testing.T) {
+	d := SystemdDriver{Unit: "example-worker.service", WorkerUser: "example-worker"}
+	resolved, err := d.bindWorker(&user.User{Username: d.WorkerUser, Uid: "1234", Gid: "1234"})
+	if err != nil || resolved.WorkerUID != 1234 {
+		t.Fatal("local account identity not bound", err)
+	}
+	for _, worker := range []*user.User{
+		nil,
+		{Username: "other", Uid: "1234", Gid: "1234"},
+		{Username: d.WorkerUser, Uid: "0", Gid: "1234"},
+		{Username: d.WorkerUser, Uid: "1234", Gid: "0"},
+		{Username: d.WorkerUser, Uid: "4294967296", Gid: "1234"},
+	} {
+		if _, err := d.bindWorker(worker); err == nil {
+			t.Fatal("invalid account accepted")
+		}
+	}
+	raw, err := json.Marshal(resolved)
+	if err != nil || strings.Contains(string(raw), "workerUid") {
+		t.Fatal("allocated UID leaked into bootstrap configuration", err)
+	}
+	decoder := json.NewDecoder(strings.NewReader(`{"workerUid":1234}`))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&d) == nil {
+		t.Fatal("bootstrap may not override the local UID")
 	}
 }

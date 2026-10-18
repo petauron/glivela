@@ -33,7 +33,7 @@ type SystemdDriver struct {
 	UnitSHA256   string `json:"unitSha256"`
 	Unit         string `json:"unit"`
 	WorkerUser   string `json:"workerUser"`
-	WorkerUID    uint32 `json:"workerUid"`
+	WorkerUID    uint32 `json:"-"`
 	Interface    string `json:"interface"`
 }
 
@@ -57,10 +57,37 @@ func (d SystemdDriver) installationNames() (string, error) {
 		return true
 	}
 	if !strings.HasSuffix(d.Unit, ".service") || !valid(strings.TrimSuffix(d.Unit, ".service")) ||
-		!valid(d.WorkerUser) || len(d.WorkerUser) > 32 || d.WorkerUser == "root" || d.WorkerUID == 0 {
+		!valid(d.WorkerUser) || len(d.WorkerUser) > 32 || d.WorkerUser == "root" {
 		return "", errors.New("control: explicit dedicated service and worker identity required")
 	}
 	return filepath.Join("/etc/systemd/system", d.Unit), nil
+}
+
+// ResolveWorker binds the installation-provided account name to the local UID.
+// The UID is not a catalog input: useradd allocates it on each host. Persisted
+// runtime journals still reject an identity change on subsequent starts.
+func (d SystemdDriver) ResolveWorker() (SystemdDriver, error) {
+	if _, err := d.installationNames(); err != nil {
+		return SystemdDriver{}, err
+	}
+	worker, err := user.Lookup(d.WorkerUser)
+	if err != nil {
+		return SystemdDriver{}, errors.New("control: dedicated worker account unavailable")
+	}
+	return d.bindWorker(worker)
+}
+
+func (d SystemdDriver) bindWorker(worker *user.User) (SystemdDriver, error) {
+	if worker == nil || worker.Username != d.WorkerUser {
+		return SystemdDriver{}, errors.New("control: dedicated worker account differs")
+	}
+	uid, err := strconv.ParseUint(worker.Uid, 10, 32)
+	gid, groupErr := strconv.ParseUint(worker.Gid, 10, 32)
+	if err != nil || groupErr != nil || uid == 0 || gid == 0 {
+		return SystemdDriver{}, errors.New("control: dedicated worker cannot use root identity")
+	}
+	d.WorkerUID = uint32(uid)
+	return d, nil
 }
 
 func verifyExecutableFile(path, expected string) error {
@@ -103,6 +130,9 @@ func (d SystemdDriver) Validate(ctx context.Context, config string) error {
 }
 
 func (d SystemdDriver) service(ctx context.Context, action string) error {
+	if d.WorkerUID == 0 {
+		return errors.New("control: worker identity has not been resolved")
+	}
 	unitPath, err := d.installationNames()
 	if err != nil {
 		return err
