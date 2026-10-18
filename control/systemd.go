@@ -143,6 +143,17 @@ func (d SystemdDriver) service(ctx context.Context, action string) error {
 	if err := verifyExecutableFile(unitPath, d.UnitSHA256); err != nil {
 		return err
 	}
+	// A matching file on disk is insufficient if systemd still has an older
+	// definition loaded, an alias resolves elsewhere, or a drop-in overrides
+	// the owned unit. Never reload the daemon here: the generic installer owns
+	// that lifecycle step, and unknown host state must fail closed.
+	inspection, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(inspection, "/usr/bin/systemctl", "show", d.Unit,
+		"--property=LoadState,FragmentPath,DropInPaths,NeedDaemonReload,User").Output()
+	if err != nil || !d.loadedUnitMatches(string(raw)) {
+		return errors.New("control: loaded Xray service differs from owned installation")
+	}
 	// Health polling must not rehash a multi-megabyte binary every cycle.
 	// Validate/activation verify it before use; a health poll runs systemctl.
 	if action != "is-active" {
@@ -154,6 +165,27 @@ func (d SystemdDriver) service(ctx context.Context, action string) error {
 		return errors.New("control: Xray service operation failed")
 	}
 	return nil
+}
+
+func (d SystemdDriver) loadedUnitMatches(raw string) bool {
+	path, err := d.installationNames()
+	if err != nil {
+		return false
+	}
+	want := map[string]string{
+		"LoadState": "loaded", "FragmentPath": path, "DropInPaths": "",
+		"NeedDaemonReload": "no", "User": d.WorkerUser,
+	}
+	seen := make(map[string]bool, len(want))
+	for _, line := range strings.Split(strings.TrimSuffix(raw, "\n"), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		expected, known := want[key]
+		if !ok || !known || seen[key] || value != expected {
+			return false
+		}
+		seen[key] = true
+	}
+	return len(seen) == len(want)
 }
 func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 	if err := desired.Validate(); err != nil {

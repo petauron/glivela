@@ -69,3 +69,29 @@ func TestSystemdWorkerUIDComesFromLocalAccount(t *testing.T) {
 		t.Fatal("bootstrap may not override the local UID")
 	}
 }
+
+func TestSystemdLoadedUnitMustMatchOwnedInstallation(t *testing.T) {
+	d := SystemdDriver{Unit: "example-worker.service", WorkerUser: "example-worker"}
+	raw := "LoadState=loaded\nFragmentPath=/etc/systemd/system/example-worker.service\nDropInPaths=\nNeedDaemonReload=no\nUser=example-worker\n"
+	if !d.loadedUnitMatches(raw) || !d.loadedUnitMatches(strings.TrimSuffix(raw, "\n")) {
+		t.Fatal("matching loaded unit refused")
+	}
+	for name, value := range map[string]string{
+		"not loaded":    strings.Replace(raw, "LoadState=loaded", "LoadState=not-found", 1),
+		"alias":         strings.Replace(raw, "/etc/systemd/system/example-worker.service", "/usr/lib/systemd/system/other.service", 1),
+		"override":      strings.Replace(raw, "DropInPaths=", "DropInPaths=/etc/systemd/system/example-worker.service.d/override.conf", 1),
+		"stale":         strings.Replace(raw, "NeedDaemonReload=no", "NeedDaemonReload=yes", 1),
+		"root":          strings.Replace(raw, "User=example-worker", "User=root", 1),
+		"implicit root": strings.Replace(raw, "User=example-worker", "User=", 1),
+		"missing user":  strings.Replace(raw, "User=example-worker\n", "", 1),
+		"duplicate":     raw + "LoadState=loaded\n",
+		"unknown":       raw + "Unexpected=value\n",
+		"empty":         "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if d.loadedUnitMatches(value) {
+				t.Fatal("unverified loaded identity accepted")
+			}
+		})
+	}
+}
