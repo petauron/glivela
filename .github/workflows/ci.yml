@@ -14,6 +14,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  native-package:
+    name: Native runtime distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build twice and compare immutable distributions
+        run: |
+          sh scripts/build-native-release.sh "$RUNNER_TEMP/native-first"
+          sh scripts/build-native-release.sh "$RUNNER_TEMP/native-second"
+          diff -r "$RUNNER_TEMP/native-first" "$RUNNER_TEMP/native-second"
+          cd "$RUNNER_TEMP/native-first"
+          sha256sum --check SHA256SUMS
+      - name: Exercise bundled official core over verified TLS
+        run: |
+          version=$(jq -er '.["."]' .release-please-manifest.json)
+          mkdir "$RUNNER_TEMP/native-runtime"
+          tar -xzf "$RUNNER_TEMP/native-first/glivela-$version-linux-amd64.tar.gz" -C "$RUNNER_TEMP/native-runtime"
+          "$RUNNER_TEMP/native-runtime/glivela" -help
+          GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" go test ./control -run '^TestOfficialXrayValidationAndTLS$' -count=1 -v
   selection-runtime:
     name: Reviewed target-selection runtime
     runs-on: ubuntu-24.04

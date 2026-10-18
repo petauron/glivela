@@ -62,14 +62,51 @@ jobs:
         run: test "$RELEASE_SHA" = "$GITHUB_SHA"
 
   publish:
-    name: Publish checked source release
+    name: Publish checked native and source release
     needs: prepare
     if: needs.prepare.outputs.release_created == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build distributions from exact checked release source
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
+          test "$RELEASE_TAG" = "v$(jq -er '.["."]' .release-please-manifest.json)"
+          sh scripts/build-native-release.sh "$RUNNER_TEMP/native-release"
+          sh scripts/build-native-release.sh "$RUNNER_TEMP/native-repeat"
+          diff -r "$RUNNER_TEMP/native-release" "$RUNNER_TEMP/native-repeat"
+      - name: Stage and verify distribution files in draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          mkdir "$RUNNER_TEMP/native-readback"
+          for file in "$RUNNER_TEMP/native-release/"*; do
+            name=$(basename "$file")
+            existing=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$name\") | .name")
+            if [ -z "$existing" ]; then
+              gh release upload "$RELEASE_TAG" "$file" --repo "$GITHUB_REPOSITORY"
+            fi
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$RUNNER_TEMP/native-readback"
+            cmp "$file" "$RUNNER_TEMP/native-readback/$name"
+          done
+          cd "$RUNNER_TEMP/native-readback"
+          sha256sum --check SHA256SUMS
       - name: Publish the prepared draft
         env:
           GH_TOKEN: ${{ github.token }}

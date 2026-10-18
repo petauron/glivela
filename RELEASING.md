@@ -16,6 +16,21 @@ dispatches ci.yml on the version PR branch to run the existing checks.
 
 These are source-code releases, not automatic production deployments.
 
+Native runtime distributions are also built from the exact Release Please SHA
+for Linux amd64/arm64. They contain Glivela, the unmodified official Xray
+26.7.28 executable, licenses and runtime source/digest metadata. Upstream ZIP
+SHA256 values are pinned in `scripts/build-native-release.sh`; version changes
+require review of those pins. No build downloads or executes an unpinned core.
+CI builds twice, compares the outputs and tests bundled amd64 Xray with a local
+TLS fixture. It retains no downloadable Actions artifacts.
+
+Publication builds twice, uploads only the two distribution archives and
+`SHA256SUMS` directly to the draft Release, downloads and compares every asset,
+then publishes the draft. On a failed upload retry, existing draft assets must
+match exactly; they are never overwritten. A mismatch requires investigation,
+not moving a tag or replacing a published asset. Source publication does not
+change signed catalog pins or install/upgrade any running instance.
+
 Glivela source releases do not automatically package or deploy the UI in the
 production catalog. That remains a separately reviewed catalog operation.
 
