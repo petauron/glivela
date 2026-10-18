@@ -142,13 +142,24 @@ func TestRenderedLandingUDP(t *testing.T) {
 	}
 	validateRelay(relay)
 	t.Logf("SOCKS control=%s, association relay=%s", proxy, relay)
+	// Xray binds an association to the first UDP source endpoint. Retain this
+	// socket for all authorized packets, including destination-change tests.
+	authorizedUDP, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("100.64.0.11")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer authorizedUDP.Close()
 	allowed := func() {
 		t.Helper()
 		nonce := udpRuntimeNonce(t)
-		got, err := udpRuntimeExchange("100.64.0.11", relay, udpRuntimePacket("93.184.216.34:8443", nonce))
+		got, err := udpRuntimeExchangeOn(authorizedUDP, relay, udpRuntimePacket("93.184.216.34:8443", nonce))
+		if err != nil {
+			t.Fatal("authorized UDP exchange failed", err,
+				"target-observed sources:", peers["93.184.216.34:8443"].sources(nonce))
+		}
 		payload, parseErr := udpRuntimePayload(got, "93.184.216.34:8443")
-		if err != nil || parseErr != nil || string(payload) != "observed=192.168.50.2;"+nonce {
-			t.Fatal("authorized UDP failed or used another egress", err, parseErr,
+		if parseErr != nil || string(payload) != "observed=192.168.50.2;"+nonce {
+			t.Fatal("authorized UDP reply invalid or used another egress", parseErr,
 				"target-observed sources:", peers["93.184.216.34:8443"].sources(nonce))
 		}
 		if observed := peers["93.184.216.34:8443"].sources(nonce); len(observed) != 1 || observed[0] != plan.EgressIP {
@@ -163,17 +174,16 @@ func TestRenderedLandingUDP(t *testing.T) {
 		if source == "100.64.0.11" {
 			// Use one UDP source port for the allowed seed and forbidden next
 			// destination, not merely the same TCP association with fresh flows.
-			session, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(source)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer session.Close()
-			exchange = func(packet []byte) ([]byte, error) { return udpRuntimeExchangeOn(session, associationRelay, packet) }
+			exchange = func(packet []byte) ([]byte, error) { return udpRuntimeExchangeOn(authorizedUDP, associationRelay, packet) }
 			seed := udpRuntimeNonce(t)
 			got, err := exchange(udpRuntimePacket("93.184.216.34:8443", seed))
+			if err != nil {
+				t.Fatal("allowed seed exchange unavailable", err,
+					"target-observed sources:", peers["93.184.216.34:8443"].sources(seed))
+			}
 			payload, parseErr := udpRuntimePayload(got, "93.184.216.34:8443")
-			if err != nil || parseErr != nil || string(payload) != "observed=192.168.50.2;"+seed {
-				t.Fatal("allowed first datagram unavailable", err, parseErr)
+			if parseErr != nil || string(payload) != "observed=192.168.50.2;"+seed {
+				t.Fatal("allowed seed reply invalid", parseErr)
 			}
 		}
 		nonce := udpRuntimeNonce(t)
