@@ -37,7 +37,7 @@ func writeLegacyJournal(t *testing.T, root string, metadata map[string]any) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(metadata)
+	raw, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

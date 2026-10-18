@@ -27,7 +27,7 @@ type LegacyLandingSnapshot struct {
 	Version  int                        `json:"version"`
 	NodeID   string                     `json:"nodeId"`
 	Revision uint64                     `json:"revision"`
-	Journal  json.RawMessage            `json:"journal"`
+	Journal  []byte                     `json:"journal"`
 	Files    map[string]LegacyOwnedFile `json:"files"`
 }
 
