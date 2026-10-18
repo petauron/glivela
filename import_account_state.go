@@ -24,30 +24,31 @@ type ImportTrafficCounters struct {
 	WatermarkObservedAt string `json:"watermarkObservedAt"`
 }
 
-func (m ImportMaterial) validateAccountState() error {
-	validTime := func(value string) bool {
-		if value == "" {
-			return true
-		}
-		if len(value) > 64 {
-			return false
-		}
-		_, err := time.Parse(time.RFC3339Nano, value)
-		return err == nil
+func validImportTime(value string) bool {
+	if value == "" {
+		return true
 	}
+	if len(value) > 64 {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339Nano, value)
+	return err == nil
+}
+
+func (m ImportMaterial) validateAccountState() error {
 	credentials := 0
 	if len(m.ResetSchedules) != len(m.Plan.Accounts) {
 		return errors.New("glivela: incomplete reset schedule inventory")
 	}
 	for _, account := range m.Plan.Accounts {
 		schedule, exists := m.ResetSchedules[account.Account.ID]
-		if !exists || !validTime(schedule.NextResetAt) || !validTime(schedule.LastResetAt) {
+		if !exists || !validImportTime(schedule.NextResetAt) || !validImportTime(schedule.LastResetAt) {
 			return errors.New("glivela: missing or invalid reset schedule")
 		}
 		for _, credential := range account.Credentials {
 			credentials++
 			counters, exists := m.TrafficCounters[credential.ID]
-			if !exists || counters.UploadBytes < 0 || counters.DownloadBytes < 0 || counters.RawUploadBytes < 0 || counters.RawDownloadBytes < 0 || !validTime(counters.StartedAt) || !validTime(counters.ObservedAt) || !validTime(counters.WatermarkObservedAt) {
+			if !exists || counters.UploadBytes < 0 || counters.DownloadBytes < 0 || counters.RawUploadBytes < 0 || counters.RawDownloadBytes < 0 || !validImportTime(counters.StartedAt) || !validImportTime(counters.ObservedAt) || !validImportTime(counters.WatermarkObservedAt) {
 				return errors.New("glivela: missing or invalid directional traffic counters")
 			}
 		}

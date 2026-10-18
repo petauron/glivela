@@ -52,6 +52,10 @@ func stageAccountsCommand(args []string) error {
 	if err != nil {
 		return err
 	}
+	endpoints, err := endpointMaterial(a)
+	if err != nil || glivela.ValidateEndpointImport(material, endpoints) != nil {
+		return errors.New("endpoint configuration or complete entry inventory could not be verified")
+	}
 	accounts, err := glivela.SealImportMaterial(material, transfer, *snapshot)
 	if err != nil {
 		return err

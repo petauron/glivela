@@ -62,6 +62,17 @@ are copied and cross-validated. Missing usage watermarks, changed credentials,
 unknown references or wrong storage classes abort. A legitimately absent line
 sample remains unobserved; it is not fabricated from the raw counters.
 
+Endpoint preflight now verifies the complete REALITY/Hysteria configuration,
+original secret ownership, certificates/expiry, protocol switches, service and
+entry references, quota/reset fields and historical observations before staging
+accounts. A configured but disabled protocol retains its keys and certificates.
+The reviewed schema-113 constraint requires at least one configured protocol
+flag even for retired endpoints; retirement is preserved through its recorded
+status, not by clearing both protocol flags. Historical healthy/applied values
+never count as new runtime or TLS acceptance. This preflight does not yet make
+endpoints live or persist them into a new active business store: retain the
+complete encrypted export until the full atomic handover is implemented.
+
 The existing controller directory lease excludes a running process. Its
 `accounts.pending.json` is encrypted with an independent storage key, not the
 temporary transfer key. Identical retries do not rewrite it; changed counters

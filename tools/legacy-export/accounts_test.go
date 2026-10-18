@@ -233,9 +233,21 @@ func TestArchiveToEncryptedControllerStaging(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a := accountArchiveFixture()
+	a := completeEndpointArchiveFixture(t)
 	writeArchiveFixture(t, input, a, transfer)
 	args := []string{"-archive", input, "-snapshot", a.SnapshotID, "-state-directory", state, "-transfer-key", transferPath, "-storage-key", storagePath}
+	// Account conversion alone would accept this input; endpoint preflight
+	// must reject it before any pending account checkpoint is created.
+	replaceCell(&a, "meridian_endpoints", 0, "listen_port", cell{Kind: "integer", Text: "65536"})
+	writeArchiveFixture(t, input, a, transfer)
+	if err := stageAccountsCommand(args); err == nil {
+		t.Fatal("invalid endpoint did not fence staging")
+	}
+	if _, err := os.Lstat(filepath.Join(state, "accounts.pending.json")); !os.IsNotExist(err) {
+		t.Fatal("preflight failure wrote account state")
+	}
+	replaceCell(&a, "meridian_endpoints", 0, "listen_port", cell{Kind: "integer", Text: "10443"})
+	writeArchiveFixture(t, input, a, transfer)
 	if err := stageAccountsCommand(args); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +300,8 @@ func TestArchiveToEncryptedControllerStaging(t *testing.T) {
 	}
 	// Restore the original input so the lease, not the prior counter mismatch,
 	// is the only remaining reason this otherwise valid retry can fail.
-	writeArchiveFixture(t, input, accountArchiveFixture(), transfer)
+	replaceCell(&a, "meridian_line_usage", 0, "upload_bytes", cell{Kind: "integer", Text: "123"})
+	writeArchiveFixture(t, input, a, transfer)
 	unlock, err := control.LockDirectory(state)
 	if err != nil {
 		t.Fatal(err)
