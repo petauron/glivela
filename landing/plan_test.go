@@ -53,7 +53,7 @@ func TestPlanDeterministicAndDenyByDefault(t *testing.T) {
 	if !slices.Equal(config.DNS.Servers, []string{"1.1.1.1", "1.0.0.1"}) {
 		t.Fatal("implicit system DNS")
 	}
-	if config.Routing.Rules[3]["network"] != "tcp" || config.Routing.Rules[4]["network"] != "tcp,udp" {
+	if config.Routing.Rules[4]["network"] != "tcp" || config.Routing.Rules[5]["network"] != "tcp,udp" {
 		t.Fatal("source capabilities changed")
 	}
 	policy, err := p.Firewall(990, "tailscale0")

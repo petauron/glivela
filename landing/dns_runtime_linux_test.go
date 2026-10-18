@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -53,7 +54,8 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = command.Process.Kill(); _ = command.Wait() })
 	}
-	args := []string{"--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1", "--user=root", "--pid-file=" + filepath.Join(directory, "dns.pid")}
+	dnsLog := filepath.Join(directory, "dns.log")
+	args := []string{"--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1", "--user=root", "--pid-file=" + filepath.Join(directory, "dns.pid"), "--log-queries", "--log-facility=" + dnsLog}
 	for i := 1; i <= 12; i++ {
 		args = append(args, fmt.Sprintf("--host-record=example.com,2001:db8::%x", i))
 	}
@@ -124,18 +126,31 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	transport := &http.Transport{Proxy: http.ProxyURL(proxy), DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 8 * time.Second}
+	countQueries := func() int {
+		t.Helper()
+		raw, err := os.ReadFile(dnsLog)
+		if err != nil {
+			t.Fatal("cannot read isolated DNS evidence", err)
+		}
+		return strings.Count(string(raw), "query[A] example.com")
+	}
 	for _, phase := range []string{"cold", "warm"} {
+		before := countQueries()
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com/", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		response, err := client.Do(request)
 		if err != nil {
-			t.Fatalf("actual rendered DNS/TLS failed (%s cache): %v", phase, err)
+			t.Fatalf("actual rendered DNS/TLS failed (%s cache, resolver A queries %d -> %d): %v", phase, before, countQueries(), err)
 		}
 		response.Body.Close()
 		if response.StatusCode != http.StatusNoContent {
 			t.Fatal("TLS target/SNI not reached", response.StatusCode)
 		}
+		if phase == "cold" && countQueries() <= before {
+			t.Fatal("cold request never reached controlled resolver")
+		}
+		t.Logf("%s cache: verified TLS/HTTP 204, resolver A queries %d -> %d", phase, before, countQueries())
 	}
 }

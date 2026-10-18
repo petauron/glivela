@@ -70,6 +70,9 @@ func (p Plan) Render() ([]byte, error) {
 		blocked = append(blocked, "::/3", "4000::/2", "8000::/1")
 	}
 	rules := []any{
+		// Built-in DNS has no authorized SOCKS client source. Route only its
+		// tagged queries to the exact resolvers before business-family rules.
+		map[string]any{"type": "field", "inboundTag": []string{"resolver"}, "ip": []string{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp", "outboundTag": "resolver"},
 		map[string]any{"type": "field", "ip": []string{opposite}, "outboundTag": "deny"},
 		map[string]any{"type": "field", "ip": blocked, "outboundTag": "deny"},
 		map[string]any{"type": "field", "port": managementPorts, "outboundTag": "deny"},
@@ -83,14 +86,14 @@ func (p Plan) Render() ([]byte, error) {
 			network = "tcp,udp"
 			udp = true
 		}
-		rules = append(rules, map[string]any{"type": "field", "source": []string{source.Address + "/32"}, "network": network, "outboundTag": "egress"})
+		rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{"landing"}, "source": []string{source.Address + "/32"}, "network": network, "outboundTag": "egress"})
 	}
 	value := map[string]any{
 		"log":      map[string]any{"loglevel": "warning"},
-		"dns":      map[string]any{"servers": []string{"1.1.1.1", "1.0.0.1"}, "queryStrategy": strategy},
+		"dns":      map[string]any{"tag": "resolver", "servers": []string{"1.1.1.1", "1.0.0.1"}, "queryStrategy": strategy},
 		"inbounds": []any{map[string]any{"tag": "landing", "listen": p.Address, "port": SOCKSPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": udp, "ip": p.Address}}},
 		// A miss is blocked, including an unrecognized source or UDP grant.
-		"outbounds": []any{map[string]any{"tag": "deny", "protocol": "blackhole"}, map[string]any{"tag": "egress", "protocol": "freedom", "sendThrough": p.EgressIP, "settings": map[string]any{"domainStrategy": strategy}}},
+		"outbounds": []any{map[string]any{"tag": "deny", "protocol": "blackhole"}, map[string]any{"tag": "egress", "protocol": "freedom", "sendThrough": p.EgressIP, "settings": map[string]any{"domainStrategy": strategy}}, map[string]any{"tag": "resolver", "protocol": "freedom", "settings": map[string]any{"domainStrategy": "AsIs"}}},
 		"routing":   map[string]any{"domainStrategy": "IPOnDemand", "rules": rules},
 		"policy":    map[string]any{"levels": map[string]any{"0": map[string]any{"handshake": 10, "connIdle": 300}}},
 	}
