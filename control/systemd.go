@@ -29,11 +29,13 @@ import (
 // dependency; this adapter refuses unowned/replaced installation files.
 type SystemdDriver struct {
 	Distribution string `json:"distribution"`
+	Installation string `json:"installation"`
+	Service      string `json:"service"`
 	Binary       string `json:"-"`
 	BinarySHA256 string `json:"-"`
-	UnitSHA256   string `json:"unitSha256"`
-	Unit         string `json:"unit"`
-	WorkerUser   string `json:"workerUser"`
+	UnitSHA256   string `json:"-"`
+	Unit         string `json:"-"`
+	WorkerUser   string `json:"-"`
 	WorkerUID    uint32 `json:"-"`
 	Interface    string `json:"interface"`
 }

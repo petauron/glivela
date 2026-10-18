@@ -31,6 +31,10 @@ func (d SystemdDriver) ResolveInstallation() (SystemdDriver, error) {
 	if err != nil {
 		return SystemdDriver{}, err
 	}
+	resolved, err = resolved.resolveService()
+	if err != nil {
+		return SystemdDriver{}, err
+	}
 	return resolved.ResolveWorker()
 }
 
