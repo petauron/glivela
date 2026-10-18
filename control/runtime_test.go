@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,20 +12,26 @@ import (
 )
 
 type driverFixture struct {
-	validErr      error
-	starts, stops int
-	failHealth    int
-	binding       string
-	active        Desired
-	prior         *Desired
-	onHealth      func()
-	onActivate    func(Desired)
+	validErr        error
+	starts, stops   int
+	failHealth      int
+	binding         string
+	active          Desired
+	prior           *Desired
+	onHealth        func()
+	onActivate      func(Desired)
+	activationError func(Desired) error
 }
 
 func (f *driverFixture) Binding() string { return "fixture:" + f.binding }
 
 func (f *driverFixture) Validate(context.Context, string) error { return f.validErr }
 func (f *driverFixture) Activate(_ context.Context, desired Desired, prior *Desired) error {
+	if f.activationError != nil {
+		if err := f.activationError(desired); err != nil {
+			return err
+		}
+	}
 	f.starts++
 	f.active = desired.clone()
 	f.prior = prior
@@ -32,6 +39,55 @@ func (f *driverFixture) Activate(_ context.Context, desired Desired, prior *Desi
 		f.onActivate(desired)
 	}
 	return nil
+}
+
+func TestReadyRenameSyncFailureAndFailedRecoveryRemainPending(t *testing.T) {
+	r, d := nativeFixture(t)
+	ctx := context.Background()
+	if err := r.Apply(ctx, artifact(1)); err != nil {
+		t.Fatal(err)
+	}
+	r.writeJournal = func(directory, name string, raw []byte) error {
+		if err := replacePrivate(directory, name, raw); err != nil {
+			return err
+		}
+		var state runtimeJournal
+		if err := json.Unmarshal(raw, &state); err != nil {
+			return err
+		}
+		if state.Phase == "ready" && state.Current != nil && state.Current.Revision == 2 {
+			return errors.New("injected directory fsync failure after ready rename")
+		}
+		return nil
+	}
+	d.activationError = func(desired Desired) error {
+		if desired.Revision == 1 {
+			return errors.New("injected restore failure")
+		}
+		return nil
+	}
+	if err := r.Apply(ctx, artifact(2)); err == nil || !strings.Contains(err.Error(), "recovery required") {
+		t.Fatal("compound failure accepted", err)
+	}
+	if d.active.Revision != 2 {
+		t.Fatal("fixture did not retain running candidate")
+	}
+	// Simulate a process restart: no in-memory fault flag can protect us now.
+	restarted := &NativeRuntime{Directory: r.Directory, Driver: d}
+	if _, err := restarted.Inspect(ctx); err == nil {
+		t.Fatal("ready bytes hid unfinished recovery")
+	}
+	if err := restarted.Recover(ctx); err == nil {
+		t.Fatal("restart skipped failed restoration")
+	}
+	d.activationError = nil
+	if err := restarted.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := restarted.Inspect(ctx)
+	if err != nil || actual.Revision != 1 || !actual.RuntimeReady {
+		t.Fatal("previous runtime not recovered", err)
+	}
 }
 func (f *driverFixture) Stop(context.Context, Desired) error { f.stops++; return nil }
 func (f *driverFixture) Healthy(context.Context, Desired) error {
