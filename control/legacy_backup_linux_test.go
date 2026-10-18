@@ -33,6 +33,11 @@ func TestRecoveryCheckpointRejectsChangedResources(t *testing.T) {
 			case "journal":
 				snapshot.Journal = []byte(`{}`)
 			case "program":
+				// Simulate an owner replacing the retained executable. Ordinary
+				// writes are correctly denied by its production 0500 mode.
+				if err := os.Chmod(filepath.Join(filepath.Dir(path), "recovery-program"), 0700); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.WriteFile(filepath.Join(filepath.Dir(path), "recovery-program"), []byte("changed"), 0500); err != nil {
 					t.Fatal(err)
 				}
