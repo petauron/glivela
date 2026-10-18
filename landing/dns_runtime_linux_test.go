@@ -37,7 +37,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		t.Fatal("verified official core required")
 	}
 	ipv6 := os.Getenv("GLIVELA_LANDING_FAMILY") == "ipv6"
-	egress, targetNetwork, targetAddress, queryType := "192.168.50.2", "tcp4", "93.184.216.34:443", "A"
+	egress, targetNetwork, targetAddress, queryType := "93.184.216.35", "tcp4", "93.184.216.34:443", "A"
 	if ipv6 {
 		egress, targetNetwork, targetAddress, queryType = "2606:4700::100", "tcp6", "[::]:443", "AAAA"
 	}
@@ -50,7 +50,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		}
 	}
 	ip("link", "set", "lo", "up")
-	for _, address := range []string{"100.64.0.10/32", "100.64.0.11/32", "100.64.0.12/32", "192.168.50.2/32", "93.184.216.34/32", "1.1.1.1/32", "1.0.0.1/32"} {
+	for _, address := range []string{"100.64.0.10/32", "100.64.0.11/32", "100.64.0.12/32", "192.168.50.2/32", "93.184.216.34/32", "93.184.216.35/32", "1.1.1.1/32", "1.0.0.1/32"} {
 		ip("addr", "add", address, "dev", "lo")
 	}
 	if ipv6 {
@@ -121,6 +121,13 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		// Report the actual TCP peer, never the fixture's expected egress.
+		peer, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Observed-Exit", peer)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	_ = target.Listener.Close()
@@ -224,6 +231,9 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		if response.StatusCode != http.StatusNoContent {
 			t.Fatal("TLS target/SNI not reached", response.StatusCode)
 		}
+		if !net.ParseIP(response.Header.Get("Observed-Exit")).Equal(net.ParseIP(egress)) {
+			t.Fatalf("wrong actual socket egress: got %q, expected %q", response.Header.Get("Observed-Exit"), egress)
+		}
 		if phase == "cold" && countQueries() <= before {
 			t.Fatal("cold request never reached controlled resolver")
 		}
@@ -263,5 +273,29 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	var authority x509.UnknownAuthorityError
 	if !errors.As(err, &authority) {
 		t.Fatal("untrusted certificate must fail specifically at TLS verification", err)
+	}
+	// The trusted target remains reachable directly, but a dead SOCKS endpoint
+	// must not make the HTTP transport silently bypass the proxy.
+	direct := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool, ServerName: "example.com"}}
+	defer direct.CloseIdleConnections()
+	directAddress := "93.184.216.34:443"
+	if ipv6 {
+		directAddress = "[2606:4700::1]:443"
+	}
+	response, err = (&http.Client{Transport: direct, Timeout: time.Second}).Get("https://" + directAddress)
+	if err != nil {
+		t.Fatal("direct control target unavailable", err)
+	}
+	response.Body.Close()
+	dead := transport.Clone()
+	dead.TLSClientConfig.ServerName = "example.com"
+	dead.Proxy = http.ProxyURL(&url.URL{Scheme: "socks5", Host: "100.64.0.10:1"})
+	defer dead.CloseIdleConnections()
+	response, err = (&http.Client{Transport: dead, Timeout: time.Second}).Get("https://" + directAddress)
+	if response != nil {
+		response.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("failed SOCKS connection silently fell back to direct")
 	}
 }
