@@ -66,6 +66,31 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/admin/entries":
+			var request struct {
+				ID            string           `json:"id"`
+				CertificateID string           `json:"certificateId"`
+				Plan          glivela.XrayPlan `json:"plan"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, maxMessage), &request) != nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
+				http.Error(w, "invalid entry identity or plan", http.StatusBadRequest)
+				return
+			}
+			desired, err := NewEntryDesired(request.Plan)
+			if err != nil {
+				http.Error(w, "invalid entry policy", http.StatusBadRequest)
+				return
+			}
+			if err := store.Put(Node{ID: request.ID, CertificateID: request.CertificateID, Desired: desired}); err != nil {
+				http.Error(w, "entry update refused", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(struct {
+				Revision     uint64 `json:"revision"`
+				ConfigSHA256 string `json:"configSha256"`
+			}{desired.Revision, desired.ConfigSHA256})
 		case "/v1/admin/business":
 			var request struct{}
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil {

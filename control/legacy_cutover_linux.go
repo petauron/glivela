@@ -83,7 +83,7 @@ func SwitchLegacyLanding(ctx context.Context, directory, checkpoint, nodeID stri
 	if err := replacePrivate(directory, "candidate.json", candidate.Config); err != nil {
 		return err
 	}
-	if err := driver.Validate(ctx, filepath.Join(directory, "candidate.json")); err != nil {
+	if err := driver.Validate(ctx, candidate, filepath.Join(directory, "candidate.json")); err != nil {
 		return err
 	}
 	// Verify the installed candidate unit without starting or stopping it.
@@ -168,7 +168,7 @@ func readLegacyCutover(r *NativeRuntime) (legacyCutover, error) {
 		return state, errors.New("control: unsafe cutover journal")
 	}
 	raw, err := os.ReadFile(path)
-	if err != nil || decode(strings.NewReader(string(raw)), &state) != nil || state.Version != 1 || state.NodeID == "" || state.Binding != r.Driver.Binding() || state.Candidate.Validate() != nil || !filepath.IsAbs(state.Checkpoint) {
+	if err != nil || decode(strings.NewReader(string(raw)), &state) != nil || state.Version != 1 || state.NodeID == "" || state.Binding != r.Driver.Binding() || state.Candidate.Validate() != nil || state.Candidate.Landing == nil || !filepath.IsAbs(state.Checkpoint) {
 		return state, errors.New("control: invalid cutover journal")
 	}
 	if state.Phase != "pending" && state.Phase != "awaiting-routes" && state.Phase != "rolled-back" {

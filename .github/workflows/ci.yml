@@ -39,7 +39,7 @@ jobs:
           mkdir "$RUNNER_TEMP/native-runtime"
           tar -xzf "$RUNNER_TEMP/native-first/glivela-$version-linux-amd64.tar.gz" -C "$RUNNER_TEMP/native-runtime"
           "$RUNNER_TEMP/native-runtime/glivela" -help
-          GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" go test ./control -run '^TestOfficialXrayValidationAndTLS$' -count=1 -v
+          GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" go test ./control -run '^TestOfficialXray(ValidationAndTLS|EntryPlanValidation)$' -count=1 -v
       - name: Exercise actual landing DNS policy in isolated namespace
         run: |
           sudo apt-get update -qq

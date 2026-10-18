@@ -14,6 +14,9 @@ type RouteEntry struct {
 }
 
 func validateRouteEntries(node Node) error {
+	if node.Desired.Landing == nil {
+		return errors.New("control: landing plan required for route inventory")
+	}
 	// A landing may be provisioned before its entry enrollment is complete,
 	// but no route checks or successful acceptance are allowed in that state.
 	if len(node.RouteEntries) == 0 {

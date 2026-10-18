@@ -37,7 +37,7 @@ func TestRollbackRestoresPolicyTogetherWithConfiguration(t *testing.T) {
 	}
 	plan := artifact(2).Landing
 	plan.Sources[0].TCPOnly = true
-	next, err := NewDesired(plan)
+	next, err := NewDesired(*plan)
 	if err != nil {
 		t.Fatal(err)
 	}

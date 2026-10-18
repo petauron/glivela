@@ -12,7 +12,7 @@ func TestLandingAcceptanceRequiresAllRoutesAndFreshRuntime(t *testing.T) {
 	s := store(t)
 	plan := artifact(1).Landing
 	plan.Sources = append(plan.Sources, landing.Source{Address: "100.64.0.4"})
-	d, err := NewDesired(plan)
+	d, err := NewDesired(*plan)
 	if err != nil {
 		t.Fatal(err)
 	}

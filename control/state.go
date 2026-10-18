@@ -26,9 +26,9 @@ type Node struct {
 
 // Store is a bounded single-process state file for the MVP. Callers must run
 // one controller per directory; it is not a multi-writer database protocol.
-// The node JSON file contains no private keys. Business import material is
-// stored separately under authenticated encryption and loaded only in memory.
-// Configuration files remain private (0600).
+// Desired entry plans contain sensitive runtime configuration. The node state
+// is private (0600) and must never be logged or published. Imported business
+// data is separately authenticated/encrypted; node desired plans are projections.
 type Store struct {
 	mu       sync.Mutex
 	path     string
@@ -67,7 +67,7 @@ func OpenStore(path string) (*Store, error) {
 	}
 	seen := map[string]bool{}
 	for _, node := range nodes {
-		if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || seen[node.ID] || validateRouteEntries(node) != nil {
+		if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || seen[node.ID] || validateNodeRole(node) != nil {
 			return nil, errors.New("control: invalid node")
 		}
 		if _, ok := s.nodes[node.CertificateID]; ok {
@@ -90,6 +90,9 @@ func OpenStore(path string) (*Store, error) {
 		seen[node.ID] = true
 		s.nodes[node.CertificateID] = node
 	}
+	if err := validateEnrollmentRoles(s.nodes); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -99,7 +102,7 @@ func OpenStore(path string) (*Store, error) {
 func (s *Store) Put(node Node) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || len(node.Checks) != 0 || validateRouteEntries(node) != nil {
+	if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || len(node.Checks) != 0 || validateNodeRole(node) != nil {
 		return errors.New("control: invalid enrollment")
 	}
 	next := s.copy()
@@ -110,11 +113,24 @@ func (s *Store) Put(node Node) error {
 		if old.ID != node.ID {
 			continue
 		}
+		if (old.Desired.Entry == nil) != (node.Desired.Entry == nil) {
+			return errors.New("control: changing node role requires explicit handover")
+		}
 		if node.Desired.Revision < old.Desired.Revision || node.Desired.Revision == old.Desired.Revision && node.Desired.ConfigSHA256 != old.Desired.ConfigSHA256 {
 			return errors.New("control: non-monotonic desired state")
 		}
 		if node.Desired.Revision == old.Desired.Revision && maps.Equal(node.RouteEntries, old.RouteEntries) {
 			node.Checks = old.Checks
+		}
+		if old.Desired.Entry != nil && old.CertificateID != node.CertificateID {
+			for peerKey, peer := range next {
+				if entry, ok := peer.RouteEntries[node.ID]; ok && entry.CertificateID == old.CertificateID {
+					peer.RouteEntries = maps.Clone(peer.RouteEntries)
+					entry.CertificateID = node.CertificateID
+					peer.RouteEntries[node.ID] = entry
+					next[peerKey] = peer
+				}
+			}
 		}
 		delete(next, key)
 	}
@@ -124,6 +140,12 @@ func (s *Store) Put(node Node) error {
 	node.Desired = node.Desired.clone()
 	node.RouteEntries = maps.Clone(node.RouteEntries)
 	next[node.CertificateID] = node
+	if node.Desired.Entry != nil {
+		invalidateEntryChecks(next, node.ID)
+	}
+	if err := validateEnrollmentRoles(next); err != nil {
+		return err
+	}
 	return s.commit(next)
 }
 
@@ -137,6 +159,8 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *glive
 	if !ok {
 		return Desired{}, errors.New("control: not enrolled")
 	}
+	now := time.Now().UTC()
+	wasReady := runtimeFresh(node, now)
 	// Every authenticated observation supersedes the previous health report.
 	// A missing/stale report can occur after failed recovery or lost local state;
 	// keeping the old successful receipt would incorrectly show a healthy node.
@@ -147,9 +171,12 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *glive
 			node.Receipt = &copyReceipt
 		}
 	}
-	node.ReportedAt = time.Now().UTC()
+	node.ReportedAt = now
 	next := s.copy()
 	next[certificate] = node
+	if node.Desired.Entry != nil && wasReady != runtimeFresh(node, now) {
+		invalidateEntryChecks(next, node.ID)
+	}
 	if err := s.commit(next); err != nil {
 		return Desired{}, err
 	}

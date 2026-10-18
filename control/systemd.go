@@ -120,13 +120,20 @@ func verifyExecutableFile(path, expected string) error {
 	return nil
 }
 
-func (d SystemdDriver) Validate(ctx context.Context, config string) error {
-	if err := verifyExecutableFile(d.Binary, d.BinarySHA256); err != nil {
+func (d SystemdDriver) Validate(ctx context.Context, desired Desired, config string) error {
+	if desired.Landing == nil || desired.Entry != nil || desired.Validate() != nil {
+		return errors.New("control: native landing driver requires a landing plan")
+	}
+	return validateXrayFile(ctx, d.Binary, d.BinarySHA256, config)
+}
+
+func validateXrayFile(ctx context.Context, binary, digest, config string) error {
+	if err := verifyExecutableFile(binary, digest); err != nil {
 		return err
 	}
 	// Output can include configuration/credentials. Discard it and expose only
 	// a generic error; never attach unredacted Xray output to a receipt.
-	if exec.CommandContext(ctx, d.Binary, "run", "-test", "-format", "json", "-config", config).Run() != nil {
+	if exec.CommandContext(ctx, binary, "run", "-test", "-format", "json", "-config", config).Run() != nil {
 		return errors.New("control: Xray validation failed")
 	}
 	return nil
@@ -195,6 +202,9 @@ func (d SystemdDriver) loadedUnitMatches(raw string) bool {
 	return len(seen) == len(want)
 }
 func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
+	if desired.Landing == nil || desired.Entry != nil {
+		return landing.ServerFirewall{}, errors.New("control: landing role required")
+	}
 	if err := desired.Validate(); err != nil {
 		return landing.ServerFirewall{}, err
 	}
@@ -233,6 +243,9 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 }
 
 func (d SystemdDriver) Activate(ctx context.Context, desired Desired, previous *Desired) error {
+	if previous != nil && (previous.Landing == nil || previous.Entry != nil) {
+		return errors.New("control: previous runtime has a different role")
+	}
 	policy, err := d.policy(desired)
 	if err != nil {
 		return err
@@ -274,6 +287,9 @@ func (d SystemdDriver) Activate(ctx context.Context, desired Desired, previous *
 }
 
 func (d SystemdDriver) Stop(ctx context.Context, desired Desired) error {
+	if desired.Landing == nil || desired.Entry != nil || desired.Validate() != nil {
+		return errors.New("control: refusing to stop a different runtime role")
+	}
 	if err := d.service(ctx, "stop"); err != nil {
 		return err
 	}
@@ -288,6 +304,9 @@ func (d SystemdDriver) Stop(ctx context.Context, desired Desired) error {
 // SOCKS probe would violate the exact mesh-source allowlist. Route acceptance
 // must originate from an authorized entry and be tracked independently.
 func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
+	if desired.Landing == nil || desired.Entry != nil {
+		return errors.New("control: landing role required")
+	}
 	if err := d.service(ctx, "is-active"); err != nil {
 		return err
 	}

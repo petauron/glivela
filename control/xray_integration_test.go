@@ -17,11 +17,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	glivela "github.com/petauron/glivela"
 )
 
 // Uses an independently verified official binary. No production network,
 // systemd service, firewall or existing application is touched by this test.
-func TestOfficialXrayValidationAndTLS(t *testing.T) {
+func officialTestDriver(t *testing.T) SystemdDriver {
+	t.Helper()
 	binary := os.Getenv("GLIVELA_XRAY_BINARY")
 	if binary == "" {
 		t.Skip("set GLIVELA_XRAY_BINARY to a verified official Xray")
@@ -39,6 +43,12 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 		}
 		driver = verified
 	}
+	return driver
+}
+
+func TestOfficialXrayValidationAndTLS(t *testing.T) {
+	driver := officialTestDriver(t)
+	binary := driver.Binary
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +76,7 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err = driver.Validate(ctx, path); err != nil {
+	if err = validateXrayFile(ctx, driver.Binary, driver.BinarySHA256, path); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.CommandContext(ctx, binary, "run", "-config", path)
@@ -127,7 +137,38 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 	if err = os.WriteFile(path, []byte(`{"inbounds":[{"protocol":"invalid"}]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if driver.Validate(ctx, path) == nil {
+	if validateXrayFile(ctx, driver.Binary, driver.BinarySHA256, path) == nil {
 		t.Fatal("invalid Xray config accepted")
+	}
+}
+
+// Official-core syntax validation is deliberately separate from container,
+// firewall and end-to-end acceptance. Unknown fields accepted by the core are
+// not evidence that an address-family/security policy actually works.
+func TestOfficialXrayEntryPlanValidation(t *testing.T) {
+	driver := officialTestDriver(t)
+	d := entryArtifact(t, "entry-example", 1)
+	base := d.Entry.Credentials[0]
+	protocolID := uuid.NewString()
+	route := glivela.Credential{ID: "route-example", AccountID: base.Credential.AccountID, Kind: glivela.RouteCredential, User: "route-example-user", Identity: glivela.Identity(protocolID), EntryID: "entry-example", EgressID: "landing-example", Enabled: true}
+	plan := d.clone().Entry
+	plan.Credentials = append(plan.Credentials, glivela.CredentialMaterial{Credential: route, ProtocolID: protocolID})
+	plan.Grants = []glivela.RouteGrant{{ID: "grant-example", AccountID: route.AccountID, EntryID: route.EntryID, EgressID: route.EgressID, InboundTag: plan.RealityEndpoints[0].InboundTag, Base: base.Credential, Route: route, Mode: glivela.FixedMode, Enabled: true, DesiredRev: 1}}
+	plan.Peers = []glivela.RoutePeer{{EgressID: "landing-example", Address: "100.64.0.2", Port: 1080}}
+	routed, err := NewEntryDesired(*plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, desired := range []Desired{d, routed} {
+		path := filepath.Join(t.TempDir(), "entry.json")
+		if err := os.WriteFile(path, desired.Config, 0600); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := validateXrayFile(ctx, driver.Binary, driver.BinarySHA256, path)
+		cancel()
+		if err != nil {
+			t.Fatal("entry plan was rejected by the packaged official core", err)
+		}
 	}
 }

@@ -14,7 +14,8 @@ import (
 // Vastora neither transports nor interprets this application-owned state.
 type Desired struct {
 	glivela.DesiredArtifact
-	Landing landing.Plan `json:"landing"`
+	Landing *landing.Plan     `json:"landing,omitempty"`
+	Entry   *glivela.XrayPlan `json:"entry,omitempty"`
 }
 
 func NewDesired(plan landing.Plan) (Desired, error) {
@@ -23,22 +24,62 @@ func NewDesired(plan landing.Plan) (Desired, error) {
 		return Desired{}, err
 	}
 	plan.Sources = slices.Clone(plan.Sources)
-	return Desired{DesiredArtifact: a, Landing: plan}, nil
+	return Desired{DesiredArtifact: a, Landing: &plan}, nil
+}
+
+func NewEntryDesired(plan glivela.XrayPlan) (Desired, error) {
+	if _, err := entryPlanIdentity(plan); err != nil {
+		return Desired{}, err
+	}
+	artifact, err := glivela.BuildDesiredArtifact(plan)
+	if err != nil {
+		return Desired{}, err
+	}
+	return (Desired{DesiredArtifact: artifact, Entry: &plan}).clone(), nil
 }
 
 func (d Desired) Validate() error {
 	if err := d.DesiredArtifact.Validate(); err != nil {
 		return err
 	}
-	expected, err := d.Landing.Artifact()
+	if (d.Landing == nil) == (d.Entry == nil) {
+		return errors.New("control: exactly one entry or landing plan required")
+	}
+	var expected glivela.DesiredArtifact
+	var err error
+	if d.Landing != nil {
+		expected, err = d.Landing.Artifact()
+	} else {
+		if _, err := entryPlanIdentity(*d.Entry); err != nil {
+			return err
+		}
+		expected, err = glivela.BuildDesiredArtifact(*d.Entry)
+	}
 	if err != nil || expected.Revision != d.Revision || expected.ConfigSHA256 != d.ConfigSHA256 || !bytes.Equal(expected.Config, d.Config) {
-		return errors.New("control: configuration and landing policy differ")
+		return errors.New("control: configuration and owned proxy plan differ")
 	}
 	return nil
 }
 
 func (d Desired) clone() Desired {
 	d.Config = bytes.Clone(d.Config)
-	d.Landing.Sources = slices.Clone(d.Landing.Sources)
+	if d.Landing != nil {
+		plan := *d.Landing
+		plan.Sources = slices.Clone(plan.Sources)
+		d.Landing = &plan
+	}
+	if d.Entry != nil {
+		plan := *d.Entry
+		plan.RealityEndpoints = slices.Clone(plan.RealityEndpoints)
+		for i := range plan.RealityEndpoints {
+			plan.RealityEndpoints[i].ServerNames = slices.Clone(plan.RealityEndpoints[i].ServerNames)
+			plan.RealityEndpoints[i].ShortIDs = slices.Clone(plan.RealityEndpoints[i].ShortIDs)
+		}
+		plan.HysteriaEndpoints = slices.Clone(plan.HysteriaEndpoints)
+		plan.Credentials = slices.Clone(plan.Credentials)
+		plan.Grants = slices.Clone(plan.Grants)
+		plan.Peers = slices.Clone(plan.Peers)
+		d.Entry = &plan
+	}
 	return d
 }

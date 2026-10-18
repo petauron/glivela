@@ -27,7 +27,19 @@ func runtimeFresh(node Node, now time.Time) bool {
 	return node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, *node.Receipt) == nil && !node.ReportedAt.IsZero() && !node.ReportedAt.After(now) && now.Sub(node.ReportedAt) <= time.Minute
 }
 
+func enrolledEntriesFresh(node Node, nodes map[string]Node, now time.Time) bool {
+	for id, entry := range node.RouteEntries {
+		if enrolled, ok := nodes[entry.CertificateID]; ok && (enrolled.Desired.Entry == nil || enrolled.ID != id || !runtimeFresh(enrolled, now)) {
+			return false
+		}
+	}
+	return true
+}
+
 func routeTargetsLanding(p RouteProbe, node Node) bool {
+	if node.Desired.Landing == nil {
+		return false
+	}
 	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)
 	address, addressErr := netip.ParseAddr(node.Desired.Landing.Address)
 	return err == nil && addressErr == nil && endpoint.Addr() == address && endpoint.Port() == landing.SOCKSPort &&

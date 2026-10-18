@@ -27,6 +27,9 @@ func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint6
 		if node.ID != landingID {
 			continue
 		}
+		if node.Desired.Landing == nil {
+			return RouteAcceptance{}, errors.New("control: acceptance requires a landing identity")
+		}
 		if node.Desired.Revision != revision || node.Desired.ConfigSHA256 != digest {
 			return RouteAcceptance{Reason: "revision-changed"}, nil
 		}
@@ -35,6 +38,10 @@ func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint6
 			return RouteAcceptance{Reason: "runtime-unverified"}, nil
 		}
 		status := RouteAcceptance{RuntimeReady: true}
+		if !enrolledEntriesFresh(node, s.nodes, now) {
+			status.Reason = "entry-runtime-unverified"
+			return status, nil
+		}
 		if !completeRouteInventory(node, node.Checks) {
 			status.Reason = "routes-incomplete"
 			return status, nil

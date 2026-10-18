@@ -22,7 +22,7 @@ func recoveryContext() (context.Context, context.CancelFunc) {
 // not a remote execution protocol or a Vastora integration interface.
 type Driver interface {
 	Binding() string
-	Validate(context.Context, string) error
+	Validate(context.Context, Desired, string) error
 	Activate(context.Context, Desired, *Desired) error
 	Stop(context.Context, Desired) error
 	Healthy(context.Context, Desired) error
@@ -221,7 +221,7 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 	if err = replacePrivate(r.Directory, "candidate.json", desired.Config); err != nil {
 		return err
 	}
-	if err = r.Driver.Validate(ctx, filepath.Join(r.Directory, "candidate.json")); err != nil {
+	if err = r.Driver.Validate(ctx, desired, filepath.Join(r.Directory, "candidate.json")); err != nil {
 		return errors.New("control: Xray configuration rejected")
 	}
 	state.Phase = "pending"
@@ -301,7 +301,7 @@ func (r *NativeRuntime) restore(ctx context.Context, state runtimeJournal) error
 		if err := replacePrivate(r.Directory, "config.json", state.Current.Config); err != nil {
 			return err
 		}
-		if err := r.Driver.Validate(ctx, filepath.Join(r.Directory, "config.json")); err != nil {
+		if err := r.Driver.Validate(ctx, *state.Current, filepath.Join(r.Directory, "config.json")); err != nil {
 			return err
 		}
 		if err := r.Driver.Activate(ctx, *state.Current, state.Candidate); err != nil {
@@ -371,7 +371,7 @@ func (r *NativeRuntime) Recover(ctx context.Context) error {
 		// boot ordering alone. Restore the committed runtime once at node
 		// startup, after verifying local identity/config and the core itself.
 		// This path is not called from the periodic health/reconcile loop.
-		if err := r.Driver.Validate(ctx, filepath.Join(r.Directory, "config.json")); err != nil {
+		if err := r.Driver.Validate(ctx, *state.Current, filepath.Join(r.Directory, "config.json")); err != nil {
 			return errors.New("control: committed startup configuration rejected")
 		}
 		err := r.Driver.Activate(ctx, *state.Current, state.Current)

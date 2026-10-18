@@ -68,6 +68,30 @@ identities cannot use management endpoints; management identities cannot submit
 node or verifier reports. This API is not yet a replacement business UI or a
 complete legacy-data importer.
 
+The same administrator can POST `/v1/admin/entries` with `id`,
+`certificateId` and a Glivela `XrayPlan`. Here `id` is the existing entry
+application ID; its physical host relationship stays in the business references.
+Exactly one entry application may appear in its endpoints, credentials and
+grants. REALITY private/public keys must form the same X25519 pair. The controller
+renders and binds the configuration/revision itself; arbitrary standalone core
+configuration is not accepted. Entry and landing plans are mutually exclusive,
+and an enrolled identity cannot silently change role. Entry certificates may
+also verify that same entry, but cannot obtain another node configuration or
+administrative access. Rotation updates the linked verifier identity atomically
+and invalidates route proofs. Desired entry configuration is sensitive: keep
+the private `nodes.json` and runtime journals out of public logs and artifacts.
+
+Entry desired state can now use the direct channel and the shared revision/
+recovery journal. **The entry container execution adapter is still incomplete.**
+The existing `node` bootstrap uses the native landing/systemd driver, which
+explicitly refuses entry plans before service start/stop. Do not deploy an entry
+enrollment through that driver or claim these tests prove container takeover.
+Entry execution must retain the current Docker read-only mount/user/network
+ownership and peer firewall boundaries; it must not become an easier native
+replacement or a blind container restart. In particular, actual 26.7.28
+post-resolution/address-family enforcement still needs installed acceptance;
+successful parsing does not prove that newer JSON options are honored.
+
 The `verifier` mode runs on an enrolled entry using its own private bootstrap,
 state-directory lease and mTLS identity. It polls `/v1/route-checks`, performs
 one bounded SOCKS/TLS/observed-exit check at a time, and reports success or
@@ -83,6 +107,13 @@ that attempt, snapshot, entry certificate, landing and desired revision/hash.
 Completed reports are durable, and a lost acknowledgement does not cause the
 entry to repeat a completed attempt. This channel does not by itself complete
 legacy ownership transfer or authorize clearing a runtime-health alert.
+
+Once an entry is enrolled as an owned runtime, route acceptance also requires
+its current applied receipt. Diagnostics may still test a reachable route while
+that receipt is missing: network observations are not blocked or promoted to
+runtime success. Entry configuration/certificate changes and readiness
+transitions invalidate linked route proofs, so a check performed before a new
+entry configuration was applied cannot later clear its warning.
 
 `landing/` renders the official Xray 26.7.28 SOCKS configuration and dedicated
 UID-scoped nftables policy from one explicit plan. The node channel binds this
