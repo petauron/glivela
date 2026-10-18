@@ -138,6 +138,21 @@ func (g *TrafficGate) Block(ctx context.Context) error {
 	return g.block(ctx)
 }
 
+// Verify is observational. It never installs/repairs a missing policy or
+// extends a lease based on a process/configuration health poll.
+func (g *TrafficGate) Verify(ctx context.Context) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	document, err := g.snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if found, err := g.validate(document); err != nil || !found {
+		return errors.Join(err, errors.New("landing: entry gate missing or changed"))
+	}
+	return nil
+}
+
 // Remove is used only after restoring the direct configuration or replacing
 // this revision with another closed gate. Refuse foreign or still-open rules.
 func (g *TrafficGate) Remove(ctx context.Context) error {

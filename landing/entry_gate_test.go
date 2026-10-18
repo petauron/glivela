@@ -32,6 +32,24 @@ func fixtureNFT(t *testing.T, gate *TrafficGate) nftDocument {
 	return result
 }
 
+func TestEntryGateHealthVerificationNeverMutatesPolicy(t *testing.T) {
+	gate := fixtureGate(t)
+	document := fixtureNFT(t, gate)
+	gate.run = func(_ context.Context, input []byte, _ ...string) ([]byte, error) {
+		if input != nil {
+			t.Fatal("read-only health poll changed firewall")
+		}
+		return json.Marshal(document)
+	}
+	if err := gate.Verify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	document.Objects[0]["table"]["comment"] = "unowned"
+	if gate.Verify(context.Background()) == nil {
+		t.Fatal("policy drift accepted")
+	}
+}
+
 func TestBridgeGateRejectsPolicyDriftAndFlowOffload(t *testing.T) {
 	gate := fixtureGate(t)
 	for _, test := range []struct {

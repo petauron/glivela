@@ -100,7 +100,7 @@ application/verification. Real mTLS/journal regression covers this delivery and
 deduplication boundary with a test worker, not an actual container or gate.
 
 Entry desired state can now use the direct channel and the shared revision/
-recovery journal. **The entry container execution adapter is still incomplete.**
+recovery journal. **Installed entry takeover and integration are still incomplete.**
 The existing `node` bootstrap uses the native landing/systemd driver, which
 explicitly refuses entry plans before service start/stop. Do not deploy an entry
 enrollment through that driver or claim these tests prove container takeover.
@@ -119,8 +119,9 @@ close that peer only; the monitor has no shared Xray process lifecycle methods.
 Xray UDP relay ports are per-association, so UDP fencing binds the dedicated
 runtime GID/bridge and exact private peer rather than Dante's old fixed range.
 Policy read-back, expiry, closed-revision cleanup and unrelated-peer preservation
-are tested separately. These primitives are not yet wired into the unfinished
-entry container adapter or its boot fence; they do not authorize deployment.
+are tested separately. The configuration driver below now uses these primitives;
+the installed boot fence and complete entry acceptance still do not authorize
+deployment.
 
 `control.EntryContainer` adds read-only ownership checks for the new owned
 entry profile: immutable full container/image IDs, the pinned official image,
@@ -129,11 +130,37 @@ minimal capabilities and private PID/IPC isolation. Host mode binds the
 dedicated GID; retained bridge mode binds the exact network ID and bridge name,
 not a reusable display name. Inspection uses only the fixed local Docker socket,
 with bounded output/time and no inherited Docker context or diagnostic dumps.
-Old Vastora labels do not count as ownership. This is not a lifecycle driver or
-legacy adopter: conversion of the frozen legacy resource inventory, config-byte
-and listener verification, boot fencing and activation/recovery are still needed.
+Old Vastora labels do not count as ownership. This read-only type is not itself
+a legacy adopter; frozen inventory conversion and installed takeover remain.
 The current tests mutate anonymous inspect snapshots; they do not create a real
 container or prove actual installed Docker acceptance.
+
+`control.EntryDriver` implements configuration activation/stop/observation for
+one already-owned container behind the durable runtime journal. Candidate core
+validation and unknown-config rejection precede mutation intent. The worker
+gets a separate private read-only config directory with its existing UID, never
+the node's journal/backups. Failed or interrupted activation restores the
+previous journaled config into that mount. This does not create/adopt containers
+or replace images; those resource transitions remain unfinished.
+
+Readiness code checks the mounted config through the actual PID, its UID/GID,
+no-new-privileges/capability status and exact TCP/API/authorized-UDP listener
+inodes held by that process. It rechecks Docker process identity afterwards.
+Unchanged core/transport can resume monitoring after a node-program restart or
+probe-only update without stopping Xray. Ordinary peer probe failure closes
+only that peer. Fatal gate-ownership loss instead quarantines the exact owned
+worker without an automatic restart; unknown firewall policy is never repaired
+by health polling.
+
+Local recovery tests use real files/journals with simulated Docker/process
+acceptance. Linux namespace CI additionally exercises real gates with simulated
+Docker/private-link failure and verifies unchanged-worker resume. These do not
+prove real container or successful-route acceptance. `RuntimeReady` describes
+the owned process/gates/monitor liveness, not all peers being reachable. Private
+source checks surround business probes, but their per-peer reports still need
+the controller acceptance path. Pre-cutover checks for newly enabled peers,
+image replacement, installer/boot integration and actual native destination/
+family safety acceptance remain required before exposing this driver via CLI.
 
 The `verifier` mode runs on an enrolled entry using its own private bootstrap,
 state-directory lease and mTLS identity. It polls `/v1/route-checks`, performs

@@ -18,7 +18,7 @@ func recoveryContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 30*time.Second)
 }
 
-// Driver is implemented by Glivela's native Xray adapter. It is deliberately
+// Driver is implemented by Glivela's owned Xray adapters. It is deliberately
 // not a remote execution protocol or a Vastora integration interface.
 type Driver interface {
 	Binding() string
@@ -36,7 +36,9 @@ type runtimeJournal struct {
 	Candidate *Desired `json:"candidate,omitempty"`
 }
 
-// NativeRuntime owns one private directory and one dedicated Xray service.
+// NativeRuntime owns one private journal and a dedicated Xray runtime. An
+// entry container receives a separate read-only configuration mount, never
+// this journal directory.
 // Existing applications must be explicitly handed over before use; an
 // unjournaled config file is never silently adopted or overwritten.
 type NativeRuntime struct {

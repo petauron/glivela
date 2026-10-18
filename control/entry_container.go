@@ -57,7 +57,7 @@ type entryContainerState struct {
 		DeviceRequests                            []json.RawMessage
 	}
 	State struct {
-		Status                            string
+		Status, StartedAt                 string
 		Running, Restarting, Paused, Dead bool
 		Pid                               int
 	}
@@ -71,7 +71,7 @@ type entryContainerState struct {
 // Keep the projection explicit: never request all inspect data, labels, logs,
 // process arguments beyond this known service, or an environment dump on stdout.
 // Env is compared in memory only and is never included in diagnostics/receipts.
-const entryInspectTemplate = `{"ID":{{json .Id}},"Image":{{json .Image}},"Config":{"Image":{{json .Config.Image}},"User":{{json .Config.User}},"WorkingDir":{{json .Config.WorkingDir}},"Labels":{"io.glivela.managed":{{json (index .Config.Labels "io.glivela.managed")}},"io.glivela.entry":{{json (index .Config.Labels "io.glivela.entry")}}},"Entrypoint":{{json .Config.Entrypoint}},"Cmd":{{json .Config.Cmd}},"Env":{{json .Config.Env}}},"Host":{"NetworkMode":{{json .HostConfig.NetworkMode}},"UsernsMode":{{json .HostConfig.UsernsMode}},"PidMode":{{json .HostConfig.PidMode}},"IpcMode":{{json .HostConfig.IpcMode}},"Privileged":{{json .HostConfig.Privileged}},"ReadonlyRootfs":{{json .HostConfig.ReadonlyRootfs}},"AutoRemove":{{json .HostConfig.AutoRemove}},"Restart":{{json .HostConfig.RestartPolicy.Name}},"CapAdd":{{json .HostConfig.CapAdd}},"CapDrop":{{json .HostConfig.CapDrop}},"SecurityOpt":{{json .HostConfig.SecurityOpt}},"GroupAdd":{{json .HostConfig.GroupAdd}},"PortBindings":{{json .HostConfig.PortBindings}},"Sysctls":{{json .HostConfig.Sysctls}},"Tmpfs":{{json .HostConfig.Tmpfs}},"Devices":{{json .HostConfig.Devices}},"DeviceRequests":{{json .HostConfig.DeviceRequests}}},"State":{"Status":{{json .State.Status}},"Running":{{json .State.Running}},"Restarting":{{json .State.Restarting}},"Paused":{{json .State.Paused}},"Dead":{{json .State.Dead}},"Pid":{{json .State.Pid}}},"Mounts":{{json .Mounts}},"Networks":{{json .NetworkSettings.Networks}}}`
+const entryInspectTemplate = `{"ID":{{json .Id}},"Image":{{json .Image}},"Config":{"Image":{{json .Config.Image}},"User":{{json .Config.User}},"WorkingDir":{{json .Config.WorkingDir}},"Labels":{"io.glivela.managed":{{json (index .Config.Labels "io.glivela.managed")}},"io.glivela.entry":{{json (index .Config.Labels "io.glivela.entry")}}},"Entrypoint":{{json .Config.Entrypoint}},"Cmd":{{json .Config.Cmd}},"Env":{{json .Config.Env}}},"Host":{"NetworkMode":{{json .HostConfig.NetworkMode}},"UsernsMode":{{json .HostConfig.UsernsMode}},"PidMode":{{json .HostConfig.PidMode}},"IpcMode":{{json .HostConfig.IpcMode}},"Privileged":{{json .HostConfig.Privileged}},"ReadonlyRootfs":{{json .HostConfig.ReadonlyRootfs}},"AutoRemove":{{json .HostConfig.AutoRemove}},"Restart":{{json .HostConfig.RestartPolicy.Name}},"CapAdd":{{json .HostConfig.CapAdd}},"CapDrop":{{json .HostConfig.CapDrop}},"SecurityOpt":{{json .HostConfig.SecurityOpt}},"GroupAdd":{{json .HostConfig.GroupAdd}},"PortBindings":{{json .HostConfig.PortBindings}},"Sysctls":{{json .HostConfig.Sysctls}},"Tmpfs":{{json .HostConfig.Tmpfs}},"Devices":{{json .HostConfig.Devices}},"DeviceRequests":{{json .HostConfig.DeviceRequests}}},"State":{"Status":{{json .State.Status}},"Running":{{json .State.Running}},"Restarting":{{json .State.Restarting}},"Paused":{{json .State.Paused}},"Dead":{{json .State.Dead}},"Pid":{{json .State.Pid}},"StartedAt":{{json .State.StartedAt}}},"Mounts":{{json .Mounts}},"Networks":{{json .NetworkSettings.Networks}}}`
 
 func exactDockerID(value string) bool {
 	b, err := hex.DecodeString(value)
@@ -201,7 +201,7 @@ func (o *entryDockerOutput) Write(p []byte) (int, error) {
 // Only the local system Docker daemon is used. Inherited DOCKER_HOST,
 // DOCKER_CONTEXT, plugin paths and environment proxy settings cannot redirect
 // privileged inspection to another daemon. No stderr or inspect output leaks.
-func readEntryDocker(ctx context.Context, arguments ...string) ([]byte, error) {
+func runEntryDocker(ctx context.Context, arguments ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "/usr/bin/docker", append([]string{"--host=unix:///var/run/docker.sock"}, arguments...)...)
@@ -210,7 +210,7 @@ func readEntryDocker(ctx context.Context, arguments ...string) ([]byte, error) {
 	var output entryDockerOutput
 	command.Stdout = &output
 	if command.Run() != nil {
-		return nil, errors.New("control: entry Docker inspection unavailable")
+		return nil, errors.New("control: entry Docker operation unavailable")
 	}
 	return output.Bytes(), nil
 }
@@ -236,7 +236,7 @@ func (c EntryContainer) Verify(ctx context.Context, d Desired) error {
 	if c.validate() != nil || d.Entry == nil || d.Validate() != nil {
 		return errors.New("control: valid owned entry required")
 	}
-	raw, err := readEntryDocker(ctx, "container", "inspect", "--format", entryInspectTemplate, c.ContainerID)
+	raw, err := runEntryDocker(ctx, "container", "inspect", "--format", entryInspectTemplate, c.ContainerID)
 	if err != nil {
 		return err
 	}
@@ -256,9 +256,10 @@ func (c EntryContainer) Verify(ctx context.Context, d Desired) error {
 	return nil
 }
 
+const entryBridgeTemplate = `{"Id":{{json .Id}},"Name":{{json .Name}},"Driver":{{json .Driver}},"Scope":{{json .Scope}},"Internal":{{json .Internal}},"Ingress":{{json .Ingress}},"Options":{{json .Options}}}`
+
 func (c EntryContainer) verifyBridge(ctx context.Context) error {
-	const projection = `{"Id":{{json .Id}},"Name":{{json .Name}},"Driver":{{json .Driver}},"Scope":{{json .Scope}},"Internal":{{json .Internal}},"Ingress":{{json .Ingress}},"Options":{{json .Options}}}`
-	raw, err := readEntryDocker(ctx, "network", "inspect", "--format", projection, c.NetworkID)
+	raw, err := runEntryDocker(ctx, "network", "inspect", "--format", entryBridgeTemplate, c.NetworkID)
 	if err != nil {
 		return err
 	}
