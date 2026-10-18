@@ -65,6 +65,14 @@ type archive struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "capture-final" {
+		if captureFinalCommand(context.Background(), os.Args[2:]) != nil {
+			fmt.Fprintln(os.Stderr, "final offline capture failed; keep old writers stopped and inspect private state")
+			os.Exit(1)
+		}
+		fmt.Println("final stopped-writer backup captured; authority remains unchanged")
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "stage" {
 		if stageImportCommand(os.Args[2:]) != nil {
 			fmt.Fprintln(os.Stderr, "offline business staging failed; existing authority unchanged")

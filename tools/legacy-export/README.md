@@ -1,5 +1,47 @@
 # One-time offline legacy export
 
+## MVP final snapshot, not a lossless traffic ledger
+
+The maintainer accepted small traffic undercounts across restart/sampling gaps
+when closing Vastora #652. Preserve the final **persisted** accounts, quota
+baselines, counters and reset cycles; prevent repeated import or obvious double
+counting. Do not add runtime-generation tracking, forced tail sampling or manual
+traffic reconciliation as a migration prerequisite. A small unobserved tail is
+not a reason to refuse an otherwise healthy replacement or keep the generic
+Agent permanently stopped.
+
+For the previous standard Docker Center installation, the one-time tool can
+capture that final persisted snapshot after the operator has stopped the old
+Center and disabled its automatic restart through normal maintenance:
+
+```sh
+legacy-export capture-final \
+  -container <full-old-center-container-id> \
+  -data-directory /private/old-center-data \
+  -backup-directory /private/new-final-backup
+```
+
+This root-only command **does not** stop/update containers, change their restart
+policy, restart services or checkpoint/repair SQLite. It inspects only the local
+Docker socket with a bounded response, excluding environment variables from
+output. It requires exact old Center labels/entrypoint/command/data mount,
+stopped process state and no automatic restart. Other writable containers whose
+mounts overlap the data directory must likewise be stopped and unable to
+auto-restart; stopped recovery containers need not be deleted. It rejects SQLite
+sidecars instead of silently discarding WAL data. The operator must keep old writers stopped until
+the replacement ownership transition is completed; a captured marker does not
+stop a person from restarting an old binary and is not a runtime permission.
+
+The new private directory contains exact `center.db` and `center.key` copies.
+Source bytes and writer state are checked again before `capture.json` is written
+last with the database hash and stopped-container identity. Existing directories
+are never overwritten. Failures may retain private partial backup files, but
+without the completion marker; they are not accepted as a completed capture.
+Keep all these files private and out of GitHub. Export the captured database
+using the existing command below; its schema, key binding, integrity and scope
+checks remain required. Neither capture nor export activates subscriptions,
+accepts route health or releases the old node writer fence.
+
 This isolated Go module is the **only** Glivela module allowed to depend on
 `modernc.org/sqlite v1.60.1`. It is not built by the native runtime distribution
 and neither controller nor node imports it. CI tests this module separately and
