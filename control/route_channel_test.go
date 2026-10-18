@@ -18,7 +18,7 @@ func TestRouteChannelUsesVerifiedPeer(t *testing.T) {
 	roots.AddCert(ca)
 	s := store(t)
 	d := artifact(1)
-	if err := s.Put(Node{ID: "landing-a", CertificateID: strings.Repeat("a", 64), Desired: d}); err != nil {
+	if err := s.Put(Node{ID: "landing-a", CertificateID: strings.Repeat("a", 64), Desired: d, RouteEntries: map[string]RouteEntry{"entry-a": {CertificateID: CertificateID(cert), Address: "100.64.0.3"}}}); err != nil {
 		t.Fatal(err)
 	}
 	reportRuntime(t, s, strings.Repeat("a", 64), d)

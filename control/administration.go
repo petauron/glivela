@@ -35,6 +35,11 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				return nil, errors.New("control: management and verifier identities must differ")
 			}
 		}
+		for _, entry := range node.RouteEntries {
+			if admins[entry.CertificateID] {
+				return nil, errors.New("control: management and entry identities must differ")
+			}
+		}
 	}
 	nodes := Handler(store)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,9 +68,10 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 		switch r.URL.Path {
 		case "/v1/admin/landings":
 			var request struct {
-				ID            string       `json:"id"`
-				CertificateID string       `json:"certificateId"`
-				Plan          landing.Plan `json:"plan"`
+				ID            string                `json:"id"`
+				CertificateID string                `json:"certificateId"`
+				Plan          landing.Plan          `json:"plan"`
+				RouteEntries  map[string]RouteEntry `json:"routeEntries"`
 			}
 			if decode(http.MaxBytesReader(w, r.Body, 64<<10), &request) != nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
 				http.Error(w, "invalid landing identity or plan", http.StatusBadRequest)
@@ -76,7 +82,13 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				http.Error(w, "invalid landing policy", http.StatusBadRequest)
 				return
 			}
-			if store.Put(Node{ID: request.ID, CertificateID: request.CertificateID, Desired: desired}) != nil {
+			for _, entry := range request.RouteEntries {
+				if admins[entry.CertificateID] {
+					http.Error(w, "entry identity required", http.StatusBadRequest)
+					return
+				}
+			}
+			if store.Put(Node{ID: request.ID, CertificateID: request.CertificateID, Desired: desired, RouteEntries: request.RouteEntries}) != nil {
 				http.Error(w, "landing update refused", http.StatusConflict)
 				return
 			}

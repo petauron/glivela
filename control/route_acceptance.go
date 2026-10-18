@@ -35,7 +35,7 @@ func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint6
 			return RouteAcceptance{Reason: "runtime-unverified"}, nil
 		}
 		status := RouteAcceptance{RuntimeReady: true}
-		if len(node.Checks) == 0 {
+		if !completeRouteInventory(node, node.Checks) {
 			status.Reason = "routes-incomplete"
 			return status, nil
 		}

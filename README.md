@@ -28,7 +28,11 @@ leaf-certificate fingerprints. It does not contain node business state. Existing
 `nodes` field is rejected, not replayed over managed updates.
 
 On the same private mTLS listener, a separately authorized management identity
-can POST `/v1/admin/landings` with `id`, `certificateId` and `plan`. Glivela
+can POST `/v1/admin/landings` with `id`, `certificateId`, `plan` and
+`routeEntries` (entry ID to `{certificateId,address}`). A configured entry
+inventory must cover every exact source in the landing plan, with distinct
+entry certificates. Provisioning without that inventory cannot pass route
+acceptance. Glivela
 validates the plan and generates the exact Xray artifact itself. The response
 is HTTP 202 with `revision` and `configSha256`, not a health success. Node
 identities cannot use management endpoints; management identities cannot submit
@@ -42,6 +46,9 @@ failure directly to Glivela. It cannot enroll nodes, listen for commands or
 control Xray. Management can POST the complete `checks` batch to
 `/v1/admin/route-checks`, then POST `landingId`, `snapshotId`, `revision` and
 `configSha256` to `/v1/admin/route-acceptance` for a read-only decision. These
+checks must match the independently enrolled entry inventory in full; submitting
+only passing entries or reusing one entry certificate for another is refused.
+Changing the enrolled inventory invalidates the old route proofs. These
 endpoints do not commit a migration or remove backups. Each retry has a new attempt ID; reports are bound to
 that attempt, snapshot, entry certificate, landing and desired revision/hash.
 Completed reports are durable, and a lost acknowledgement does not cause the

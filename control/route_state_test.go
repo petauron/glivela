@@ -19,7 +19,7 @@ func TestRouteChecksCannotVerifyAnotherPrivateProxy(t *testing.T) {
 	s := store(t)
 	d := artifact(1)
 	certificate, entry := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	if err := s.Put(Node{ID: "landing-a", CertificateID: certificate, Desired: d}); err != nil {
+	if err := s.Put(Node{ID: "landing-a", CertificateID: certificate, Desired: d, RouteEntries: map[string]RouteEntry{"entry-a": {CertificateID: entry, Address: "100.64.0.3"}}}); err != nil {
 		t.Fatal(err)
 	}
 	reportRuntime(t, s, certificate, d)
@@ -65,7 +65,7 @@ func TestRouteAttemptsAreBoundAndDurable(t *testing.T) {
 	s := store(t)
 	landing, entry := strings.Repeat("a", 64), strings.Repeat("b", 64)
 	d := artifact(1)
-	if err := s.Put(Node{ID: "landing-a", CertificateID: landing, Desired: d}); err != nil {
+	if err := s.Put(Node{ID: "landing-a", CertificateID: landing, Desired: d, RouteEntries: map[string]RouteEntry{"entry-a": {CertificateID: entry, Address: "100.64.0.3"}}}); err != nil {
 		t.Fatal(err)
 	}
 	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
@@ -162,7 +162,7 @@ func TestRouteExpiredAssignmentCannotAcceptResult(t *testing.T) {
 	s := store(t)
 	landing, entry := strings.Repeat("a", 64), strings.Repeat("b", 64)
 	d := artifact(1)
-	if err := s.Put(Node{ID: "landing-a", CertificateID: landing, Desired: d}); err != nil {
+	if err := s.Put(Node{ID: "landing-a", CertificateID: landing, Desired: d, RouteEntries: map[string]RouteEntry{"entry-a": {CertificateID: entry, Address: "100.64.0.3"}}}); err != nil {
 		t.Fatal(err)
 	}
 	reportRuntime(t, s, landing, d)

@@ -56,7 +56,7 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 		}
 		return response
 	}
-	enrollment := map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": d.Landing}
+	enrollment := map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": d.Landing, "routeEntries": map[string]RouteEntry{"entry-a": {CertificateID: CertificateID(entryCert), Address: "100.64.0.3"}}}
 	post(entryHTTP, "/v1/admin/landings", enrollment, http.StatusForbidden)
 	response := post(admin, "/v1/admin/landings", enrollment, http.StatusAccepted)
 	var revision struct {

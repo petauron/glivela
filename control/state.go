@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,7 @@ import (
 )
 
 type Node struct {
+	RouteEntries  map[string]RouteEntry   `json:"routeEntries,omitempty"`
 	Checks        map[string]RouteCheck   `json:"checks,omitempty"`
 	ID            string                  `json:"id"`
 	CertificateID string                  `json:"certificateId"`
@@ -62,7 +64,7 @@ func OpenStore(path string) (*Store, error) {
 	}
 	seen := map[string]bool{}
 	for _, node := range nodes {
-		if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || seen[node.ID] {
+		if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || seen[node.ID] || validateRouteEntries(node) != nil {
 			return nil, errors.New("control: invalid node")
 		}
 		if _, ok := s.nodes[node.CertificateID]; ok {
@@ -79,6 +81,9 @@ func OpenStore(path string) (*Store, error) {
 				return nil, errors.New("control: inconsistent stored route check")
 			}
 		}
+		if len(node.Checks) > 0 && !completeRouteInventory(node, node.Checks) {
+			return nil, errors.New("control: incomplete stored entry verification inventory")
+		}
 		seen[node.ID] = true
 		s.nodes[node.CertificateID] = node
 	}
@@ -91,7 +96,7 @@ func OpenStore(path string) (*Store, error) {
 func (s *Store) Put(node Node) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || len(node.Checks) != 0 {
+	if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || len(node.Checks) != 0 || validateRouteEntries(node) != nil {
 		return errors.New("control: invalid enrollment")
 	}
 	next := s.copy()
@@ -105,7 +110,7 @@ func (s *Store) Put(node Node) error {
 		if node.Desired.Revision < old.Desired.Revision || node.Desired.Revision == old.Desired.Revision && node.Desired.ConfigSHA256 != old.Desired.ConfigSHA256 {
 			return errors.New("control: non-monotonic desired state")
 		}
-		if node.Desired.Revision == old.Desired.Revision {
+		if node.Desired.Revision == old.Desired.Revision && maps.Equal(node.RouteEntries, old.RouteEntries) {
 			node.Checks = old.Checks
 		}
 		delete(next, key)
@@ -114,6 +119,7 @@ func (s *Store) Put(node Node) error {
 	node.Receipt = nil
 	node.ReportedAt = time.Time{}
 	node.Desired = node.Desired.clone()
+	node.RouteEntries = maps.Clone(node.RouteEntries)
 	next[node.CertificateID] = node
 	return s.commit(next)
 }

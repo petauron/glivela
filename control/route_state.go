@@ -34,9 +34,8 @@ func routeTargetsLanding(p RouteProbe, node Node) bool {
 		p.LandingID == node.ID && p.Revision == node.Desired.Revision && p.ConfigSHA256 == node.Desired.ConfigSHA256
 }
 
-// AssignRouteChecks atomically fixes the complete entry inventory for one
-// landing verification. A retry replaces the whole attempt, never a subset of
-// its results. This administrative operation is not exposed to nodes.
+// AssignRouteChecks atomically queues the complete independently enrolled entry
+// inventory. A retry cannot narrow it to whichever entries happened to pass.
 func (s *Store) AssignRouteChecks(assignments []RouteCheck) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -67,6 +66,9 @@ func (s *Store) AssignRouteChecks(assignments []RouteCheck) error {
 		}
 		if node.Desired.Revision != request.Revision || node.Desired.ConfigSHA256 != request.ConfigSHA256 {
 			return errors.New("control: route assignment is stale")
+		}
+		if !completeRouteInventory(node, checks) {
+			return errors.New("control: route checks must cover every enrolled entry")
 		}
 		for _, check := range checks {
 			if !routeTargetsLanding(check.Request, node) {
@@ -124,7 +126,7 @@ func (s *Store) RouteExchange(ctx context.Context, certificate string, report *R
 				continue
 			}
 			check, ok := node.Checks[report.EntryID]
-			if !ok || check.CertificateID != certificate || !routeTargetsLanding(check.Request, node) || validateRouteResult(check.Request, *report) != nil || node.Desired.Revision != report.Revision || node.Desired.ConfigSHA256 != report.ConfigSHA256 {
+			if !ok || !completeRouteInventory(node, node.Checks) || check.CertificateID != certificate || !routeTargetsLanding(check.Request, node) || validateRouteResult(check.Request, *report) != nil || node.Desired.Revision != report.Revision || node.Desired.ConfigSHA256 != report.ConfigSHA256 {
 				return nil, errors.New("control: route report refused")
 			}
 			if check.Result != nil {
@@ -159,7 +161,7 @@ func (s *Store) RouteExchange(ctx context.Context, certificate string, report *R
 	}
 	var pending []RouteProbe
 	for _, node := range s.nodes {
-		if !runtimeFresh(node, now) {
+		if !runtimeFresh(node, now) || !completeRouteInventory(node, node.Checks) {
 			continue
 		}
 		for _, check := range node.Checks {
