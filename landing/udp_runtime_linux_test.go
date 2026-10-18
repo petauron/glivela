@@ -133,16 +133,23 @@ func TestRenderedLandingUDP(t *testing.T) {
 		}
 	}
 	defer control.Close()
-	if relay != proxy {
-		t.Fatal("core returned a relay outside the exact protected listener", relay)
+	validateRelay := func(address string) {
+		t.Helper()
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || host != plan.Address || port == "0" || port == "" {
+			t.Fatal("core returned a relay outside the assigned landing address", address, err)
+		}
 	}
+	validateRelay(relay)
+	t.Logf("SOCKS control=%s, association relay=%s", proxy, relay)
 	allowed := func() {
 		t.Helper()
 		nonce := udpRuntimeNonce(t)
 		got, err := udpRuntimeExchange("100.64.0.11", relay, udpRuntimePacket("93.184.216.34:8443", nonce))
 		payload, parseErr := udpRuntimePayload(got, "93.184.216.34:8443")
 		if err != nil || parseErr != nil || string(payload) != "observed=192.168.50.2;"+nonce {
-			t.Fatal("authorized UDP failed or used another egress", err, parseErr)
+			t.Fatal("authorized UDP failed or used another egress", err, parseErr,
+				"target-observed sources:", peers["93.184.216.34:8443"].sources(nonce))
 		}
 		if observed := peers["93.184.216.34:8443"].sources(nonce); len(observed) != 1 || observed[0] != plan.EgressIP {
 			t.Fatal("target did not independently observe the selected egress", observed)
@@ -150,9 +157,9 @@ func TestRenderedLandingUDP(t *testing.T) {
 	}
 	allowed()
 	denied := map[string][]string{}
-	assertDenied := func(source, destination string) {
+	assertDenied := func(source, destination, associationRelay string) {
 		t.Helper()
-		exchange := func(packet []byte) ([]byte, error) { return udpRuntimeExchange(source, relay, packet) }
+		exchange := func(packet []byte) ([]byte, error) { return udpRuntimeExchange(source, associationRelay, packet) }
 		if source == "100.64.0.11" {
 			// Use one UDP source port for the allowed seed and forbidden next
 			// destination, not merely the same TCP association with fresh flows.
@@ -161,7 +168,7 @@ func TestRenderedLandingUDP(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer session.Close()
-			exchange = func(packet []byte) ([]byte, error) { return udpRuntimeExchangeOn(session, relay, packet) }
+			exchange = func(packet []byte) ([]byte, error) { return udpRuntimeExchangeOn(session, associationRelay, packet) }
 			seed := udpRuntimeNonce(t)
 			got, err := exchange(udpRuntimePacket("93.184.216.34:8443", seed))
 			payload, parseErr := udpRuntimePayload(got, "93.184.216.34:8443")
@@ -180,12 +187,15 @@ func TestRenderedLandingUDP(t *testing.T) {
 	// Keep each TCP association alive. UDP is denied by source policy, not by
 	// accidentally closing its control stream or disabling UDP globally.
 	tcpOnlyControl, tcpOnlyRelay, err := udpRuntimeAssociate("100.64.0.12", proxy)
-	if err != nil || tcpOnlyRelay != relay {
+	if err != nil {
 		t.Fatal("TCP-only source must still reach the SOCKS control listener", err)
 	}
 	defer tcpOnlyControl.Close()
-	assertDenied("100.64.0.12", "93.184.216.34:8443")
-	assertDenied("100.64.0.13", "93.184.216.34:8443")
+	validateRelay(tcpOnlyRelay)
+	// Test this source's own association. Sending to the other source's relay
+	// would be rejected by Xray itself and would not exercise UDP authorization.
+	assertDenied("100.64.0.12", "93.184.216.34:8443", tcpOnlyRelay)
+	assertDenied("100.64.0.13", "93.184.216.34:8443", relay)
 	unauthorized, _, err := udpRuntimeAssociate("100.64.0.13", proxy)
 	if unauthorized != nil {
 		unauthorized.Close()
@@ -196,8 +206,8 @@ func TestRenderedLandingUDP(t *testing.T) {
 	}
 	// Change destination after an allowed datagram: a first-packet decision
 	// must not authorize private/management packets in an existing association.
-	assertDenied("100.64.0.11", "192.168.50.3:8443")
-	assertDenied("100.64.0.11", "93.184.216.34:22")
+	assertDenied("100.64.0.11", "192.168.50.3:8443", relay)
+	assertDenied("100.64.0.11", "93.184.216.34:22", relay)
 	allowed() // Denials must not be explained by a dead core/target.
 
 	// Exercise the UID-scoped kernel guard independently of Xray routing.
