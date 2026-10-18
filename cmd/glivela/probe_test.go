@@ -13,7 +13,7 @@ import (
 )
 
 func TestRouteCommandReportsFailureForExactOperation(t *testing.T) {
-	p := control.RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: 7, ConfigSHA256: strings.Repeat("a", 64), SOCKSAddress: "127.0.0.1:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
+	p := control.RouteProbe{AttemptID: "attempt-example", SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: 7, ConfigSHA256: strings.Repeat("a", 64), SOCKSAddress: "127.0.0.1:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
 	raw, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)

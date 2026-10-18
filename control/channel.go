@@ -60,6 +60,10 @@ func Handler(repository Repository) http.Handler {
 			http.Error(w, "client authentication required", http.StatusUnauthorized)
 			return
 		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/route-checks" && r.URL.RawQuery == "" {
+			handleRouteExchange(repository, w, r)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/exchange" || r.URL.RawQuery != "" {
 			http.Error(w, "unsupported request", http.StatusNotFound)
 			return

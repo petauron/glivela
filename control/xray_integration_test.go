@@ -105,7 +105,7 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 	exitTarget := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("203.0.113.9\n")) }))
 	defer exitTarget.Close()
 	pool.AddCert(exitTarget.Certificate())
-	probe := RouteProbe{SnapshotID: "snapshot-example", EntryID: "entry-example", LandingID: "landing-example", Revision: 7, ConfigSHA256: strings.Repeat("a", 64), SOCKSAddress: address, Target: strings.Replace(exitTarget.URL, "127.0.0.1", "example.com", 1), ExpectedExit: "203.0.113.9"}
+	probe := RouteProbe{AttemptID: "attempt-example", SnapshotID: "snapshot-example", EntryID: "entry-example", LandingID: "landing-example", Revision: 7, ConfigSHA256: strings.Repeat("a", 64), SOCKSAddress: address, Target: strings.Replace(exitTarget.URL, "127.0.0.1", "example.com", 1), ExpectedExit: "203.0.113.9"}
 	result, err := checkRoute(ctx, probe, pool)
 	if err != nil || !result.Passed || !result.TLSVerified || result.HTTPStatus != 200 || result.Revision != 7 || result.SnapshotID != probe.SnapshotID {
 		t.Fatal("entry-side route acceptance failed", err, result.Failure)

@@ -14,6 +14,7 @@ import (
 )
 
 type Node struct {
+	Checks        map[string]RouteCheck   `json:"checks,omitempty"`
 	ID            string                  `json:"id"`
 	CertificateID string                  `json:"certificateId"`
 	Desired       Desired                 `json:"desired"`
@@ -70,6 +71,14 @@ func OpenStore(path string) (*Store, error) {
 		if node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, *node.Receipt) != nil {
 			return nil, errors.New("control: invalid stored receipt")
 		}
+		for entry, check := range node.Checks {
+			if entry != check.Request.EntryID || check.Request.LandingID != node.ID || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
+				return nil, errors.New("control: invalid stored route check")
+			}
+			if len(node.Checks) > 64 || check.Request.Revision != node.Desired.Revision || check.Request.ConfigSHA256 != node.Desired.ConfigSHA256 || (check.Result == nil) != check.ReceivedAt.IsZero() {
+				return nil, errors.New("control: inconsistent stored route check")
+			}
+		}
 		seen[node.ID] = true
 		s.nodes[node.CertificateID] = node
 	}
@@ -82,7 +91,7 @@ func OpenStore(path string) (*Store, error) {
 func (s *Store) Put(node Node) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil {
+	if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || len(node.Checks) != 0 {
 		return errors.New("control: invalid enrollment")
 	}
 	next := s.copy()
@@ -95,6 +104,9 @@ func (s *Store) Put(node Node) error {
 		}
 		if node.Desired.Revision < old.Desired.Revision || node.Desired.Revision == old.Desired.Revision && node.Desired.ConfigSHA256 != old.Desired.ConfigSHA256 {
 			return errors.New("control: non-monotonic desired state")
+		}
+		if node.Desired.Revision == old.Desired.Revision {
+			node.Checks = old.Checks
 		}
 		delete(next, key)
 	}
