@@ -21,15 +21,16 @@ const maxMessage = 8 << 20
 
 // NewServer supplies bounded HTTP handling for the direct node endpoint.
 // ListenAndServeTLS must be used; TLS certificates are supplied in the config.
-func NewServer(address string, repository Repository, certificate tls.Certificate, clients *x509.CertPool) (*http.Server, error) {
-	if repository == nil {
-		return nil, errors.New("control: repository required")
+func NewServer(address string, store *Store, certificate tls.Certificate, clients *x509.CertPool, administrators []string) (*http.Server, error) {
+	handler, err := controllerHandler(store, administrators)
+	if err != nil {
+		return nil, err
 	}
 	configuration, err := ServerTLS(certificate, clients)
 	if err != nil {
 		return nil, err
 	}
-	return &http.Server{Addr: address, Handler: Handler(repository), TLSConfig: configuration,
+	return &http.Server{Addr: address, Handler: handler, TLSConfig: configuration,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second,
 		WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}, nil
 }
