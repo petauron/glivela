@@ -44,7 +44,7 @@ func CertificateID(cert *x509.Certificate) string {
 // Repository is owned by Glivela. Exchange must atomically compare a report
 // with the current desired revision before recording it.
 type Repository interface {
-	Exchange(context.Context, string, *glivela.AppliedReceipt) (glivela.DesiredArtifact, error)
+	Exchange(context.Context, string, *glivela.AppliedReceipt) (Desired, error)
 }
 
 type exchange struct {
@@ -115,27 +115,27 @@ func NewClient(endpoint string, identity tls.Certificate, roots *x509.CertPool) 
 
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 
-func (c *Client) Exchange(ctx context.Context, receipt *glivela.AppliedReceipt) (glivela.DesiredArtifact, error) {
+func (c *Client) Exchange(ctx context.Context, receipt *glivela.AppliedReceipt) (Desired, error) {
 	raw, err := json.Marshal(exchange{Receipt: receipt})
 	if err != nil {
-		return glivela.DesiredArtifact{}, errors.New("control: cannot encode report")
+		return Desired{}, errors.New("control: cannot encode report")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(raw))
 	if err != nil {
-		return glivela.DesiredArtifact{}, errors.New("control: invalid request")
+		return Desired{}, errors.New("control: invalid request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	response, err := c.http.Do(req)
 	if err != nil {
-		return glivela.DesiredArtifact{}, errors.New("control: exchange failed")
+		return Desired{}, errors.New("control: exchange failed")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return glivela.DesiredArtifact{}, errors.New("control: exchange refused")
+		return Desired{}, errors.New("control: exchange refused")
 	}
-	var desired glivela.DesiredArtifact
+	var desired Desired
 	if decode(io.LimitReader(response.Body, maxMessage+1), &desired) != nil || desired.Validate() != nil {
-		return glivela.DesiredArtifact{}, errors.New("control: invalid desired state")
+		return Desired{}, errors.New("control: invalid desired state")
 	}
 	return desired, nil
 }

@@ -21,17 +21,19 @@ func recoveryContext() (context.Context, context.CancelFunc) {
 // Driver is implemented by Glivela's native Xray adapter. It is deliberately
 // not a remote execution protocol or a Vastora integration interface.
 type Driver interface {
+	Binding() string
 	Validate(context.Context, string) error
-	Activate(context.Context) error
-	Stop(context.Context) error
-	Healthy(context.Context) error
+	Activate(context.Context, Desired, *Desired) error
+	Stop(context.Context, Desired) error
+	Healthy(context.Context, Desired) error
 }
 
 type runtimeJournal struct {
-	Version   int                      `json:"version"`
-	Phase     string                   `json:"phase"`
-	Current   *glivela.DesiredArtifact `json:"current,omitempty"`
-	Candidate *glivela.DesiredArtifact `json:"candidate,omitempty"`
+	Version   int      `json:"version"`
+	Binding   string   `json:"binding"`
+	Phase     string   `json:"phase"`
+	Current   *Desired `json:"current,omitempty"`
+	Candidate *Desired `json:"candidate,omitempty"`
 }
 
 // NativeRuntime owns one private directory and one dedicated Xray service.
@@ -71,6 +73,9 @@ func (r *NativeRuntime) journal() (runtimeJournal, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil || json.Unmarshal(raw, &state) != nil || state.Version != 1 {
 		return state, errors.New("control: unreadable runtime journal")
+	}
+	if state.Binding == "" || state.Binding != r.Driver.Binding() {
+		return state, errors.New("control: local runtime identity changed; explicit handover required")
 	}
 	if state.Current != nil && state.Current.Validate() != nil || state.Candidate != nil && state.Candidate.Validate() != nil {
 		return state, errors.New("control: damaged runtime artifacts")
@@ -125,7 +130,7 @@ func replacePrivate(directory, name string, contents []byte) error {
 	return dir.Sync()
 }
 
-func (r *NativeRuntime) Apply(ctx context.Context, desired glivela.DesiredArtifact) error {
+func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if desired.Validate() != nil {
@@ -136,7 +141,10 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired glivela.DesiredArtifa
 		return err
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		state = runtimeJournal{Version: 1, Phase: "ready"}
+		state = runtimeJournal{Version: 1, Phase: "ready", Binding: r.Driver.Binding()}
+		if state.Binding == "" {
+			return errors.New("control: runtime binding required")
+		}
 	}
 	if state.Phase != "ready" {
 		return errors.New("control: recovery required")
@@ -165,10 +173,10 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired glivela.DesiredArtifa
 		return err
 	}
 	if err = replacePrivate(r.Directory, "config.json", desired.Config); err == nil {
-		err = r.Driver.Activate(ctx)
+		err = r.Driver.Activate(ctx, desired, state.Current)
 	}
 	if err == nil {
-		err = r.Driver.Healthy(ctx)
+		err = r.Driver.Healthy(ctx, desired)
 	}
 	if err != nil {
 		// A cancelled upgrade must still get a bounded opportunity to restore
@@ -200,7 +208,7 @@ func (r *NativeRuntime) restore(ctx context.Context, state runtimeJournal) error
 		}
 	}
 	if state.Current == nil {
-		if err := r.Driver.Stop(ctx); err != nil {
+		if err := r.Driver.Stop(ctx, *state.Candidate); err != nil {
 			return err
 		}
 	} else {
@@ -210,10 +218,10 @@ func (r *NativeRuntime) restore(ctx context.Context, state runtimeJournal) error
 		if err := r.Driver.Validate(ctx, filepath.Join(r.Directory, "config.json")); err != nil {
 			return err
 		}
-		if err := r.Driver.Activate(ctx); err != nil {
+		if err := r.Driver.Activate(ctx, *state.Current, state.Candidate); err != nil {
 			return err
 		}
-		if err := r.Driver.Healthy(ctx); err != nil {
+		if err := r.Driver.Healthy(ctx, *state.Current); err != nil {
 			return err
 		}
 	}
@@ -222,7 +230,7 @@ func (r *NativeRuntime) restore(ctx context.Context, state runtimeJournal) error
 	return r.save(state)
 }
 
-func (r *NativeRuntime) backup(a glivela.DesiredArtifact) error {
+func (r *NativeRuntime) backup(a Desired) error {
 	raw, err := json.Marshal(a)
 	if err != nil {
 		return err
@@ -280,10 +288,10 @@ func (r *NativeRuntime) Inspect(ctx context.Context) (glivela.AppliedReceipt, er
 	if err := r.verifyConfig(a); err != nil {
 		return glivela.AppliedReceipt{}, err
 	}
-	return glivela.AppliedReceipt{Revision: a.Revision, ConfigSHA256: a.ConfigSHA256, RuntimeReady: r.Driver.Healthy(ctx) == nil}, nil
+	return glivela.AppliedReceipt{Revision: a.Revision, ConfigSHA256: a.ConfigSHA256, RuntimeReady: r.Driver.Healthy(ctx, a) == nil}, nil
 }
 
-func (r *NativeRuntime) verifyConfig(a glivela.DesiredArtifact) error {
+func (r *NativeRuntime) verifyConfig(a Desired) error {
 	info, err := os.Lstat(filepath.Join(r.Directory, "config.json"))
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > maxMessage {
 		return errors.New("control: cannot verify active config")

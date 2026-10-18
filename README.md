@@ -25,6 +25,19 @@ an unchanged revision does not restart the service. The controller bootstrap
 enrolls certificate-bound desired artifacts; it is not a replacement business
 UI or a complete legacy-data importer.
 
+`landing/` renders the official Xray 26.7.28 SOCKS configuration and dedicated
+UID-scoped nftables policy from one explicit plan. The node channel binds this
+plan to the exact configuration digest. The runtime journals both together,
+stops the worker during rule replacement, installs/read-backs the new rules
+before starting, and retains the previous complete plan for recovery. Changes
+to the local worker UID or mesh interface require explicit handover. Only
+exact authorized mesh sources are granted access; TCP-only grants stay TCP-only.
+
+Local readiness checks the service and rules; it **does not** mean an end-to-end
+route passed. The local process is not allowed to bypass source restrictions
+to probe its own SOCKS listener. Authorized entry-side route acceptance is
+still required before exposing a route as healthy.
+
 This is **not yet an installable landing replacement**. The installer still
 needs to provision the dedicated Xray unit and its enforced firewall dependency;
 this code refuses an unknown unit rather than installing an unsafe substitute.

@@ -10,11 +10,16 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"time"
+
+	"github.com/petauron/glivela/landing"
 )
 
 // SystemdDriver invokes only an installed, hash-pinned official Xray and the
@@ -25,11 +30,16 @@ type SystemdDriver struct {
 	Binary       string `json:"binary"`
 	BinarySHA256 string `json:"binarySha256"`
 	UnitSHA256   string `json:"unitSha256"`
-	SOCKSAddress string `json:"socksAddress"`
-	ProbeURL     string `json:"probeUrl"`
+	WorkerUID    uint32 `json:"workerUid"`
+	Interface    string `json:"interface"`
 }
 
 const xrayUnitPath = "/etc/systemd/system/glivela-xray.service"
+
+// Ownership changes require explicit handover, not silent rule replacement.
+func (d SystemdDriver) Binding() string {
+	return "glivela-xray:" + strconv.FormatUint(uint64(d.WorkerUID), 10) + ":" + d.Interface
+}
 
 func verifyExecutableFile(path, expected string) error {
 	if !filepath.IsAbs(path) {
@@ -86,14 +96,89 @@ func (d SystemdDriver) service(ctx context.Context, action string) error {
 	}
 	return nil
 }
-func (d SystemdDriver) Activate(ctx context.Context) error { return d.service(ctx, "restart") }
-func (d SystemdDriver) Stop(ctx context.Context) error     { return d.service(ctx, "stop") }
+func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
+	if err := desired.Validate(); err != nil {
+		return landing.ServerFirewall{}, err
+	}
+	worker, err := user.Lookup("glivela-xray")
+	if err != nil || worker.Uid != strconv.FormatUint(uint64(d.WorkerUID), 10) {
+		return landing.ServerFirewall{}, errors.New("control: dedicated worker identity differs")
+	}
+	iface, err := net.InterfaceByName(d.Interface)
+	if err != nil {
+		return landing.ServerFirewall{}, errors.New("control: private interface unavailable")
+	}
+	addresses, err := iface.Addrs()
+	if err != nil {
+		return landing.ServerFirewall{}, err
+	}
+	assigned := func(addresses []net.Addr, want string) bool {
+		for _, address := range addresses {
+			prefix, err := netip.ParsePrefix(address.String())
+			if err == nil && prefix.Addr().String() == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !assigned(addresses, desired.Landing.Address) {
+		return landing.ServerFirewall{}, errors.New("control: landing listener is not on private interface")
+	}
+	all, err := net.InterfaceAddrs()
+	if err != nil || !assigned(all, desired.Landing.EgressIP) {
+		return landing.ServerFirewall{}, errors.New("control: egress source is not locally assigned")
+	}
+	return desired.Landing.Firewall(d.WorkerUID, d.Interface)
+}
 
-func (d SystemdDriver) Healthy(ctx context.Context) error {
+func (d SystemdDriver) Activate(ctx context.Context, desired Desired, previous *Desired) error {
+	policy, err := d.policy(desired)
+	if err != nil {
+		return err
+	}
+	// No worker runs during rule replacement. Install the candidate before
+	// removing the exact previous table; an interrupted switch remains closed.
+	if err = d.service(ctx, "stop"); err != nil {
+		return err
+	}
+	if err = policy.Install(ctx); err != nil {
+		return err
+	}
+	if previous != nil && previous.Revision != desired.Revision {
+		old, err := previous.Landing.Firewall(d.WorkerUID, d.Interface)
+		if err != nil {
+			return err
+		}
+		if err = old.Remove(ctx); err != nil {
+			return err
+		}
+	}
+	return d.service(ctx, "start")
+}
+
+func (d SystemdDriver) Stop(ctx context.Context, desired Desired) error {
+	if err := d.service(ctx, "stop"); err != nil {
+		return err
+	}
+	policy, err := desired.Landing.Firewall(d.WorkerUID, d.Interface)
+	if err != nil {
+		return err
+	}
+	return policy.Remove(ctx)
+}
+
+// Healthy is local runtime readiness, not end-to-end route acceptance. A local
+// SOCKS probe would violate the exact mesh-source allowlist. Route acceptance
+// must originate from an authorized entry and be tracked independently.
+func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 	if err := d.service(ctx, "is-active"); err != nil {
 		return err
 	}
-	return probeSOCKSTLS(ctx, d.SOCKSAddress, d.ProbeURL, nil)
+	policy, err := d.policy(desired)
+	if err != nil {
+		return err
+	}
+	return policy.Verify(ctx)
 }
 
 func probeSOCKSTLS(ctx context.Context, socksAddress, probeURL string, roots *x509.CertPool) error {

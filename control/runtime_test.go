@@ -12,12 +12,22 @@ type driverFixture struct {
 	validErr      error
 	starts, stops int
 	failHealth    int
+	binding       string
+	active        Desired
+	prior         *Desired
 }
 
+func (f *driverFixture) Binding() string { return "fixture:" + f.binding }
+
 func (f *driverFixture) Validate(context.Context, string) error { return f.validErr }
-func (f *driverFixture) Activate(context.Context) error         { f.starts++; return nil }
-func (f *driverFixture) Stop(context.Context) error             { f.stops++; return nil }
-func (f *driverFixture) Healthy(context.Context) error {
+func (f *driverFixture) Activate(_ context.Context, desired Desired, prior *Desired) error {
+	f.starts++
+	f.active = desired.clone()
+	f.prior = prior
+	return nil
+}
+func (f *driverFixture) Stop(context.Context, Desired) error { f.stops++; return nil }
+func (f *driverFixture) Healthy(context.Context, Desired) error {
 	if f.failHealth > 0 {
 		f.failHealth--
 		return errors.New("unhealthy")

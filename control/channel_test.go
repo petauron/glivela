@@ -5,11 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/hex"
 	"errors"
 	"math/big"
 	"net"
@@ -22,12 +20,15 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
-func artifact(revision uint64) glivela.DesiredArtifact {
-	raw := []byte(`{"outbounds":[{"protocol":"blackhole"}]}`)
-	digest := sha256.Sum256(raw)
-	return glivela.DesiredArtifact{Revision: revision, Config: raw, ConfigSHA256: hex.EncodeToString(digest[:])}
+func artifact(revision uint64) Desired {
+	d, err := NewDesired(landing.Plan{Revision: revision, Address: "100.64.0.2", EgressIP: "192.168.50.2", Sources: []landing.Source{{Address: "100.64.0.3"}}})
+	if err != nil {
+		panic(err)
+	}
+	return d
 }
 
 func identity(t *testing.T, ca *x509.Certificate, signer *ecdsa.PrivateKey, server bool) (tls.Certificate, *x509.Certificate, *ecdsa.PrivateKey) {
@@ -176,7 +177,7 @@ type fakeRuntime struct {
 func (f *fakeRuntime) Inspect(context.Context) (glivela.AppliedReceipt, error) {
 	return f.current, f.inspectErr
 }
-func (f *fakeRuntime) Apply(_ context.Context, desired glivela.DesiredArtifact) error {
+func (f *fakeRuntime) Apply(_ context.Context, desired Desired) error {
 	f.applies++
 	if f.applyErr != nil {
 		return f.applyErr
@@ -187,12 +188,12 @@ func (f *fakeRuntime) Apply(_ context.Context, desired glivela.DesiredArtifact) 
 }
 
 type fakeClient struct {
-	desired glivela.DesiredArtifact
+	desired Desired
 	err     error
 	reports int
 }
 
-func (f *fakeClient) Exchange(_ context.Context, receipt *glivela.AppliedReceipt) (glivela.DesiredArtifact, error) {
+func (f *fakeClient) Exchange(_ context.Context, receipt *glivela.AppliedReceipt) (Desired, error) {
 	if receipt != nil {
 		f.reports++
 	}

@@ -16,7 +16,7 @@ import (
 type Node struct {
 	ID            string                  `json:"id"`
 	CertificateID string                  `json:"certificateId"`
-	Desired       glivela.DesiredArtifact `json:"desired"`
+	Desired       Desired                 `json:"desired"`
 	Receipt       *glivela.AppliedReceipt `json:"receipt,omitempty"`
 	ReportedAt    time.Time               `json:"reportedAt,omitempty"`
 }
@@ -67,7 +67,7 @@ func OpenStore(path string) (*Store, error) {
 		if _, ok := s.nodes[node.CertificateID]; ok {
 			return nil, errors.New("control: duplicate enrollment")
 		}
-		if node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired, *node.Receipt) != nil {
+		if node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, *node.Receipt) != nil {
 			return nil, errors.New("control: invalid stored receipt")
 		}
 		seen[node.ID] = true
@@ -101,38 +101,37 @@ func (s *Store) Put(node Node) error {
 	// Administrative imports cannot manufacture a ready node.
 	node.Receipt = nil
 	node.ReportedAt = time.Time{}
-	node.Desired.Config = append([]byte(nil), node.Desired.Config...)
+	node.Desired = node.Desired.clone()
 	next[node.CertificateID] = node
 	return s.commit(next)
 }
 
-func (s *Store) Exchange(ctx context.Context, certificate string, receipt *glivela.AppliedReceipt) (glivela.DesiredArtifact, error) {
+func (s *Store) Exchange(ctx context.Context, certificate string, receipt *glivela.AppliedReceipt) (Desired, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return glivela.DesiredArtifact{}, err
+		return Desired{}, err
 	}
 	node, ok := s.nodes[certificate]
 	if !ok {
-		return glivela.DesiredArtifact{}, errors.New("control: not enrolled")
+		return Desired{}, errors.New("control: not enrolled")
 	}
 	if receipt != nil && receipt.Revision == node.Desired.Revision && receipt.ConfigSHA256 == node.Desired.ConfigSHA256 {
 		copyReceipt := *receipt
 		node.Receipt = nil
-		if glivela.VerifyAppliedReceipt(node.Desired, copyReceipt) == nil {
+		if glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, copyReceipt) == nil {
 			node.Receipt = &copyReceipt
 		}
 		node.ReportedAt = time.Now().UTC()
 		next := s.copy()
 		next[certificate] = node
 		if err := s.commit(next); err != nil {
-			return glivela.DesiredArtifact{}, err
+			return Desired{}, err
 		}
 	}
 	// A stale report is not accepted as healthy, but must not prevent the node
 	// from receiving a newer desired revision after an interrupted update.
-	result := node.Desired
-	result.Config = append([]byte(nil), result.Config...)
+	result := node.Desired.clone()
 	return result, nil
 }
 
