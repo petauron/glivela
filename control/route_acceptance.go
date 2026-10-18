@@ -8,8 +8,8 @@ import (
 )
 
 // RouteAcceptance is a read-only gate for a single landing cutover. The caller
-// supplies the complete entry inventory from its frozen snapshot, not a subset
-// inferred from whichever checks happened to finish. It does not commit a
+// reads the complete persisted entry inventory, not a caller-selected subset
+// of whichever checks happened to finish. It does not commit a
 // migration or remove recovery resources.
 type RouteAcceptance struct {
 	RuntimeReady bool   `json:"runtimeReady"`
@@ -17,18 +17,11 @@ type RouteAcceptance struct {
 	Reason       string `json:"reason"`
 }
 
-func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint64, digest string, entries []string) (RouteAcceptance, error) {
+func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint64, digest string) (RouteAcceptance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !glivela.ValidIdentifier(landingID) || !glivela.ValidIdentifier(snapshotID) || revision == 0 || !glivela.ValidIdentity(digest) || len(entries) == 0 || len(entries) > 64 {
+	if !glivela.ValidIdentifier(landingID) || !glivela.ValidIdentifier(snapshotID) || revision == 0 || !glivela.ValidIdentity(digest) {
 		return RouteAcceptance{}, errors.New("control: complete route acceptance identity required")
-	}
-	seen := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		if !glivela.ValidIdentifier(entry) || seen[entry] {
-			return RouteAcceptance{}, errors.New("control: invalid entry inventory")
-		}
-		seen[entry] = true
 	}
 	for _, node := range s.nodes {
 		if node.ID != landingID {
@@ -42,9 +35,12 @@ func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint6
 			return RouteAcceptance{Reason: "runtime-unverified"}, nil
 		}
 		status := RouteAcceptance{RuntimeReady: true}
-		for _, entry := range entries {
-			check, ok := node.Checks[entry]
-			if !ok || check.Request.SnapshotID != snapshotID || check.Request.Revision != revision || check.Request.ConfigSHA256 != digest || check.Result == nil {
+		if len(node.Checks) == 0 {
+			status.Reason = "routes-incomplete"
+			return status, nil
+		}
+		for _, check := range node.Checks {
+			if check.Request.SnapshotID != snapshotID || check.Request.Revision != revision || check.Request.ConfigSHA256 != digest || check.Result == nil {
 				status.Reason = "routes-incomplete"
 				return status, nil
 			}

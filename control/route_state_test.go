@@ -23,11 +23,11 @@ func TestRouteAttemptsAreBoundAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
-	if err := s.AssignRouteCheck(entry, p); err == nil {
+	if err := s.AssignRouteChecks([]RouteCheck{{CertificateID: entry, Request: p}}); err == nil {
 		t.Fatal("desired state treated as applied runtime")
 	}
 	reportRuntime(t, s, landing, d)
-	if err := s.AssignRouteCheck(entry, p); err != nil {
+	if err := s.AssignRouteChecks([]RouteCheck{{CertificateID: entry, Request: p}}); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := s.RouteExchange(context.Background(), entry, nil)
@@ -77,7 +77,7 @@ func TestRouteAttemptsAreBoundAndDurable(t *testing.T) {
 	if _, err := s.RouteExchange(context.Background(), entry, &wrong); err == nil {
 		t.Fatal("changed replay accepted")
 	}
-	if err := s.AssignRouteCheck(entry, p); err != nil {
+	if err := s.AssignRouteChecks([]RouteCheck{{CertificateID: entry, Request: p}}); err != nil {
 		t.Fatal(err)
 	}
 	if s.nodes[landing].Checks[p.EntryID].Result != nil {
@@ -121,7 +121,7 @@ func TestRouteExpiredAssignmentCannotAcceptResult(t *testing.T) {
 	}
 	reportRuntime(t, s, landing, d)
 	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
-	if err := s.AssignRouteCheck(entry, p); err != nil {
+	if err := s.AssignRouteChecks([]RouteCheck{{CertificateID: entry, Request: p}}); err != nil {
 		t.Fatal(err)
 	}
 	check := s.nodes[landing].Checks[p.EntryID]

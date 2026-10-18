@@ -23,7 +23,7 @@ func TestRouteChannelUsesVerifiedPeer(t *testing.T) {
 	}
 	reportRuntime(t, s, strings.Repeat("a", 64), d)
 	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
-	if err := s.AssignRouteCheck(CertificateID(cert), p); err != nil {
+	if err := s.AssignRouteChecks([]RouteCheck{{CertificateID: CertificateID(cert), Request: p}}); err != nil {
 		t.Fatal(err)
 	}
 	listener := httptest.NewUnstartedServer(Handler(s))

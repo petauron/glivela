@@ -26,19 +26,32 @@ func runtimeFresh(node Node, now time.Time) bool {
 	return node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, *node.Receipt) == nil && !node.ReportedAt.IsZero() && !node.ReportedAt.After(now) && now.Sub(node.ReportedAt) <= time.Minute
 }
 
-// AssignRouteCheck is a local controller operation, never exposed to nodes.
-// Each assignment gets a fresh attempt identity; a previous successful report
-// cannot complete a retry, even if its snapshot and configuration are unchanged.
-func (s *Store) AssignRouteCheck(certificate string, request RouteProbe) error {
+// AssignRouteChecks atomically fixes the complete entry inventory for one
+// landing verification. A retry replaces the whole attempt, never a subset of
+// its results. This administrative operation is not exposed to nodes.
+func (s *Store) AssignRouteChecks(assignments []RouteCheck) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var nonce [24]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
+	if len(assignments) == 0 || len(assignments) > 64 {
+		return errors.New("control: complete route inventory required")
 	}
-	request.AttemptID = hex.EncodeToString(nonce[:])
-	if !glivela.ValidIdentity(certificate) || request.Validate() != nil {
-		return errors.New("control: invalid route assignment")
+	request := assignments[0].Request
+	checks := make(map[string]RouteCheck, len(assignments))
+	now := time.Now().UTC()
+	for _, assignment := range assignments {
+		p := assignment.Request
+		var nonce [24]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return err
+		}
+		p.AttemptID = hex.EncodeToString(nonce[:])
+		if !glivela.ValidIdentity(assignment.CertificateID) || p.Validate() != nil || assignment.Result != nil || p.LandingID != request.LandingID || p.SnapshotID != request.SnapshotID || p.Revision != request.Revision || p.ConfigSHA256 != request.ConfigSHA256 {
+			return errors.New("control: invalid route inventory")
+		}
+		if _, exists := checks[p.EntryID]; exists {
+			return errors.New("control: duplicate entry")
+		}
+		checks[p.EntryID] = RouteCheck{CertificateID: assignment.CertificateID, Request: p, IssuedAt: now}
 	}
 	for key, node := range s.nodes {
 		if node.ID != request.LandingID {
@@ -50,14 +63,7 @@ func (s *Store) AssignRouteCheck(certificate string, request RouteProbe) error {
 		if !runtimeFresh(node, time.Now().UTC()) {
 			return errors.New("control: applied runtime proof required before route check")
 		}
-		node.Checks = maps.Clone(node.Checks)
-		if node.Checks == nil {
-			node.Checks = map[string]RouteCheck{}
-		}
-		if _, exists := node.Checks[request.EntryID]; !exists && len(node.Checks) >= 64 {
-			return errors.New("control: route assignment limit exceeded")
-		}
-		node.Checks[request.EntryID] = RouteCheck{CertificateID: certificate, Request: request, IssuedAt: time.Now().UTC()}
+		node.Checks = checks
 		next := s.copy()
 		next[key] = node
 		return s.commit(next)
