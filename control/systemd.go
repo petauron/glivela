@@ -28,8 +28,9 @@ import (
 // The package installer must provision the matching unit and its firewall
 // dependency; this adapter refuses unowned/replaced installation files.
 type SystemdDriver struct {
-	Binary       string `json:"binary"`
-	BinarySHA256 string `json:"binarySha256"`
+	Distribution string `json:"distribution"`
+	Binary       string `json:"-"`
+	BinarySHA256 string `json:"-"`
 	UnitSHA256   string `json:"unitSha256"`
 	Unit         string `json:"unit"`
 	WorkerUser   string `json:"workerUser"`

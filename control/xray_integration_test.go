@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -29,6 +30,13 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 	}
 	digest := sha256.Sum256(raw)
 	driver := SystemdDriver{Binary: binary, BinarySHA256: hex.EncodeToString(digest[:])}
+	if distribution := os.Getenv("GLIVELA_DISTRIBUTION"); distribution != "" {
+		verified, err := (SystemdDriver{Distribution: distribution}).resolveDistribution(runtime.GOOS, runtime.GOARCH)
+		if err != nil || verified.Binary != driver.Binary || verified.BinarySHA256 != driver.BinarySHA256 {
+			t.Fatal("packaged runtime metadata does not identify the tested core", err)
+		}
+		driver = verified
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
