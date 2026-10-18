@@ -16,13 +16,25 @@ Certificate enrollment is a local administrative operation, not a node API.
 Run only one controller per state directory; use a private, operator-owned
 directory and independently provisioned CA/server/node identities.
 
-This is **not yet an installable landing replacement**. The production runtime
-adapter, controller/node executables, existing-data handover, catalog packaging,
-and removal of the old Vastora business path are not implemented by this slice.
-The Runtime tests use a fake executor and do not prove real Xray, DNS, firewall,
-TLS forwarding or QUIC behavior. Do not deploy this slice or close #54 based on
-its tests. The existing architecture described below remains active until the
-complete migration is implemented and independently accepted.
+`cmd/glivela` now supplies controller/node modes from a private bootstrap JSON
+file. Both hold a kernel-backed exclusive state-directory lease. The node uses
+the native runtime journal and the hash-pinned Xray/systemd adapter, validating
+before activation, preserving revisioned configuration backups and recovering
+an interrupted or failed activation before polling. A failed health check of
+an unchanged revision does not restart the service. The controller bootstrap
+enrolls certificate-bound desired artifacts; it is not a replacement business
+UI or a complete legacy-data importer.
+
+This is **not yet an installable landing replacement**. The installer still
+needs to provision the dedicated Xray unit and its enforced firewall dependency;
+this code refuses an unknown unit rather than installing an unsafe substitute.
+Existing-data handover, catalog packaging and removal of the old Vastora
+business path remain incomplete. The optional official-binary test verifies
+actual Xray configuration validation and SOCKS/TLS forwarding on loopback,
+including certificate rejection and HTTP 404 handling. Runtime recovery tests
+use a fake systemd driver; Linux systemd, firewall, DNS isolation and QUIC have
+not been accepted. Do not deploy or close #54 based on these tests. The existing
+architecture below stays active until the complete migration is accepted.
 
 Formerly Meridian. See [the in-place brand migration](BRANDING.md) for stable
 installation identities and coordinated release steps.
