@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 )
@@ -63,6 +64,50 @@ func TestPlanDeterministicAndDenyByDefault(t *testing.T) {
 	raw, _ := json.Marshal(policy.objects())
 	if bytes.Contains(raw, []byte(`1081`)) || bytes.Contains(raw, []byte(`1208`)) {
 		t.Fatal("Dante UDP range leaked into Xray policy")
+	}
+}
+
+func TestInternalResolverExceptionCannotAuthorizeBusinessTraffic(t *testing.T) {
+	for _, egress := range []string{"192.168.50.2", "2606:4700::1111"} {
+		p := fixturePlan()
+		p.EgressIP = egress
+		for i := range p.Sources {
+			p.Sources[i].TCPOnly = true
+		}
+		raw, err := p.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config struct {
+			DNS       struct{ Tag, QueryStrategy string }
+			Routing   struct{ Rules []map[string]any }
+			Outbounds []map[string]any
+		}
+		if err := json.Unmarshal(raw, &config); err != nil {
+			t.Fatal(err)
+		}
+		expected := map[string]any{"type": "field", "inboundTag": []any{"resolver"}, "ip": []any{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp", "outboundTag": "resolver"}
+		if !reflect.DeepEqual(config.Routing.Rules[0], expected) || config.DNS.Tag != "resolver" {
+			t.Fatal("resolver exception widened")
+		}
+		for _, rule := range config.Routing.Rules[1:] {
+			if rule["outboundTag"] == "resolver" {
+				t.Fatal("another path can use resolver outbound")
+			}
+			if rule["outboundTag"] == "egress" && !reflect.DeepEqual(rule["inboundTag"], []any{"landing"}) {
+				t.Fatal("business grant can authorize internal DNS")
+			}
+		}
+		if config.Outbounds[0]["protocol"] != "blackhole" {
+			t.Fatal("unmatched requests no longer fail closed")
+		}
+		strategy := "UseIPv4"
+		if egress == "2606:4700::1111" {
+			strategy = "UseIPv6"
+		}
+		if config.DNS.QueryStrategy != strategy || config.Outbounds[1]["sendThrough"] != egress {
+			t.Fatal("resolver exception changed business address family")
+		}
 	}
 }
 
