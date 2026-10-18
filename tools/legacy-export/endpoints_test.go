@@ -46,6 +46,13 @@ func completeEndpointArchiveFixture(t *testing.T) archive {
 		"desired_revision": 9, "applied_revision": 8, "runtime_healthy": 1, "legacy_retired": 1, "status": "failed", "last_error": "synthetic historical failure", "created_at": "2026-09-19T00:00:00Z", "updated_at": "2026-10-19T02:03:04.123456789Z", "source_peer_json": "{\"id\":\"example-peer\",\"address\":\"100.64.0.2\"}",
 	})
 	a.Tables["meridian_route_health_events"] = tableFixture(map[string]any{"id": 17, "route_id": "grant-example", "recorded_at": "2026-10-19T02:03:04Z", "fingerprint": glivela.Identity("synthetic-history"), "diagnostics_json": "{\"state\":\"failed\",\"reason\":\"synthetic\"}"})
+	a.References = glivela.ImportReferences{
+		Nodes:            map[string]glivela.ImportNode{"entry-host-example": {Name: "Entry host", PreviousStatus: "active", ServiceAddress: "100.64.0.2", PrivateAddress: "100.64.0.2"}, "landing-example": {Name: "Landing host", PreviousStatus: "disabled", PrivateAddress: "100.64.0.3"}},
+		Applications:     map[string]glivela.ImportApplication{"entry-example": {Name: "Existing proxy", NodeID: "entry-host-example", Runtime: "docker", PreviousStatus: "running"}},
+		Services:         map[string]glivela.ImportService{"service-example": {ApplicationID: "entry-example", Name: "entry", DisplayName: "Saved entry", RegionCode: "US", Protocol: "tcp", ApplicationProtocol: "meridian/entry", ContainerPort: 10443, HostPort: 443, Endpoint: "100.64.0.2:10443", PreviousStatus: "ready"}},
+		Publications:     map[string]glivela.ImportPublication{"publication-example": {ServiceID: "service-example", EntryNodeID: "entry-host-example", Kind: "public_shared_443", IngressOwner: "application_node", Hostname: "entry.example.test", SNIHostname: "www.example.com", DNSProvider: "manual", DesiredRevision: 3, AppliedRevision: 2, PreviousStatus: "failed", PreviousError: "synthetic error", CreatedAt: "2026-09-19T00:00:00Z", UpdatedAt: "2026-10-19T02:03:04Z"}},
+		LandingSelection: &glivela.ImportLandingSelection{NodeIDs: []string{"landing-example"}, LandingRegionCodes: map[string]string{"landing-example": "US"}, LandingNameSuffixes: map[string]string{"landing-example": "Saved"}, Revision: 7},
+	}
 	return a
 }
 

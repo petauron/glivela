@@ -55,6 +55,19 @@ legacy-export stage \
   -state-directory /private/controller/state
 ```
 
+The checkpoint now includes the related node/application/service/publication
+reference graph and the original landing selection (revision, active/retiring
+IDs, regions and suffixes). Original node/application/service/publication IDs,
+names, advertised domains/SNI and DNS resource references are copied, not
+re-created. Unconfigured Glivela instances remain unconfigured. Missing or
+unrelated application references fail closed; no new node identity is invented.
+Only related proxy services/publications and required nodes are read. Agent
+authentication hashes, platform login state, component capability inventories
+and shared Cloudflare/provider tokens are deliberately excluded. Resource IDs
+and old statuses do not authorize DNS/resource adoption or prove live health.
+Optional unknown network observations remain unknown (including JSON null),
+not a guessed address, an empty measurement or a new successful check.
+
 This uses the source application identity as the entry identity, not a new
 registration. Original account/credential/grant IDs, protocol UUIDs, subscription
 tokens, Hysteria authentication, desired/applied revisions, disabled flags,
@@ -85,13 +98,14 @@ is unchanged. The transfer authentication binds the embedded source snapshot ID.
 The replaced account-only command/envelope/reader is removed, not a fallback.
 Keep the complete encrypted export and original backup. This one atomic pending
 checkpoint is not the final write-authority transfer, and is not permission to
-delete or stop old resources. External references/settings/history outside the
-exported tables still require explicit reconciliation before activation.
+delete or stop old resources. Actual resource ownership, shared integrations,
+settings/history outside the exported scope and final counters still require
+explicit reconciliation before activation.
 
 This is a **business-data staging checkpoint, not a complete handover**.
-Platform object references, selected landing settings, diagnostic/task history
-outside these tables, and final usage observations still require explicit
-transfer/reconciliation before activation. No API consumes this raw archive as
+Diagnostic/task history outside these tables, final usage observations and
+actual resource ownership still require explicit transfer/reconciliation before
+activation. No API consumes this raw archive as
 live authority. Exporting does not start/stop services, change subscriptions,
 fence the old writer, clear migration alarms or delete old resources.
 
@@ -105,6 +119,10 @@ using the retained Vastora source's shared-endpoint/route fixtures, then ran the
 actual export and staging commands. Independent decryption/reopen compared the
 entire normalized model and verified two accounts, three credentials, one route,
 one nonempty route-health history record, exact quotas above 2^53, reset schedules
-and directional samples. Truncated or tampered checkpoints expose no partial
+and directional samples. Independent read-only SQL joins also compared the
+original node/application/service/publication binding and display/domain data
+against the reopened checkpoint. Scope tests include unrelated applications,
+Agent authentication hashes and a shared provider-token sentinel; none may be
+exported. Truncated or tampered checkpoints expose no partial
 material and cannot be silently overwritten on retry. This proves
 offline business staging only, not an active subscription or a complete cutover.

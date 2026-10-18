@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	glivela "github.com/petauron/glivela"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -53,12 +55,13 @@ type secretValue struct {
 	Value   []byte `json:"value"`
 }
 type archive struct {
-	Version      int                    `json:"version"`
-	Schema       int                    `json:"sourceSchema"`
-	SnapshotID   string                 `json:"snapshotId"`
-	SourceSHA256 string                 `json:"sourceSha256"`
-	Tables       map[string]table       `json:"tables"`
-	Secrets      map[string]secretValue `json:"secrets"`
+	Version      int                      `json:"version"`
+	Schema       int                      `json:"sourceSchema"`
+	SnapshotID   string                   `json:"snapshotId"`
+	SourceSHA256 string                   `json:"sourceSha256"`
+	Tables       map[string]table         `json:"tables"`
+	Secrets      map[string]secretValue   `json:"secrets"`
+	References   glivela.ImportReferences `json:"references"`
 }
 
 func main() {
@@ -153,14 +156,14 @@ func export(ctx context.Context, path, sourceKeyPath, transferKeyPath, snapshot,
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	a, err := readArchive(ctx, db, key)
-	if err != nil {
-		return err
-	}
 	defer func() {
 		for _, secret := range a.Secrets {
 			clear(secret.Value)
 		}
 	}()
+	if err != nil {
+		return err
+	}
 	a.Version, a.SnapshotID, a.SourceSHA256 = 1, snapshot, hex.EncodeToString(sum[:])
 	after, err := privateFile(path, maxSnapshotBytes)
 	if err != nil {
@@ -276,7 +279,8 @@ func readArchive(ctx context.Context, db *sql.DB, key []byte) (archive, error) {
 			}
 		}
 	}
-	return a, nil
+	a.References, err = readReferences(ctx, db, a)
+	return a, err
 }
 
 func readTable(ctx context.Context, db *sql.DB, name string) (table, error) {

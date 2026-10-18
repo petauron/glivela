@@ -21,6 +21,7 @@ func importFixture(t *testing.T) ImportMaterial {
 		TrafficCounters: map[string]ImportTrafficCounters{credential.ID: {UploadBytes: 123456789, DownloadBytes: 876543210, RawUploadBytes: 1123456789, RawDownloadBytes: 1876543210, StartedAt: "2026-10-03T00:00:00+08:00", ObservedAt: "2026-10-18T02:03:04.123456789Z", WatermarkObservedAt: "2026-10-18T02:03:04Z"}},
 	}
 	m.Endpoints = []ImportEndpoint{importEndpointFixture(t)}
+	m.References = ImportReferences{Nodes: map[string]ImportNode{"node-entry-a": {Name: "Entry A", PreviousStatus: "active"}}, Applications: map[string]ImportApplication{"entry-a": {Name: "Proxy A", NodeID: "node-entry-a", Runtime: "docker", PreviousStatus: "running"}}, Services: map[string]ImportService{"service-a": {ApplicationID: "entry-a", Name: "entry", DisplayName: "Entry A", RegionCode: "US", Protocol: "tcp", ContainerPort: 10443, HostPort: 443}}, Publications: map[string]ImportPublication{}}
 	bindImportFixture(t, &m, "snapshot-a")
 	return m
 }

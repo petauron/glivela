@@ -16,6 +16,7 @@ type ImportMaterial struct {
 	SourceSHA256       string                           `json:"sourceSha256"`
 	RetainedSource     json.RawMessage                  `json:"retainedSource"`
 	Endpoints          []ImportEndpoint                 `json:"endpoints"`
+	References         ImportReferences                 `json:"references"`
 	Plan               ImportPlan                       `json:"plan"`
 	SubscriptionTokens map[string]string                `json:"subscriptionTokens"`
 	ProtocolSecrets    map[string]string                `json:"protocolSecrets"`
@@ -57,7 +58,10 @@ func (m ImportMaterial) Validate() error {
 	if len(m.SubscriptionTokens) != len(plan.Accounts) || len(m.ProtocolSecrets) != credentials || len(m.HysteriaSecrets) != hysteria {
 		return errors.New("glivela: unreferenced import credentials")
 	}
-	return m.validateEndpoints()
+	if err := m.validateEndpoints(); err != nil {
+		return err
+	}
+	return m.validateReferences()
 }
 
 // Only the archive identity header is interpreted here. Legacy table formats

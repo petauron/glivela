@@ -40,6 +40,8 @@ func fixture(t *testing.T) (string, []byte, *sql.DB) {
 	exec("PRAGMA user_version=113")
 	exec("CREATE TABLE storage_key_binding(id INTEGER PRIMARY KEY,sealed BLOB)")
 	exec("CREATE TABLE secrets(id TEXT PRIMARY KEY,sealed BLOB)")
+	exec("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)")
+	exec("CREATE TABLE applications(id TEXT PRIMARY KEY,name TEXT,node_id TEXT,runtime TEXT,status TEXT,app_key TEXT)")
 	for _, name := range businessTables {
 		columns := "id TEXT PRIMARY KEY,payload BLOB,optional TEXT,counter INTEGER"
 		if name == "meridian_accounts" {
@@ -47,6 +49,12 @@ func fixture(t *testing.T) (string, []byte, *sql.DB) {
 		}
 		if name == "meridian_subscription_snapshots" {
 			columns += ",account_id TEXT,secret_id TEXT REFERENCES secrets(id)"
+		}
+		if name == "meridian_endpoints" {
+			columns += ",application_id TEXT,service_id TEXT"
+		}
+		if name == "landing_client_grants" {
+			columns += ",application_id TEXT,service_id TEXT,landing_node_id TEXT"
 		}
 		exec(`CREATE TABLE "` + name + `"(` + columns + `)`)
 	}

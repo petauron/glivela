@@ -25,6 +25,7 @@ func dataImportFixture(t *testing.T) glivela.ImportMaterial {
 		TrafficCounters: map[string]glivela.ImportTrafficCounters{credential.ID: {UploadBytes: 2000, DownloadBytes: 3000, RawUploadBytes: 4000, RawDownloadBytes: 6000}},
 	}
 	m.Endpoints = []glivela.ImportEndpoint{{Reality: glivela.RealityEndpoint{ID: "endpoint-example", EntryID: "entry-example", InboundTag: "inbound-example", ListenAddress: "100.64.0.2", ListenPort: 10443, AdvertiseHost: "entry.example.test", AdvertisePort: 443, Target: "www.example.com:443", ServerNames: []string{"www.example.com"}, PrivateKey: "synthetic-private-key", PublicKey: "synthetic-public-key", ShortIDs: []string{"abcd"}, Fingerprint: "chrome"}, ServiceID: "service-example", TargetIP: "203.0.113.20", VLESSEnabled: true, DesiredRevision: 3, AppliedRevision: 2, PreviousStatus: "failed", CreatedAt: "2026-10-19T00:00:00Z", UpdatedAt: "2026-10-19T02:03:04Z", SourcePeerJSON: json.RawMessage(`{}`)}}
+	m.References = glivela.ImportReferences{Nodes: map[string]glivela.ImportNode{"node-entry-example": {Name: "Example", PreviousStatus: "active"}}, Applications: map[string]glivela.ImportApplication{"entry-example": {Name: "Example proxy", NodeID: "node-entry-example", Runtime: "docker", PreviousStatus: "running"}}, Services: map[string]glivela.ImportService{"service-example": {ApplicationID: "entry-example", Name: "entry", Protocol: "tcp", ContainerPort: 10443, HostPort: 443}}, Publications: map[string]glivela.ImportPublication{}}
 	m.SourceSHA256 = glivela.Identity("synthetic-source")
 	m.RetainedSource, err = json.Marshal(map[string]any{"version": 1, "sourceSchema": 113, "snapshotId": "snapshot-example", "sourceSha256": m.SourceSHA256, "history": []string{"synthetic-event"}})
 	if err != nil {
@@ -114,7 +115,7 @@ func TestImportRefusesRunningControllerAndUnsafeState(t *testing.T) {
 }
 
 func TestImportRetryRejectsChangedStateOutsidePlanHash(t *testing.T) {
-	for _, field := range []string{"schedule", "counters", "endpoint", "history", "source"} {
+	for _, field := range []string{"schedule", "counters", "endpoint", "history", "source", "reference"} {
 		t.Run(field, func(t *testing.T) {
 			r, _ := nativeFixture(t)
 			m := dataImportFixture(t)
@@ -147,6 +148,10 @@ func TestImportRetryRejectsChangedStateOutsidePlanHash(t *testing.T) {
 				m.Endpoints[0].Reality.PublicKey = "changed-synthetic-public-key"
 			} else if field == "history" {
 				m.RetainedSource = bytes.Replace(m.RetainedSource, []byte("synthetic-event"), []byte("changed-event"), 1)
+			} else if field == "reference" {
+				a := m.References.Applications["entry-example"]
+				a.Name = "Changed proxy label"
+				m.References.Applications["entry-example"] = a
 			} else {
 				previous := m.SourceSHA256
 				m.SourceSHA256 = glivela.Identity("changed-source")

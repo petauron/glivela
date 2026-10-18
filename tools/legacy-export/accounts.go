@@ -304,6 +304,7 @@ func importMaterial(a archive) (glivela.ImportMaterial, error) {
 		return m, err
 	}
 	m.SourceSHA256 = a.SourceSHA256
+	m.References = a.References
 	m.RetainedSource, err = json.Marshal(a)
 	if err != nil {
 		return m, errors.New("source retention failed")
