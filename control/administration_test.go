@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	glivela "github.com/petauron/glivela"
 )
 
 func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
@@ -18,14 +20,12 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 	serverIdentity, _, _ := identity(t, ca, key, true)
 	adminIdentity, adminCert, _ := identity(t, ca, key, false)
 	entryIdentity, entryCert, _ := identity(t, ca, key, false)
+	landingIdentity, landingCert, _ := identity(t, ca, key, false)
 	roots := x509.NewCertPool()
 	roots.AddCert(ca)
 	s := store(t)
 	d := artifact(1)
-	landingCertificate := strings.Repeat("a", 64)
-	if err := s.Put(Node{ID: "landing-a", CertificateID: landingCertificate, Desired: d}); err != nil {
-		t.Fatal(err)
-	}
+	landingCertificate := CertificateID(landingCert)
 	server, err := NewServer("127.0.0.1:0", s, serverIdentity, roots, []string{CertificateID(adminCert)})
 	if err != nil {
 		t.Fatal(err)
@@ -56,12 +56,33 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 		}
 		return response
 	}
+	enrollment := map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": d.Landing}
+	post(entryHTTP, "/v1/admin/landings", enrollment, http.StatusForbidden)
+	response := post(admin, "/v1/admin/landings", enrollment, http.StatusAccepted)
+	var revision struct {
+		Revision     uint64
+		ConfigSHA256 string
+	}
+	if json.NewDecoder(response.Body).Decode(&revision) != nil || revision.Revision != d.Revision || revision.ConfigSHA256 != d.ConfigSHA256 {
+		t.Fatal("management response did not bind generated configuration", revision)
+	}
+	response.Body.Close()
+	landingClient, err := NewClient(listener.URL, landingIdentity, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landingClient.Close()
+	if got, err := landingClient.Exchange(context.Background(), nil); err != nil || got.ConfigSHA256 != d.ConfigSHA256 || got.Validate() != nil {
+		t.Fatal("generated policy not delivered to enrolled landing", err)
+	}
 	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
 	inventory := map[string]any{"checks": []RouteCheck{{CertificateID: CertificateID(entryCert), Request: p}}}
 	post(entryHTTP, "/v1/admin/route-checks", inventory, http.StatusForbidden)
 	post(admin, "/v1/exchange", map[string]any{}, http.StatusForbidden)
 	post(admin, "/v1/admin/route-checks", inventory, http.StatusConflict)
-	reportRuntime(t, s, landingCertificate, d)
+	if _, err := landingClient.Exchange(context.Background(), &glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}); err != nil {
+		t.Fatal(err)
+	}
 	post(admin, "/v1/admin/route-checks", inventory, http.StatusAccepted)
 	acceptance := map[string]any{"landingId": p.LandingID, "snapshotId": p.SnapshotID, "revision": p.Revision, "configSha256": p.ConfigSHA256}
 	read := func(want bool) {
@@ -92,6 +113,21 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 	post(admin, "/v1/admin/route-checks", map[string]any{"checks": []RouteCheck{{CertificateID: CertificateID(adminCert), Request: p}}}, http.StatusBadRequest)
 	post(admin, "/v1/admin/route-acceptance", map[string]any{"unknown": true}, http.StatusBadRequest)
 	post(entryHTTP, "/v1/admin/route-acceptance", acceptance, http.StatusForbidden)
+	post(admin, "/v1/admin/landings", map[string]any{"id": "landing-a", "certificateId": CertificateID(adminCert), "plan": d.Landing}, http.StatusBadRequest)
+	post(admin, "/v1/admin/landings", map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": d.Landing, "config": "arbitrary core configuration"}, http.StatusBadRequest)
+	next := artifact(2)
+	post(admin, "/v1/admin/landings", map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": next.Landing}, http.StatusAccepted)
+	if got, err := landingClient.Exchange(context.Background(), &glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}); err != nil || got.Revision != 2 {
+		t.Fatal("stale receipt prevented delivery of updated policy", err)
+	}
+	post(admin, "/v1/admin/landings", enrollment, http.StatusConflict)
+	if s.nodes[landingCertificate].Receipt != nil || len(s.nodes[landingCertificate].Checks) != 0 {
+		t.Fatal("updated policy retained old success")
+	}
+	reloaded, err := OpenStore(s.path)
+	if err != nil || reloaded.nodes[landingCertificate].ID != "landing-a" || reloaded.nodes[landingCertificate].Desired.Revision != 2 {
+		t.Fatal("managed update lost identity or revision on reload", err)
+	}
 }
 
 func TestManagementCertificateInventoryFailsClosed(t *testing.T) {

@@ -31,7 +31,6 @@ type configuration struct {
 	CA             string                `json:"ca"`
 	Listen         string                `json:"listen,omitempty"`
 	Controller     string                `json:"controller,omitempty"`
-	Nodes          []control.Node        `json:"nodes,omitempty"`
 	Administrators []string              `json:"administrators,omitempty"`
 	Xray           control.SystemdDriver `json:"xray,omitempty"`
 }
@@ -111,7 +110,7 @@ func run(ctx context.Context, path string) error {
 		return errors.New("invalid CA")
 	}
 	if cfg.Mode == "verifier" {
-		if len(cfg.Nodes) != 0 || len(cfg.Administrators) != 0 || cfg.Listen != "" || cfg.Xray != (control.SystemdDriver{}) {
+		if len(cfg.Administrators) != 0 || cfg.Listen != "" || cfg.Xray != (control.SystemdDriver{}) {
 			return errors.New("verifier cannot enroll peers or listen")
 		}
 		client, err := control.NewClient(cfg.Controller, identity, roots)
@@ -126,7 +125,7 @@ func run(ctx context.Context, path string) error {
 		})
 	}
 	if cfg.Mode == "node" {
-		if len(cfg.Nodes) != 0 || len(cfg.Administrators) != 0 || cfg.Listen != "" {
+		if len(cfg.Administrators) != 0 || cfg.Listen != "" {
 			return errors.New("node cannot enroll peers or listen")
 		}
 		// The native installer extracts both executables from the same verified
@@ -174,11 +173,6 @@ func run(ctx context.Context, path string) error {
 	store, err := control.OpenStore(filepath.Join(cfg.Directory, "nodes.json"))
 	if err != nil {
 		return err
-	}
-	for _, node := range cfg.Nodes {
-		if err = store.Put(node); err != nil {
-			return err
-		}
 	}
 	server, err := control.NewServer(cfg.Listen, store, identity, roots, cfg.Administrators)
 	if err != nil {

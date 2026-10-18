@@ -12,7 +12,7 @@ or application capability negotiation is introduced.
 authenticated HTTPS exchanges, certificate-bound node isolation, revision/hash
 receipts, private durable controller state and bounded node reconciliation.
 It uses Go's TLS/HTTP implementation and existing Glivela artifact contracts.
-Certificate enrollment is a local administrative operation, not a node API.
+Certificate enrollment is a Glivela management operation, not a node API.
 Run only one controller per state directory; use a private, operator-owned
 directory and independently provisioned CA/server/node identities.
 
@@ -22,15 +22,27 @@ the native runtime journal and the hash-pinned Xray/systemd adapter, validating
 before activation, preserving revisioned configuration backups and recovering
 an interrupted or failed activation before polling. A failed health check of
 an unchanged revision does not restart the service. The controller bootstrap
-enrolls certificate-bound desired artifacts; it is not a replacement business
-UI or a complete legacy-data importer.
+contains transport/storage settings and an `administrators` list of SHA-256
+leaf-certificate fingerprints. It does not contain node business state. Existing
+`nodes.json` remains authoritative across restarts; the obsolete bootstrap
+`nodes` field is rejected, not replayed over managed updates.
+
+On the same private mTLS listener, a separately authorized management identity
+can POST `/v1/admin/landings` with `id`, `certificateId` and `plan`. Glivela
+validates the plan and generates the exact Xray artifact itself. The response
+is HTTP 202 with `revision` and `configSha256`, not a health success. Node
+identities cannot use management endpoints; management identities cannot submit
+node or verifier reports. This API is not yet a replacement business UI or a
+complete legacy-data importer.
 
 The `verifier` mode runs on an enrolled entry using its own private bootstrap,
 state-directory lease and mTLS identity. It polls `/v1/route-checks`, performs
 one bounded SOCKS/TLS/observed-exit check at a time, and reports success or
 failure directly to Glivela. It cannot enroll nodes, listen for commands or
-control Xray. Assignments are currently local controller operations, not a
-finished management UI. Each retry has a new attempt ID; reports are bound to
+control Xray. Management can POST the complete `checks` batch to
+`/v1/admin/route-checks`, then POST `landingId`, `snapshotId`, `revision` and
+`configSha256` to `/v1/admin/route-acceptance` for a read-only decision. These
+endpoints do not commit a migration or remove backups. Each retry has a new attempt ID; reports are bound to
 that attempt, snapshot, entry certificate, landing and desired revision/hash.
 Completed reports are durable, and a lost acknowledgement does not cause the
 entry to repeat a completed attempt. This channel does not by itself complete
@@ -59,7 +71,10 @@ including certificate rejection and HTTP 404 handling. Runtime recovery tests
 use a fake systemd driver. Real Linux nftables lifecycle tests cover IPv4/IPv6
 install/read-back/remove, idempotence, drift rejection and unrelated-table
 preservation in an isolated network namespace, and run in CI. Packet-level
-enforcement, Linux systemd, DNS isolation and QUIC have not been accepted.
+enforcement tests additionally cover actual rendered IPv4/IPv6 DNS/TLS policy
+and literal-IPv4 SOCKS UDP request/reply, target-observed egress and source/UID
+denials with the official core. Full migration systemd recovery, QUIC and
+independent kernel ingress isolation for dynamic UDP sockets remain unaccepted.
 Do not deploy or close #54 based on these tests. The existing
 architecture below stays active until the complete migration is accepted.
 

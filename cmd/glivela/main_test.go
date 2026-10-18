@@ -18,6 +18,15 @@ func TestBootstrapCannotSelectDistribution(t *testing.T) {
 	}
 }
 
+func TestBootstrapCannotOverwriteManagedBusinessState(t *testing.T) {
+	var cfg configuration
+	decoder := json.NewDecoder(strings.NewReader(`{"mode":"controller","nodes":[]}`))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&cfg) == nil {
+		t.Fatal("bootstrap retained a second source of node business state")
+	}
+}
+
 func TestBootstrapFailsClosed(t *testing.T) {
 	for _, body := range []string{`{}`, `{"mode":"arbitrary"}`, `{"mode":"node","unknown":true}`, `{"mode":"node"} {}`} {
 		path := filepath.Join(t.TempDir(), "bootstrap.json")

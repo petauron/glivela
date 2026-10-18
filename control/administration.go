@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 // controllerHandler separates locally enrolled management certificates from
@@ -60,6 +61,31 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/admin/landings":
+			var request struct {
+				ID            string       `json:"id"`
+				CertificateID string       `json:"certificateId"`
+				Plan          landing.Plan `json:"plan"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 64<<10), &request) != nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
+				http.Error(w, "invalid landing identity or plan", http.StatusBadRequest)
+				return
+			}
+			desired, err := NewDesired(request.Plan)
+			if err != nil {
+				http.Error(w, "invalid landing policy", http.StatusBadRequest)
+				return
+			}
+			if store.Put(Node{ID: request.ID, CertificateID: request.CertificateID, Desired: desired}) != nil {
+				http.Error(w, "landing update refused", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(struct {
+				Revision     uint64 `json:"revision"`
+				ConfigSHA256 string `json:"configSha256"`
+			}{desired.Revision, desired.ConfigSHA256})
 		case "/v1/admin/route-checks":
 			var request struct {
 				Checks []RouteCheck `json:"checks"`
