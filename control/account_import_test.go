@@ -30,6 +30,9 @@ func TestAccountImportPersistsWithoutReinitializing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if StageAccountImport(r.Directory, "snapshot-example", sealed, transferKey, bytes.Clone(transferKey)) == nil {
+		t.Fatal("equal key material accepted")
+	}
 	if err := StageAccountImport(r.Directory, "snapshot-example", sealed, transferKey, storageKey); err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +79,7 @@ func TestAccountImportPersistsWithoutReinitializing(t *testing.T) {
 func TestAccountImportRefusesRunningControllerAndUnsafeState(t *testing.T) {
 	r, _ := nativeFixture(t)
 	key := bytes.Repeat([]byte{3}, 32)
+	storageKey := bytes.Repeat([]byte{4}, 32)
 	sealed, err := glivela.SealImportMaterial(accountImportFixture(t), key, "snapshot-example")
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +88,7 @@ func TestAccountImportRefusesRunningControllerAndUnsafeState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = StageAccountImport(r.Directory, "snapshot-example", sealed, key, key)
+	err = StageAccountImport(r.Directory, "snapshot-example", sealed, key, storageKey)
 	unlock()
 	if err == nil {
 		t.Fatal("import ran alongside controller")
@@ -93,7 +97,7 @@ func TestAccountImportRefusesRunningControllerAndUnsafeState(t *testing.T) {
 	if err := os.Symlink("absent", path); err != nil {
 		t.Fatal(err)
 	}
-	if StageAccountImport(r.Directory, "snapshot-example", sealed, key, key) == nil {
+	if StageAccountImport(r.Directory, "snapshot-example", sealed, key, storageKey) == nil {
 		t.Fatal("symlink checkpoint accepted")
 	}
 }

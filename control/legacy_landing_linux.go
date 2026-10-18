@@ -24,11 +24,14 @@ var legacyLandingFiles = []string{
 // message. Preserve the original ownership journal and exact file bytes; do not
 // regenerate old configuration when restoring a failed first-time cutover.
 type LegacyLandingSnapshot struct {
-	Version  int                        `json:"version"`
-	NodeID   string                     `json:"nodeId"`
-	Revision uint64                     `json:"revision"`
-	Journal  []byte                     `json:"journal"`
-	Files    map[string]LegacyOwnedFile `json:"files"`
+	Version         int                        `json:"version"`
+	NodeID          string                     `json:"nodeId"`
+	Revision        uint64                     `json:"revision"`
+	Journal         []byte                     `json:"journal"`
+	Files           map[string]LegacyOwnedFile `json:"files"`
+	RecoveryProgram LegacyRecoveryProgram      `json:"recoveryProgram"`
+	programSource   string
+	programOwner    uint32
 }
 
 type LegacyOwnedFile struct {
@@ -72,6 +75,9 @@ func backupLegacyLanding(directory string, snapshot LegacyLandingSnapshot) (stri
 	}
 	checkpoint, err := os.MkdirTemp(directory, "legacy-landing-")
 	if err != nil {
+		return "", err
+	}
+	if err := copyLegacyRecoveryProgram(checkpoint, snapshot); err != nil {
 		return "", err
 	}
 	// Failed checkpoints are retained for diagnosis, but never returned as a
@@ -158,6 +164,11 @@ func snapshotLegacyLanding(root, nodeID string, owner uint32) (LegacyLandingSnap
 		}
 		result.Files[name] = LegacyOwnedFile{Contents: raw, Mode: mode}
 	}
+	program, source, err := inspectLegacyRecoveryProgram(root, owner, result.Files["/etc/systemd/system/vastora-landing-firewall.service"].Contents)
+	if err != nil {
+		return LegacyLandingSnapshot{}, err
+	}
+	result.RecoveryProgram, result.programSource, result.programOwner = program, source, owner
 	// Detect a concurrent old writer. A later cutover still needs an explicit
 	// writer fence and revalidation; this read-only check is not that fence.
 	after, _, err := read(legacyLandingJournal, 128<<10)

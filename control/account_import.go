@@ -1,6 +1,7 @@
 package control
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"os"
@@ -21,6 +22,9 @@ type stagedAccounts struct {
 // does NOT transfer authority: routes/history and the old-writer fence must be
 // verified before these accounts may be used by the business API.
 func StageAccountImport(directory, snapshotID string, sealed, transferKey, storageKey []byte) error {
+	if subtle.ConstantTimeCompare(transferKey, storageKey) == 1 {
+		return errors.New("control: transfer and storage keys must differ")
+	}
 	material, err := glivela.OpenImportMaterial(sealed, transferKey, snapshotID)
 	if err != nil {
 		return err

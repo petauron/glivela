@@ -28,16 +28,24 @@ func TestOfflineAccountImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyPath, input := filepath.Join(directory, "key"), filepath.Join(directory, "import.sealed")
+	storageKey := bytes.Repeat([]byte{5}, 32)
+	storagePath := filepath.Join(directory, "storage-key")
+	if err := os.WriteFile(storagePath, storageKey, 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(keyPath, key, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(input, sealed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := stageAccounts(input, "snapshot-empty", directory, keyPath, keyPath); err != nil {
+	if stageAccounts(input, "snapshot-empty", directory, keyPath, keyPath) == nil {
+		t.Fatal("transfer key retained as storage key")
+	}
+	if err := stageAccounts(input, "snapshot-empty", directory, keyPath, storagePath); err != nil {
 		t.Fatal(err)
 	}
-	stored, id, err := control.ReadStagedAccounts(directory, key)
+	stored, id, err := control.ReadStagedAccounts(directory, storageKey)
 	if err != nil || id != "snapshot-empty" || len(stored.Plan.Accounts) != 0 {
 		t.Fatal("empty authoritative inventory was not retained", err)
 	}
