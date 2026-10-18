@@ -28,6 +28,19 @@ func TestLegacyWriterFenceRequiresPersistentStoppedUnit(t *testing.T) {
 	}
 }
 
+func TestLegacyServiceRejectsOverridesAndStaleManagerState(t *testing.T) {
+	unit := "vastora-landing.service"
+	raw := "LoadState=loaded\nFragmentPath=/etc/systemd/system/" + unit + "\nDropInPaths=\nNeedDaemonReload=no\n"
+	if !legacyUnitLoaded(raw, unit) {
+		t.Fatal("owned loaded unit refused")
+	}
+	for _, bad := range []string{strings.Replace(raw, "DropInPaths=", "DropInPaths=/etc/override.conf", 1), strings.Replace(raw, "NeedDaemonReload=no", "NeedDaemonReload=yes", 1), strings.Replace(raw, "/etc/systemd/system/", "/run/systemd/system/", 1), raw + "LoadState=loaded\n"} {
+		if legacyUnitLoaded(bad, unit) {
+			t.Fatal("unverified loaded unit accepted")
+		}
+	}
+}
+
 func TestRecoveryResourceBindingDoesNotDependOnCurrentAgentBinary(t *testing.T) {
 	root, _ := legacyFixture(t)
 	saved, err := snapshotLegacyLanding(root, "node-example", uint32(os.Getuid()))

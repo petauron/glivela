@@ -11,11 +11,11 @@ import (
 	"time"
 )
 
-// restoreLegacyLandingFirewall is only a step of failed-cutover recovery. The
+// restoreLegacyLandingRuntime is the local part of failed-cutover recovery. The
 // caller must keep the old writer fenced. It stops the owned candidate before
-// restoring old rules. It does
-// not start Dante, declare routes healthy, or release the migration fence.
-func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string, candidate Desired, driver SystemdDriver) error {
+// restoring old rules and Dante. It does not declare routes healthy or release
+// the migration fence: entry-side verification and authority transfer are separate.
+func restoreLegacyLandingRuntime(ctx context.Context, checkpoint, nodeID string, candidate Desired, driver SystemdDriver) error {
 	if os.Geteuid() != 0 {
 		return errors.New("control: legacy recovery requires root")
 	}
@@ -33,6 +33,17 @@ func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string
 	current, err := SnapshotLegacyLanding(nodeID)
 	if err != nil || !sameLegacyResources(saved, current) {
 		return errors.New("control: legacy resources changed; recovery refused")
+	}
+	for _, unit := range []string{"vastora-landing-firewall.service", "vastora-landing.service"} {
+		if err := requireLegacyUnitLoaded(ctx, unit); err != nil {
+			return err
+		}
+	}
+	firewallActive := exec.CommandContext(ctx, "/usr/bin/systemctl", "is-active", "--quiet", "vastora-landing-firewall.service").Run() == nil
+	// If systemd must start the old prerequisite, its on-disk executable must
+	// still be the snapshotted version. Never execute a newer Agent as rollback.
+	if !firewallActive && current.RecoveryProgram != saved.RecoveryProgram {
+		return errors.New("control: inactive legacy prerequisite changed; recovery refused")
 	}
 	// Stop verifies the exact installed unit/binary identity and removes only
 	// this candidate's owned firewall table. Failure must not enable the old
@@ -54,7 +65,50 @@ func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string
 	if command.Run() != nil {
 		return errors.New("control: retained firewall recovery failed")
 	}
+	if !firewallActive {
+		if exec.CommandContext(bounded, "/usr/bin/systemctl", "start", "vastora-landing-firewall.service").Run() != nil {
+			return errors.New("control: legacy firewall prerequisite failed")
+		}
+	}
+	if err := requireLegacyWriterStopped(bounded); err != nil {
+		return err
+	}
+	if exec.CommandContext(bounded, "/usr/bin/systemctl", "start", "vastora-landing.service").Run() != nil {
+		return errors.New("control: legacy proxy restart failed")
+	}
+	for _, unit := range []string{"vastora-landing-firewall.service", "vastora-landing.service"} {
+		if exec.CommandContext(bounded, "/usr/bin/systemctl", "is-active", "--quiet", unit).Run() != nil {
+			return errors.New("control: legacy runtime not active after recovery")
+		}
+	}
 	return nil
+}
+
+func requireLegacyUnitLoaded(ctx context.Context, unit string) error {
+	if unit != "vastora-landing-firewall.service" && unit != "vastora-landing.service" {
+		return errors.New("control: unknown legacy unit")
+	}
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(bounded, "/usr/bin/systemctl", "show", unit, "--property=LoadState,FragmentPath,DropInPaths,NeedDaemonReload").Output()
+	if err != nil || !legacyUnitLoaded(string(raw), unit) {
+		return errors.New("control: legacy loaded service differs from checkpoint")
+	}
+	return nil
+}
+
+func legacyUnitLoaded(raw, unit string) bool {
+	want := map[string]string{"LoadState": "loaded", "FragmentPath": "/etc/systemd/system/" + unit, "DropInPaths": "", "NeedDaemonReload": "no"}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		expected, known := want[key]
+		if !ok || !known || seen[key] || value != expected {
+			return false
+		}
+		seen[key] = true
+	}
+	return len(seen) == len(want)
 }
 
 // Initial authority transfer requires an explicit maintenance fence. Merely
