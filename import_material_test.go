@@ -15,7 +15,10 @@ func importFixture(t *testing.T) ImportMaterial {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ImportMaterial{Plan: plan, SubscriptionTokens: map[string]string{account.ID: "fixture-token"}, ProtocolSecrets: map[string]string{credential.ID: secret}, HysteriaSecrets: map[string]string{credential.ID: "fixture-hy2"}}
+	return ImportMaterial{Plan: plan, SubscriptionTokens: map[string]string{account.ID: "fixture-token"}, ProtocolSecrets: map[string]string{credential.ID: secret}, HysteriaSecrets: map[string]string{credential.ID: "fixture-hy2"},
+		ResetSchedules:  map[string]ImportResetSchedule{account.ID: {LastResetAt: "2026-10-03T00:00:00+08:00", NextResetAt: "2026-11-03T00:00:00+08:00"}},
+		TrafficCounters: map[string]ImportTrafficCounters{credential.ID: {UploadBytes: 123456789, DownloadBytes: 876543210, RawUploadBytes: 1123456789, RawDownloadBytes: 1876543210, StartedAt: "2026-10-03T00:00:00+08:00", ObservedAt: "2026-10-18T02:03:04.123456789Z", WatermarkObservedAt: "2026-10-18T02:03:04Z"}},
+	}
 }
 
 func TestImportMaterialPreservesOriginalIdentitiesAndCounters(t *testing.T) {

@@ -14,16 +14,21 @@ import (
 // publish it in logs. Endpoints, landing state and history must be transferred
 // separately before the complete handover may be committed.
 type ImportMaterial struct {
-	Plan               ImportPlan        `json:"plan"`
-	SubscriptionTokens map[string]string `json:"subscriptionTokens"`
-	ProtocolSecrets    map[string]string `json:"protocolSecrets"`
-	HysteriaSecrets    map[string]string `json:"hysteriaSecrets"`
+	Plan               ImportPlan                       `json:"plan"`
+	SubscriptionTokens map[string]string                `json:"subscriptionTokens"`
+	ProtocolSecrets    map[string]string                `json:"protocolSecrets"`
+	HysteriaSecrets    map[string]string                `json:"hysteriaSecrets"`
+	ResetSchedules     map[string]ImportResetSchedule   `json:"resetSchedules"`
+	TrafficCounters    map[string]ImportTrafficCounters `json:"trafficCounters"`
 }
 
 func (m ImportMaterial) Validate() error {
 	plan, err := PlanImport(m.Plan.Accounts)
 	if err != nil || plan.SHA256 != m.Plan.SHA256 {
 		return errors.New("glivela: import inventory differs")
+	}
+	if err := m.validateAccountState(); err != nil {
+		return err
 	}
 	credentials, hysteria := 0, 0
 	for _, item := range plan.Accounts {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	glivela "github.com/petauron/glivela"
 )
@@ -44,11 +45,12 @@ func StageAccountImport(directory, snapshotID string, sealed, transferKey, stora
 		if err != nil {
 			return err
 		}
-		if id != snapshotID || previous.Plan.SHA256 != material.Plan.SHA256 {
+		if id != snapshotID || !reflect.DeepEqual(previous, material) {
 			return errors.New("control: staged account import already belongs to another snapshot")
 		}
-		// The authenticated plan binds every token/credential identity and
-		// usage baseline. Do not reseal or rewrite a verified identical retry.
+		// Compare the complete decrypted material, including schedules and
+		// directional counters outside the account plan's hash. An identical
+		// retry must not reseal or rewrite the verified checkpoint.
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err

@@ -19,7 +19,10 @@ func accountImportFixture(t *testing.T) glivela.ImportMaterial {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return glivela.ImportMaterial{Plan: plan, SubscriptionTokens: map[string]string{account.ID: "example-token"}, ProtocolSecrets: map[string]string{credential.ID: secret}}
+	return glivela.ImportMaterial{Plan: plan, SubscriptionTokens: map[string]string{account.ID: "example-token"}, ProtocolSecrets: map[string]string{credential.ID: secret},
+		ResetSchedules:  map[string]glivela.ImportResetSchedule{account.ID: {NextResetAt: "2026-11-03T00:00:00Z"}},
+		TrafficCounters: map[string]glivela.ImportTrafficCounters{credential.ID: {UploadBytes: 2000, DownloadBytes: 3000, RawUploadBytes: 4000, RawDownloadBytes: 6000}},
+	}
 }
 
 func TestAccountImportPersistsWithoutReinitializing(t *testing.T) {
@@ -99,5 +102,50 @@ func TestAccountImportRefusesRunningControllerAndUnsafeState(t *testing.T) {
 	}
 	if StageAccountImport(r.Directory, "snapshot-example", sealed, key, storageKey) == nil {
 		t.Fatal("symlink checkpoint accepted")
+	}
+}
+
+func TestAccountImportRetryRejectsChangedStateOutsidePlanHash(t *testing.T) {
+	for _, field := range []string{"schedule", "counters"} {
+		t.Run(field, func(t *testing.T) {
+			r, _ := nativeFixture(t)
+			m := accountImportFixture(t)
+			transfer, storage := bytes.Repeat([]byte{5}, 32), bytes.Repeat([]byte{6}, 32)
+			stage := func() error {
+				sealed, err := glivela.SealImportMaterial(m, transfer, "snapshot-example")
+				if err != nil {
+					return err
+				}
+				return StageAccountImport(r.Directory, "snapshot-example", sealed, transfer, storage)
+			}
+			if err := stage(); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(r.Directory, "accounts.pending.json")
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash := m.Plan.SHA256
+			if field == "schedule" {
+				s := m.ResetSchedules["account-example"]
+				s.NextResetAt = "2026-12-03T00:00:00Z"
+				m.ResetSchedules["account-example"] = s
+			} else {
+				c := m.TrafficCounters["credential-example"]
+				c.RawUploadBytes++
+				m.TrafficCounters["credential-example"] = c
+			}
+			if m.Plan.SHA256 != hash {
+				t.Fatal("test changed plan digest")
+			}
+			if stage() == nil {
+				t.Fatal("changed full snapshot accepted as retry")
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("rejected retry changed checkpoint", err)
+			}
+		})
 	}
 }
