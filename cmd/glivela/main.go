@@ -36,6 +36,13 @@ type configuration struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "backup-legacy-landing" {
+		if err := backupLandingCommand(os.Args[2:], os.Stdout, backupLegacyLanding); err != nil {
+			log.Print("Glivela legacy backup failed; no authority or service changes performed")
+			os.Exit(1)
+		}
+		return
+	}
 	path := flag.String("config", "", "private bootstrap configuration")
 	probePath := flag.String("verify-route", "", "entry-side route acceptance request file")
 	importPath := flag.String("stage-accounts", "", "private encrypted account migration package (offline only)")

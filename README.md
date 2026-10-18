@@ -61,6 +61,18 @@ route passed. The local process is not allowed to bypass source restrictions
 to probe its own SOCKS listener. Authorized entry-side route acceptance is
 still required before exposing a route as healthy.
 
+On a Linux landing host, the root-only local preparation command
+`glivela backup-legacy-landing -node-id <existing-id> -directory <private-directory>`
+reads only the fixed previous managed installation and writes a fresh recovery
+checkpoint into an existing private directory. It validates ownership and file
+digests, retains the exact recovery executable, then reopens and verifies the
+checkpoint and compares it with the current source. Its JSON result is explicitly
+`backup-only`, never a migration or health success. It does not stop services,
+change firewall rules, fence writers or activate Xray. Failed partial checkpoints
+are retained for diagnosis. The private output path and checkpoint contents must
+not be published. A subsequent cutover still requires a writer fence and fresh
+validation; this read-only source snapshot is not that fence.
+
 This is **not yet an installable landing replacement**. The installer still
 needs to provision the dedicated Xray unit and its enforced firewall dependency;
 this code refuses an unknown unit rather than installing an unsafe substitute.

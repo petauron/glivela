@@ -53,7 +53,23 @@ func BackupLegacyLanding(directory, nodeID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return backupLegacyLanding(directory, snapshot)
+	checkpoint, err := backupLegacyLanding(directory, snapshot)
+	if err != nil {
+		return "", err
+	}
+	// Verify the persisted bytes and executable, not just successful writes.
+	// A concurrently changed source leaves a diagnostic checkpoint but does
+	// not return a completed backup. This still does not fence the old writer.
+	saved, program, err := loadLegacyBackup(checkpoint, nodeID, 0)
+	if err != nil {
+		return "", err
+	}
+	defer program.Close()
+	current, err := SnapshotLegacyLanding(nodeID)
+	if err != nil || !sameLegacyResources(saved, current) || saved.RecoveryProgram != current.RecoveryProgram {
+		return "", errors.New("control: legacy source changed during backup")
+	}
+	return checkpoint, nil
 }
 
 func backupLegacyLanding(directory string, snapshot LegacyLandingSnapshot) (string, error) {
@@ -64,6 +80,10 @@ func backupLegacyLanding(directory string, snapshot LegacyLandingSnapshot) (stri
 		info, err := os.Lstat(parent)
 		if err != nil || !info.IsDir() || parent == directory && info.Mode().Perm()&0077 != 0 || info.Mode().Perm()&0022 != 0 && info.Mode()&os.ModeSticky == 0 {
 			return "", errors.New("control: unsafe backup directory")
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != snapshot.programOwner && stat.Uid != 0 {
+			return "", errors.New("control: unowned backup directory")
 		}
 		if parent == "/" {
 			break
