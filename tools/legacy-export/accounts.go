@@ -203,8 +203,12 @@ func accountMaterial(a archive) (glivela.ImportMaterial, error) {
 	byAccount := map[string]int{}
 	for _, r := range accounts {
 		id := r.text("id")
+		resetDays := r.integer("reset_days")
+		if resetDays > glivela.MaxResetDays {
+			return m, errors.New("invalid account reset period")
+		}
 		item := glivela.ImportAccount{Account: glivela.Account{ID: id, DisplayName: r.text("display_name"),
-			Plan:            glivela.AccountPlan{TotalBytes: r.integer("total_bytes"), ExpiryTime: r.integer("expiry_time"), ResetDays: int(r.integer("reset_days")), Enabled: r.boolean("enabled")},
+			Plan:            glivela.AccountPlan{TotalBytes: r.integer("total_bytes"), ExpiryTime: r.integer("expiry_time"), ResetDays: int(resetDays), Enabled: r.boolean("enabled")},
 			DesiredRevision: uint64(r.integer("desired_revision")), AppliedRevision: uint64(r.integer("applied_revision"))},
 			SubscriptionTokenFingerprint: r.text("subscription_token_sha256"), HysteriaIdentities: map[string]string{},
 		}

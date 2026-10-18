@@ -170,6 +170,12 @@ func TestAccountConversionRejectsLossAndSubstitution(t *testing.T) {
 		"rounded counter": func(a *archive) {
 			replaceCell(a, "meridian_usage_watermarks", 0, "observed_bytes", cell{Kind: "real", Text: "9007199254740992"})
 		},
+		"reset integer overflow": func(a *archive) {
+			replaceCell(a, "meridian_accounts", 0, "reset_days", cell{Kind: "integer", Text: "9223372036854775807"})
+		},
+		"reset policy maximum": func(a *archive) {
+			replaceCell(a, "meridian_accounts", 0, "reset_days", cell{Kind: "integer", Text: "3651"})
+		},
 		"regressed watermark": func(a *archive) {
 			replaceCell(a, "meridian_usage_watermarks", 0, "observed_bytes", cell{Kind: "integer", Text: "1"})
 		},
