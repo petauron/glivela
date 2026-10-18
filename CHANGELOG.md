@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.24](https://github.com/petauron/glivela/compare/v0.1.0-alpha.23...v0.1.0-alpha.24) (2026-10-18)
+
+
+### Bug Fixes
+
+* **ui:** remove Vastora source dependency from frontend builds ([d501a25](https://github.com/petauron/glivela/commit/d501a25796aad93c061bb883e79ee3986cfc5b99))
+
 ## [0.1.0-alpha.23](https://github.com/petauron/glivela/compare/v0.1.0-alpha.22...v0.1.0-alpha.23) (2026-10-17)
 
 
