@@ -46,6 +46,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends dnsmasq-base iproute2 nftables
           go test -c -o "$RUNNER_TEMP/glivela-dns.test" ./landing
           sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
+          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
   selection-runtime:
     name: Reviewed target-selection runtime
     runs-on: ubuntu-24.04

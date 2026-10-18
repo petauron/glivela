@@ -36,6 +36,11 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	if binary == "" {
 		t.Fatal("verified official core required")
 	}
+	ipv6 := os.Getenv("GLIVELA_LANDING_FAMILY") == "ipv6"
+	egress, targetNetwork, targetAddress, queryType := "192.168.50.2", "tcp4", "93.184.216.34:443", "A"
+	if ipv6 {
+		egress, targetNetwork, targetAddress, queryType = "2606:4700::100", "tcp6", "[::]:443", "AAAA"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	ip := func(args ...string) {
@@ -47,6 +52,9 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	ip("link", "set", "lo", "up")
 	for _, address := range []string{"100.64.0.10/32", "100.64.0.11/32", "100.64.0.12/32", "192.168.50.2/32", "93.184.216.34/32", "1.1.1.1/32", "1.0.0.1/32"} {
 		ip("addr", "add", address, "dev", "lo")
+	}
+	if ipv6 {
+		ip("-6", "addr", "add", egress+"/128", "dev", "lo", "nodad")
 	}
 	// The unprivileged worker needs traversal; no credentials are stored here.
 	directory, err := os.MkdirTemp("", "glivela-isolated-dns-")
@@ -75,10 +83,19 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	dnsLog := filepath.Join(directory, "dns.log")
 	args := []string{"--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--local-ttl=60", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1", "--user=root", "--pid-file=" + filepath.Join(directory, "dns.pid"), "--log-queries", "--log-facility=" + dnsLog}
 	for i := 1; i <= 12; i++ {
-		args = append(args, fmt.Sprintf("--host-record=example.com,2001:db8::%x", i))
+		address := fmt.Sprintf("2001:db8::%x", i)
+		if ipv6 {
+			address = fmt.Sprintf("2606:4700::%x", i)
+			ip("-6", "addr", "add", address+"/128", "dev", "lo", "nodad")
+		}
+		args = append(args, "--host-record=example.com,"+address)
 	}
 	args = append(args, "--host-record=example.com,93.184.216.34")
 	args = append(args, "--host-record=private.example.com,192.168.50.2", "--host-record=mixed.example.com,192.168.50.2", "--host-record=mixed.example.com,93.184.216.34")
+	args = append(args, "--host-record=ipv4only.example.com,93.184.216.34", "--host-record=unreachable.example.com,2606:4700::dead,93.184.216.34")
+	if ipv6 {
+		args = append(args, "--host-record=private.example.com,::1", "--host-record=mixed.example.com,::1", "--host-record=mixed.example.com,2606:4700::1")
+	}
 	start(exec.CommandContext(ctx, "dnsmasq", args...))
 	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, "1.1.1.1:53")
@@ -107,7 +124,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	_ = target.Listener.Close()
-	target.Listener, err = net.Listen("tcp", "93.184.216.34:443")
+	target.Listener, err = net.Listen(targetNetwork, targetAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +132,11 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	defer target.Close()
 	pool := x509.NewCertPool()
 	pool.AddCert(target.Certificate())
-	for _, address := range []string{"93.184.216.34:22", "192.168.50.2:443"} {
+	blockedTargets := []string{"93.184.216.34:22", "192.168.50.2:443"}
+	if ipv6 {
+		blockedTargets = append(blockedTargets, "93.184.216.34:443", "[2606:4700::1]:22")
+	}
+	for _, address := range blockedTargets {
 		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 		_ = server.Listener.Close()
 		server.Listener, err = net.Listen("tcp", address)
@@ -134,7 +155,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		response.Body.Close()
 		direct.CloseIdleConnections()
 	}
-	plan := Plan{Revision: 1, Address: "100.64.0.10", EgressIP: "192.168.50.2", Sources: []Source{{Address: "100.64.0.11", TCPOnly: true}}}
+	plan := Plan{Revision: 1, Address: "100.64.0.10", EgressIP: egress, Sources: []Source{{Address: "100.64.0.11", TCPOnly: true}}}
 	raw, err := plan.Render()
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +208,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		if err != nil {
 			t.Fatal("cannot read isolated DNS evidence", err)
 		}
-		return strings.Count(string(raw), "query[A] example.com")
+		return strings.Count(string(raw), "query["+queryType+"] example.com")
 	}
 	for _, phase := range []string{"cold", "warm"} {
 		before := countQueries()
@@ -197,7 +218,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		}
 		response, err := client.Do(request)
 		if err != nil {
-			t.Fatalf("actual rendered DNS/TLS failed (%s cache, resolver A queries %d -> %d): %v", phase, before, countQueries(), err)
+			t.Fatalf("actual rendered DNS/TLS failed (%s cache, resolver %s queries %d -> %d): %v", phase, queryType, before, countQueries(), err)
 		}
 		response.Body.Close()
 		if response.StatusCode != http.StatusNoContent {
@@ -209,14 +230,18 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		if phase == "warm" && countQueries() != before {
 			t.Fatal("warm request did not use DNS cache")
 		}
-		t.Logf("%s cache: verified TLS/HTTP 204, resolver A queries %d -> %d", phase, before, countQueries())
+		t.Logf("%s cache: verified TLS/HTTP 204, resolver %s queries %d -> %d", phase, queryType, before, countQueries())
 	}
-	for _, denied := range []struct{ name, source, target string }{
+	denials := []struct{ name, source, target string }{
 		{"unauthorized-source", "100.64.0.12", "https://example.com/"},
 		{"management-port", "100.64.0.11", "https://example.com:22/"},
 		{"private-target", "100.64.0.11", "https://private.example.com/"},
 		{"mixed-private-target", "100.64.0.11", "https://mixed.example.com/"},
-	} {
+	}
+	if ipv6 {
+		denials = append(denials, struct{ name, source, target string }{"no-ipv4-fallback", "100.64.0.11", "https://ipv4only.example.com/"}, struct{ name, source, target string }{"unreachable-ipv6-no-fallback", "100.64.0.11", "https://unreachable.example.com/"})
+	}
+	for _, denied := range denials {
 		t.Run(denied.name, func(t *testing.T) {
 			dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(denied.source)}, Timeout: time.Second}
 			transport := &http.Transport{Proxy: http.ProxyURL(proxy), DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}
