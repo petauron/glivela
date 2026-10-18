@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ type driverFixture struct {
 	failHealth      int
 	binding         string
 	active          Desired
+	running         bool
 	prior           *Desired
 	onHealth        func()
 	onActivate      func(Desired)
@@ -34,6 +36,7 @@ func (f *driverFixture) Activate(_ context.Context, desired Desired, prior *Desi
 	}
 	f.starts++
 	f.active = desired.clone()
+	f.running = true
 	f.prior = prior
 	if f.onActivate != nil {
 		f.onActivate(desired)
@@ -122,8 +125,15 @@ func TestPendingUnlinkSyncFailureDoesNotExposeCandidateSuccess(t *testing.T) {
 		t.Fatal("previous revision not recovered", err)
 	}
 }
-func (f *driverFixture) Stop(context.Context, Desired) error { f.stops++; return nil }
+func (f *driverFixture) Stop(context.Context, Desired) error {
+	f.stops++
+	f.running = false
+	return nil
+}
 func (f *driverFixture) Healthy(context.Context, Desired) error {
+	if !f.running {
+		return errors.New("worker is stopped")
+	}
 	if f.onHealth != nil {
 		f.onHealth()
 	}
@@ -263,5 +273,72 @@ func TestNativeInitialFailureStopsCandidate(t *testing.T) {
 	}
 	if _, err := r.Inspect(context.Background()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("initial failure became ready")
+	}
+}
+
+func TestCommittedWorkerRestoredAtStartupWithoutNewRevision(t *testing.T) {
+	r, d := nativeFixture(t)
+	ctx := context.Background()
+	if err := r.Apply(ctx, artifact(1)); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(r.Directory, "runtime.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.running = false // A reboot stops the manual service and loses nft tables.
+	restarted := &NativeRuntime{Directory: r.Directory, Driver: d}
+	if err := restarted.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := restarted.Inspect(ctx)
+	if err != nil || actual.Revision != 1 || !actual.RuntimeReady || d.starts != 2 {
+		t.Fatal("committed runtime not restored", err)
+	}
+	if err := (NodeRunner{Client: &fakeClient{desired: artifact(1)}, Runtime: restarted}).Step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if d.starts != 2 {
+		t.Fatal("unchanged controller revision reapplied")
+	}
+	after, err := os.ReadFile(filepath.Join(r.Directory, "runtime.json"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("startup reinitialized committed data")
+	}
+	// A later health loss is reported, not handled by repeated restarts.
+	d.running = false
+	if (NodeRunner{Client: &fakeClient{desired: artifact(1)}, Runtime: restarted}).Step(ctx) == nil || d.starts != 2 {
+		t.Fatal("health loop restarted the worker")
+	}
+}
+
+func TestStartupRefusesTamperedCommittedConfiguration(t *testing.T) {
+	r, d := nativeFixture(t)
+	if err := r.Apply(context.Background(), artifact(1)); err != nil {
+		t.Fatal(err)
+	}
+	d.running = false
+	if err := os.WriteFile(filepath.Join(r.Directory, "config.json"), []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Recover(context.Background()); err == nil || d.starts != 1 {
+		t.Fatal("tampered startup configuration activated")
+	}
+}
+
+func TestStartupActivationFailureStopsWorkerWithoutChangingRevision(t *testing.T) {
+	r, d := nativeFixture(t)
+	ctx := context.Background()
+	if err := r.Apply(ctx, artifact(1)); err != nil {
+		t.Fatal(err)
+	}
+	d.running = false
+	d.activationError = func(Desired) error { return errors.New("startup activation failed") }
+	if err := r.Recover(ctx); err == nil || d.stops != 1 || d.running {
+		t.Fatal("failed startup not stopped", err)
+	}
+	state, err := r.journal()
+	if err != nil || state.Current.Revision != 1 {
+		t.Fatal("failed startup changed committed revision", err)
 	}
 }

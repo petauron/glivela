@@ -354,6 +354,33 @@ func (r *NativeRuntime) Recover(ctx context.Context) error {
 	if state.Phase == "pending" {
 		return r.restore(ctx, state)
 	}
+	if state.Current != nil {
+		if err := r.verifyConfig(*state.Current); err != nil {
+			return err
+		}
+		if err := r.Driver.Healthy(ctx, *state.Current); err == nil {
+			return nil
+		}
+		// Manual workers deliberately do not start through the installer or
+		// boot ordering alone. Restore the committed runtime once at node
+		// startup, after verifying local identity/config and the core itself.
+		// This path is not called from the periodic health/reconcile loop.
+		if err := r.Driver.Validate(ctx, filepath.Join(r.Directory, "config.json")); err != nil {
+			return errors.New("control: committed startup configuration rejected")
+		}
+		err := r.Driver.Activate(ctx, *state.Current, state.Current)
+		if err == nil {
+			err = r.Driver.Healthy(ctx, *state.Current)
+		}
+		if err != nil {
+			recovery, cancel := recoveryContext()
+			defer cancel()
+			if stopErr := r.Driver.Stop(recovery, *state.Current); stopErr != nil {
+				return errors.New("control: startup acceptance and stop failed; investigation required")
+			}
+			return errors.New("control: startup acceptance failed; worker stopped")
+		}
+	}
 	return nil
 }
 
