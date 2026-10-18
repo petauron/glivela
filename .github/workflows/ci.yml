@@ -40,6 +40,12 @@ jobs:
           tar -xzf "$RUNNER_TEMP/native-first/glivela-$version-linux-amd64.tar.gz" -C "$RUNNER_TEMP/native-runtime"
           "$RUNNER_TEMP/native-runtime/glivela" -help
           GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" go test ./control -run '^TestOfficialXrayValidationAndTLS$' -count=1 -v
+      - name: Exercise actual landing DNS policy in isolated namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends dnsmasq-base iproute2
+          go test -c -o "$RUNNER_TEMP/glivela-dns.test" ./landing
+          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
   selection-runtime:
     name: Reviewed target-selection runtime
     runs-on: ubuntu-24.04
