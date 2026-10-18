@@ -3,8 +3,10 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +17,8 @@ type driverFixture struct {
 	binding       string
 	active        Desired
 	prior         *Desired
+	onHealth      func()
+	onActivate    func(Desired)
 }
 
 func (f *driverFixture) Binding() string { return "fixture:" + f.binding }
@@ -24,15 +28,60 @@ func (f *driverFixture) Activate(_ context.Context, desired Desired, prior *Desi
 	f.starts++
 	f.active = desired.clone()
 	f.prior = prior
+	if f.onActivate != nil {
+		f.onActivate(desired)
+	}
 	return nil
 }
 func (f *driverFixture) Stop(context.Context, Desired) error { f.stops++; return nil }
 func (f *driverFixture) Healthy(context.Context, Desired) error {
+	if f.onHealth != nil {
+		f.onHealth()
+	}
 	if f.failHealth > 0 {
 		f.failHealth--
 		return errors.New("unhealthy")
 	}
 	return nil
+}
+
+func TestNativeCommitFailureRestoresPreviousRuntime(t *testing.T) {
+	for _, storageRecovers := range []bool{true, false} {
+		t.Run(fmt.Sprint(storageRecovers), func(t *testing.T) {
+			r, d := nativeFixture(t)
+			ctx := context.Background()
+			if err := r.Apply(ctx, artifact(1)); err != nil {
+				t.Fatal(err)
+			}
+			journal := filepath.Join(r.Directory, "runtime.json")
+			d.onHealth = func() {
+				d.onHealth = nil
+				// Make the final commit fail after successful candidate health.
+				if err := os.Chmod(journal, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d.onActivate = func(desired Desired) {
+				if storageRecovers && desired.Revision == 1 {
+					if err := os.Chmod(journal, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			err := r.Apply(ctx, artifact(2))
+			if err == nil || d.active.Revision != 1 || d.starts != 3 {
+				t.Fatal("commit failure left candidate running", err)
+			}
+			actual, inspectErr := r.Inspect(ctx)
+			if storageRecovers {
+				if inspectErr != nil || actual.Revision != 1 || !actual.RuntimeReady {
+					t.Fatal("old state not durably recovered", inspectErr)
+				}
+			} else if inspectErr == nil || !strings.Contains(err.Error(), "recovery required") {
+				t.Fatal("uncommitted recovery was reported successful", err, inspectErr)
+			}
+		})
+	}
 }
 func nativeFixture(t *testing.T) (*NativeRuntime, *driverFixture) {
 	t.Helper()

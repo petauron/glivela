@@ -188,10 +188,22 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 		}
 		return errors.New("control: activation failed; previous state restored")
 	}
-	state.Current = &desired
-	state.Candidate = nil
-	state.Phase = "ready"
-	return r.save(state)
+	committed := state
+	committed.Current = &desired
+	committed.Candidate = nil
+	committed.Phase = "ready"
+	if err := r.save(committed); err != nil {
+		// Activation is not committed until its journal is durable. Recover
+		// from the original pending state, including when rename succeeded but
+		// directory sync failed. Never report the candidate as installed.
+		recovery, cancel := recoveryContext()
+		defer cancel()
+		if restoreErr := r.restore(recovery, state); restoreErr != nil {
+			return errors.New("control: commit failed; recovery required")
+		}
+		return errors.New("control: commit failed; previous state restored")
+	}
+	return nil
 }
 
 func (r *NativeRuntime) restore(ctx context.Context, state runtimeJournal) error {
