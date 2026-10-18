@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -55,11 +56,12 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		t.Cleanup(func() { _ = command.Process.Kill(); _ = command.Wait() })
 	}
 	dnsLog := filepath.Join(directory, "dns.log")
-	args := []string{"--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1", "--user=root", "--pid-file=" + filepath.Join(directory, "dns.pid"), "--log-queries", "--log-facility=" + dnsLog}
+	args := []string{"--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--local-ttl=60", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1", "--user=root", "--pid-file=" + filepath.Join(directory, "dns.pid"), "--log-queries", "--log-facility=" + dnsLog}
 	for i := 1; i <= 12; i++ {
 		args = append(args, fmt.Sprintf("--host-record=example.com,2001:db8::%x", i))
 	}
 	args = append(args, "--host-record=example.com,93.184.216.34")
+	args = append(args, "--host-record=private.example.com,192.168.50.2", "--host-record=mixed.example.com,192.168.50.2", "--host-record=mixed.example.com,93.184.216.34")
 	start(exec.CommandContext(ctx, "dnsmasq", args...))
 	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, "1.1.1.1:53")
@@ -96,6 +98,25 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	defer target.Close()
 	pool := x509.NewCertPool()
 	pool.AddCert(target.Certificate())
+	for _, address := range []string{"93.184.216.34:22", "192.168.50.2:443"} {
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+		_ = server.Listener.Close()
+		server.Listener, err = net.Listen("tcp", address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.StartTLS()
+		defer server.Close()
+		pool.AddCert(server.Certificate())
+		// Prove the blocked target is reachable and trusted without the proxy.
+		direct := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool, ServerName: "example.com"}}
+		response, err := (&http.Client{Transport: direct, Timeout: time.Second}).Get("https://" + address)
+		if err != nil {
+			t.Fatal("blocked-target fixture not reachable", err)
+		}
+		response.Body.Close()
+		direct.CloseIdleConnections()
+	}
 	plan := Plan{Revision: 1, Address: "100.64.0.10", EgressIP: "192.168.50.2", Sources: []Source{{Address: "100.64.0.11", TCPOnly: true}}}
 	raw, err := plan.Render()
 	if err != nil {
@@ -151,6 +172,37 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		if phase == "cold" && countQueries() <= before {
 			t.Fatal("cold request never reached controlled resolver")
 		}
+		if phase == "warm" && countQueries() != before {
+			t.Fatal("warm request did not use DNS cache")
+		}
 		t.Logf("%s cache: verified TLS/HTTP 204, resolver A queries %d -> %d", phase, before, countQueries())
+	}
+	for _, denied := range []struct{ name, source, target string }{
+		{"unauthorized-source", "100.64.0.12", "https://example.com/"},
+		{"management-port", "100.64.0.11", "https://example.com:22/"},
+		{"private-target", "100.64.0.11", "https://private.example.com/"},
+		{"mixed-private-target", "100.64.0.11", "https://mixed.example.com/"},
+	} {
+		t.Run(denied.name, func(t *testing.T) {
+			dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(denied.source)}, Timeout: time.Second}
+			transport := &http.Transport{Proxy: http.ProxyURL(proxy), DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}
+			defer transport.CloseIdleConnections()
+			response, err := (&http.Client{Transport: transport, Timeout: 2 * time.Second}).Get(denied.target)
+			if err == nil {
+				response.Body.Close()
+				t.Fatal("restricted proxy request reached HTTP target")
+			}
+		})
+	}
+	untrusted := transport.Clone()
+	untrusted.TLSClientConfig.RootCAs = x509.NewCertPool()
+	defer untrusted.CloseIdleConnections()
+	response, err := (&http.Client{Transport: untrusted, Timeout: 2 * time.Second}).Get("https://example.com/")
+	if response != nil {
+		response.Body.Close()
+	}
+	var authority x509.UnknownAuthorityError
+	if !errors.As(err, &authority) {
+		t.Fatal("untrusted certificate must fail specifically at TLS verification", err)
 	}
 }
