@@ -27,6 +27,8 @@ type driverFixture struct {
 
 func (f *driverFixture) Binding() string { return "fixture:" + f.binding }
 
+func (f *driverFixture) EntryHealth(Desired) *EntryHealthReport { return nil }
+
 func (f *driverFixture) Validate(context.Context, Desired, string) error { return f.validErr }
 func (f *driverFixture) Activate(_ context.Context, desired Desired, prior *Desired) error {
 	if f.activationError != nil {

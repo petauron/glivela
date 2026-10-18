@@ -32,7 +32,7 @@ func TestKernelEntryGateLifecycle(t *testing.T) {
 				t.Fatal("install", err)
 			}
 			until := time.Now().Add(5 * time.Second)
-			if err := gate.renew(ctx, until); err != nil {
+			if _, err := gate.renew(ctx, until); err != nil {
 				t.Fatal("renew", err)
 			}
 			if gate.Remove(ctx) == nil {
@@ -43,7 +43,7 @@ func TestKernelEntryGateLifecycle(t *testing.T) {
 			if err != nil || len(gate.elements(document)) != 0 {
 				t.Fatal("kernel retained expired permission", err)
 			}
-			if err := gate.renew(ctx, time.Now().Add(AllowLifetime)); err != nil {
+			if _, err := gate.renew(ctx, time.Now().Add(AllowLifetime)); err != nil {
 				t.Fatal(err)
 			}
 			if err := gate.Install(ctx); err != nil {
@@ -74,7 +74,7 @@ func TestKernelEntryGateLifecycle(t *testing.T) {
 			if err := replacement.Install(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if err := replacement.renew(ctx, time.Now().Add(AllowLifetime)); err != nil {
+			if _, err := replacement.renew(ctx, time.Now().Add(AllowLifetime)); err != nil {
 				t.Fatal(err)
 			}
 			if err := replacement.RemoveClosedConflicts(ctx); err != nil {

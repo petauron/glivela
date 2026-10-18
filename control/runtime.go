@@ -26,6 +26,7 @@ type Driver interface {
 	Activate(context.Context, Desired, *Desired) error
 	Stop(context.Context, Desired) error
 	Healthy(context.Context, Desired) error
+	EntryHealth(Desired) *EntryHealthReport
 }
 
 type runtimeJournal struct {
@@ -392,24 +393,24 @@ func (r *NativeRuntime) Recover(ctx context.Context) error {
 	return nil
 }
 
-func (r *NativeRuntime) Inspect(ctx context.Context) (glivela.AppliedReceipt, error) {
+func (r *NativeRuntime) Inspect(ctx context.Context) (Observation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state, err := r.journal()
 	if err != nil {
-		return glivela.AppliedReceipt{}, err
+		return Observation{AppliedReceipt: glivela.AppliedReceipt{}}, err
 	}
 	if state.Phase != "ready" {
-		return glivela.AppliedReceipt{}, errors.New("control: pending runtime recovery")
+		return Observation{AppliedReceipt: glivela.AppliedReceipt{}}, errors.New("control: pending runtime recovery")
 	}
 	if state.Current == nil {
-		return glivela.AppliedReceipt{}, os.ErrNotExist
+		return Observation{AppliedReceipt: glivela.AppliedReceipt{}}, os.ErrNotExist
 	}
 	a := *state.Current
 	if err := r.verifyConfig(a); err != nil {
-		return glivela.AppliedReceipt{}, err
+		return Observation{AppliedReceipt: glivela.AppliedReceipt{}}, err
 	}
-	return glivela.AppliedReceipt{Revision: a.Revision, ConfigSHA256: a.ConfigSHA256, RuntimeReady: r.Driver.Healthy(ctx, a) == nil}, nil
+	return Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: a.Revision, ConfigSHA256: a.ConfigSHA256, RuntimeReady: r.Driver.Healthy(ctx, a) == nil}, EntryHealth: r.Driver.EntryHealth(a)}, nil
 }
 
 func (r *NativeRuntime) verifyConfig(a Desired) error {

@@ -42,11 +42,19 @@ func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint6
 			status.Reason = "entry-runtime-unverified"
 			return status, nil
 		}
+		if !enrolledEntryPeersFresh(node, s.nodes, now) {
+			status.Reason = "entry-route-unverified"
+			return status, nil
+		}
 		if !completeRouteInventory(node, node.Checks) {
 			status.Reason = "routes-incomplete"
 			return status, nil
 		}
 		for _, check := range node.Checks {
+			if entry, found := s.nodes[check.CertificateID]; found && !entryRouteMatches(entry, check.Request) {
+				status.Reason = "entry-route-policy-changed"
+				return status, nil
+			}
 			if !routeTargetsLanding(check.Request, node) || check.Request.SnapshotID != snapshotID || check.Request.Revision != revision || check.Request.ConfigSHA256 != digest || check.Result == nil {
 				status.Reason = "routes-incomplete"
 				return status, nil

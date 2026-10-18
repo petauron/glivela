@@ -98,7 +98,7 @@ func TestEntryDesiredDeliveryAndUpdatesOverMutualTLS(t *testing.T) {
 	if err != nil || gotB.ConfigSHA256 != b.ConfigSHA256 {
 		t.Fatal("second entry lost its configuration", err)
 	}
-	_, err = clientA.Exchange(ctx, &glivela.AppliedReceipt{Revision: 1, ConfigSHA256: b.ConfigSHA256, RuntimeReady: true})
+	_, err = clientA.Exchange(ctx, &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: 1, ConfigSHA256: b.ConfigSHA256, RuntimeReady: true}})
 	if err != nil || s.nodes[CertificateID(certA)].Receipt != nil || s.nodes[CertificateID(certB)].Receipt != nil {
 		t.Fatal("one entry submitted another entry's readiness", err)
 	}

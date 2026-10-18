@@ -23,13 +23,30 @@ type RouteCheck struct {
 	ReceivedAt    time.Time         `json:"receivedAt,omitempty"`
 }
 
+func newRouteAttempt() (string, error) {
+	var nonce [24]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(nonce[:]), nil
+}
+
 func runtimeFresh(node Node, now time.Time) bool {
-	return node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, *node.Receipt) == nil && !node.ReportedAt.IsZero() && !node.ReportedAt.After(now) && now.Sub(node.ReportedAt) <= time.Minute
+	return node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, node.Receipt.AppliedReceipt) == nil && !node.ReportedAt.IsZero() && !node.ReportedAt.After(now) && now.Sub(node.ReportedAt) <= time.Minute
 }
 
 func enrolledEntriesFresh(node Node, nodes map[string]Node, now time.Time) bool {
 	for id, entry := range node.RouteEntries {
 		if enrolled, ok := nodes[entry.CertificateID]; ok && (enrolled.Desired.Entry == nil || enrolled.ID != id || !runtimeFresh(enrolled, now)) {
+			return false
+		}
+	}
+	return true
+}
+
+func enrolledEntryPeersFresh(node Node, nodes map[string]Node, now time.Time) bool {
+	for _, entry := range node.RouteEntries {
+		if enrolled, found := nodes[entry.CertificateID]; found && !entryPeerFresh(enrolled, node, now) {
 			return false
 		}
 	}
@@ -59,11 +76,11 @@ func (s *Store) AssignRouteChecks(assignments []RouteCheck) error {
 	now := time.Now().UTC()
 	for _, assignment := range assignments {
 		p := assignment.Request
-		var nonce [24]byte
-		if _, err := rand.Read(nonce[:]); err != nil {
+		attempt, err := newRouteAttempt()
+		if err != nil {
 			return err
 		}
-		p.AttemptID = hex.EncodeToString(nonce[:])
+		p.AttemptID = attempt
 		if !glivela.ValidIdentity(assignment.CertificateID) || p.Validate() != nil || assignment.Result != nil || p.LandingID != request.LandingID || p.SnapshotID != request.SnapshotID || p.Revision != request.Revision || p.ConfigSHA256 != request.ConfigSHA256 {
 			return errors.New("control: invalid route inventory")
 		}

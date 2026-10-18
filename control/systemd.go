@@ -40,6 +40,8 @@ type SystemdDriver struct {
 	Interface    string `json:"interface"`
 }
 
+func (SystemdDriver) EntryHealth(Desired) *EntryHealthReport { return nil }
+
 // Ownership changes require explicit handover, not silent rule replacement.
 func (d SystemdDriver) Binding() string {
 	return d.Unit + ":" + d.WorkerUser + ":" + strconv.FormatUint(uint64(d.WorkerUID), 10) + ":" + d.Interface

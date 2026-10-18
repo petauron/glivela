@@ -161,7 +161,7 @@ func checkEntryTransportRevision(t *testing.T, field string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := loaded.Exchange(context.Background(), certificate, &glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true})
+	got, err := loaded.Exchange(context.Background(), certificate, &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}})
 	if err != nil || got.Revision != changed.Revision || got.EntryNetwork.Source.PublicKey != changed.EntryNetwork.Source.PublicKey || got.EntryNetwork.Peers[0] != changed.EntryNetwork.Peers[0] || loaded.nodes[certificate].Receipt != nil {
 		t.Fatal("restart lost transport policy or accepted old runtime proof", err)
 	}

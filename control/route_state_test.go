@@ -10,7 +10,7 @@ import (
 
 func reportRuntime(t *testing.T, s *Store, certificate string, d Desired) {
 	t.Helper()
-	if _, err := s.Exchange(context.Background(), certificate, &glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}); err != nil {
+	if _, err := s.Exchange(context.Background(), certificate, &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}}); err != nil {
 		t.Fatal(err)
 	}
 }

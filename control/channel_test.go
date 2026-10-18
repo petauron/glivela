@@ -111,7 +111,7 @@ func TestDirectMutualTLSIsolation(t *testing.T) {
 	if _, err = unknown.Exchange(context.Background(), nil); err == nil {
 		t.Fatal("unenrolled certificate accepted")
 	}
-	report := glivela.AppliedReceipt{Revision: 1, ConfigSHA256: desired.ConfigSHA256, RuntimeReady: true}
+	report := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: 1, ConfigSHA256: desired.ConfigSHA256, RuntimeReady: true}}
 	if _, err = client.Exchange(context.Background(), &report); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestEnrollmentRevisionAndRotation(t *testing.T) {
 	if _, err := s.Exchange(context.Background(), CertificateID(a), nil); err == nil {
 		t.Fatal("rotated identity still authorized")
 	}
-	stale := glivela.AppliedReceipt{Revision: 1, ConfigSHA256: node.Desired.ConfigSHA256, RuntimeReady: true}
+	stale := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: 1, ConfigSHA256: node.Desired.ConfigSHA256, RuntimeReady: true}}
 	desired, err := s.Exchange(context.Background(), CertificateID(b), &stale)
 	if err != nil || desired.Revision != 2 || s.nodes[CertificateID(b)].Receipt != nil {
 		t.Fatal("stale receipt accepted or update blocked")
@@ -169,12 +169,12 @@ func TestEnrollmentRevisionAndRotation(t *testing.T) {
 }
 
 type fakeRuntime struct {
-	current              glivela.AppliedReceipt
+	current              Observation
 	inspectErr, applyErr error
 	applies              int
 }
 
-func (f *fakeRuntime) Inspect(context.Context) (glivela.AppliedReceipt, error) {
+func (f *fakeRuntime) Inspect(context.Context) (Observation, error) {
 	return f.current, f.inspectErr
 }
 func (f *fakeRuntime) Apply(_ context.Context, desired Desired) error {
@@ -182,7 +182,7 @@ func (f *fakeRuntime) Apply(_ context.Context, desired Desired) error {
 	if f.applyErr != nil {
 		return f.applyErr
 	}
-	f.current = glivela.AppliedReceipt{Revision: desired.Revision, ConfigSHA256: desired.ConfigSHA256, RuntimeReady: true}
+	f.current = Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: desired.Revision, ConfigSHA256: desired.ConfigSHA256, RuntimeReady: true}}
 	f.inspectErr = nil
 	return nil
 }
@@ -193,7 +193,7 @@ type fakeClient struct {
 	reports int
 }
 
-func (f *fakeClient) Exchange(_ context.Context, receipt *glivela.AppliedReceipt) (Desired, error) {
+func (f *fakeClient) Exchange(_ context.Context, receipt *Observation) (Desired, error) {
 	if receipt != nil {
 		f.reports++
 	}
@@ -249,7 +249,7 @@ func TestNewObservationInvalidatesPreviousSuccess(t *testing.T) {
 			if err := s.Put(Node{ID: "one", CertificateID: id, Desired: desired}); err != nil {
 				t.Fatal(err)
 			}
-			report := glivela.AppliedReceipt{Revision: 2, ConfigSHA256: desired.ConfigSHA256, RuntimeReady: true}
+			report := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: 2, ConfigSHA256: desired.ConfigSHA256, RuntimeReady: true}}
 			if _, err := s.Exchange(context.Background(), id, &report); err != nil || s.nodes[id].Receipt == nil {
 				t.Fatal("initial success not recorded", err)
 			}

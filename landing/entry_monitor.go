@@ -96,11 +96,12 @@ func (m *Monitor) Run(ctx context.Context) error {
 		}
 		until, healthy := leaseDeadlineForTransport(m.Gate, before, business, after, time.Now(), m.TCPOnly)
 		if healthy && business.ExitIP == m.ExpectedExit && checkErr == nil && ctx.Err() == nil {
-			checkErr = m.Gate.renew(ctx, until)
+			var confirmed time.Time
+			confirmed, checkErr = m.Gate.renew(ctx, until)
 			if checkErr == nil {
 				status.State, status.Stage, status.Reason = "healthy", "complete", "direct_and_business_ready"
 				status.TCP, status.UDP, status.ExitIP = business.TCP, business.UDP, business.ExitIP
-				status.AllowedUntil = until.UTC()
+				status.AllowedUntil = confirmed.UTC()
 				lastHealthy = time.Now().UTC()
 				status.LastHealthyAt = lastHealthy
 			} else {

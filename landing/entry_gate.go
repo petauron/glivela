@@ -297,33 +297,46 @@ func (g *TrafficGate) block(ctx context.Context) error {
 
 // Renew is internal to Monitor: callers cannot open the gate based on a UI
 // flag, a historical ping, or a health result for an earlier revision.
-func (g *TrafficGate) renew(ctx context.Context, until time.Time) error {
+func (g *TrafficGate) renew(ctx context.Context, until time.Time) (time.Time, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	document, err := g.snapshot(ctx)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	if found, err := g.validate(document); err != nil || !found {
-		return errors.Join(err, errors.New("landing: gate policy is unavailable"))
+		return time.Time{}, errors.Join(err, errors.New("landing: gate policy is unavailable"))
 	}
 	remaining := time.Until(until)
 	if remaining <= nftTimeout+time.Second || remaining > AllowLifetime {
-		return errors.New("landing: gate proof expired")
+		return time.Time{}, errors.New("landing: gate proof expired")
 	}
 	// libnftables JSON timeouts are seconds. Reserve the command deadline so
 	// a delayed apply cannot extend the original proof's validity.
 	seconds := int((remaining - nftTimeout) / time.Second)
 	element := nftObject{"family": "inet", "table": g.table, "name": "allowed", "elem": []any{nftObject{"elem": nftObject{"val": g.peer.Address, "timeout": seconds}}}}
 	applyErr := g.apply(ctx, []any{g.flushAllowed(), nftObject{"add": nftObject{"element": element}}})
+	observedStart := time.Now()
 	document, err = g.snapshot(ctx)
 	if err != nil {
-		return errors.Join(applyErr, err)
+		return time.Time{}, errors.Join(applyErr, err)
 	}
 	if found, err := g.validate(document); err != nil || !found || !g.hasLiveLease(document, until) {
-		return errors.Join(applyErr, err, errors.New("landing: gate permission was not confirmed"))
+		return time.Time{}, errors.Join(applyErr, err, errors.New("landing: gate permission was not confirmed"))
 	}
-	return nil
+	// expires is sampled by nft after observedStart. Starting the reported
+	// remaining duration at the earlier query start cannot overstate the
+	// actual installed lease, unlike reporting the original proof deadline.
+	lease := g.elements(document)[0].(map[string]any)["elem"].(map[string]any)
+	expires := lease["expires"].(float64)
+	confirmed := observedStart.Add(time.Duration(expires * float64(time.Second)))
+	if confirmed.After(until) {
+		confirmed = until
+	}
+	if !confirmed.After(time.Now()) {
+		return time.Time{}, errors.New("landing: confirmed gate lease expired")
+	}
+	return confirmed, nil
 }
 
 func (g *TrafficGate) flushAllowed() any {

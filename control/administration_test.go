@@ -106,7 +106,7 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 	post(entryHTTP, "/v1/admin/route-checks", inventory, http.StatusForbidden)
 	post(admin, "/v1/exchange", map[string]any{}, http.StatusForbidden)
 	post(admin, "/v1/admin/route-checks", inventory, http.StatusConflict)
-	if _, err := landingClient.Exchange(context.Background(), &glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}); err != nil {
+	if _, err := landingClient.Exchange(context.Background(), &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}}); err != nil {
 		t.Fatal(err)
 	}
 	post(admin, "/v1/admin/route-checks", inventory, http.StatusAccepted)
@@ -143,7 +143,7 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 	post(admin, "/v1/admin/landings", map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": d.Landing, "config": "arbitrary core configuration"}, http.StatusBadRequest)
 	next := artifact(2)
 	post(admin, "/v1/admin/landings", map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": next.Landing}, http.StatusAccepted)
-	if got, err := landingClient.Exchange(context.Background(), &glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}); err != nil || got.Revision != 2 {
+	if got, err := landingClient.Exchange(context.Background(), &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}}); err != nil || got.Revision != 2 {
 		t.Fatal("stale receipt prevented delivery of updated policy", err)
 	}
 	post(admin, "/v1/admin/landings", enrollment, http.StatusConflict)

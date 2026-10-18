@@ -50,6 +50,31 @@ func TestEntryGateHealthVerificationNeverMutatesPolicy(t *testing.T) {
 	}
 }
 
+func TestEntryLeaseReportsConservativeKernelDeadlineNotProofDeadline(t *testing.T) {
+	gate := fixtureGate(t)
+	document := fixtureNFT(t, gate)
+	wrote := false
+	gate.run = func(_ context.Context, input []byte, _ ...string) ([]byte, error) {
+		if input != nil {
+			wrote = true
+			document.Objects[1]["set"]["elem"] = []any{map[string]any{"elem": map[string]any{"val": gate.peer.Address, "timeout": float64(4), "expires": float64(3)}}}
+			return nil, nil
+		}
+		if wrote {
+			time.Sleep(30 * time.Millisecond)
+		}
+		return json.Marshal(document)
+	}
+	proofUntil := time.Now().Add(AllowLifetime)
+	confirmed, err := gate.renew(context.Background(), proofUntil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !confirmed.Before(time.Now().Add(3*time.Second)) || !confirmed.Before(proofUntil.Add(-time.Second)) {
+		t.Fatal("reported deadline extended beyond conservative kernel expiry")
+	}
+}
+
 func TestBridgeGateRejectsPolicyDriftAndFlowOffload(t *testing.T) {
 	gate := fixtureGate(t)
 	for _, test := range []struct {

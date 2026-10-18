@@ -13,8 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"time"
-
-	glivela "github.com/petauron/glivela"
 )
 
 const maxMessage = 8 << 20
@@ -45,11 +43,11 @@ func CertificateID(cert *x509.Certificate) string {
 // Repository is owned by Glivela. Exchange must atomically compare a report
 // with the current desired revision before recording it.
 type Repository interface {
-	Exchange(context.Context, string, *glivela.AppliedReceipt) (Desired, error)
+	Exchange(context.Context, string, *Observation) (Desired, error)
 }
 
 type exchange struct {
-	Receipt *glivela.AppliedReceipt `json:"receipt,omitempty"`
+	Receipt *Observation `json:"receipt,omitempty"`
 }
 
 // Handler has no admin endpoints. Enrollment and desired state updates are
@@ -120,7 +118,7 @@ func NewClient(endpoint string, identity tls.Certificate, roots *x509.CertPool) 
 
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 
-func (c *Client) Exchange(ctx context.Context, receipt *glivela.AppliedReceipt) (Desired, error) {
+func (c *Client) Exchange(ctx context.Context, receipt *Observation) (Desired, error) {
 	raw, err := json.Marshal(exchange{Receipt: receipt})
 	if err != nil {
 		return Desired{}, errors.New("control: cannot encode report")

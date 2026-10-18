@@ -157,8 +157,14 @@ acceptance. Linux namespace CI additionally exercises real gates with simulated
 Docker/private-link failure and verifies unchanged-worker resume. These do not
 prove real container or successful-route acceptance. `RuntimeReady` describes
 the owned process/gates/monitor liveness, not all peers being reachable. Private
-source checks surround business probes, but their per-peer reports still need
-the controller acceptance path. Pre-cutover checks for newly enabled peers,
+source checks surround business probes. Direct authenticated observations carry
+the complete assigned peer inventory and conservative kernel lease deadlines.
+Controller acceptance requires both the matching fresh peer proof and a separate
+current route challenge; process readiness alone cannot clear a route warning.
+Health transitions rotate only that entry's challenge, preserving unrelated
+entries on a shared landing. Snapshot timestamps and a persisted controller
+watermark reject delayed old success after failure; synchronized node/controller
+clocks are required and future reports fail closed. Pre-cutover checks for newly enabled peers,
 image replacement, installer/boot integration and actual native destination/
 family safety acceptance remain required before exposing this driver via CLI.
 

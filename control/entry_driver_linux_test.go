@@ -59,12 +59,18 @@ func TestKernelEntryDriverBlockedPeerAndNodeResume(t *testing.T) {
 		if err != nil || !receipt.RuntimeReady {
 			t.Fatal("ordinary blocked peer became global process failure", err)
 		}
+		if receipt.EntryHealth == nil || receipt.EntryHealth.SampledAt.IsZero() || receipt.EntryHealth.Peers["landing-example"].Status.State != "blocked" || validateEntryHealth(desired, receipt.EntryHealth) != nil {
+			t.Fatal("blocked peer observation missing or malformed")
+		}
 	}
 	if worker.starts != 1 || worker.stops != 0 {
 		t.Fatal("health polling mutated worker")
 	}
 	if err := d.Close(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if d.EntryHealth(desired) != nil {
+		t.Fatal("stopped monitor retained health evidence")
 	}
 	// Simulate only a Glivela node-program restart, not a Docker or host boot.
 	// A matching running worker/configuration must not be reset needlessly.

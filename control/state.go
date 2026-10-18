@@ -16,13 +16,14 @@ import (
 )
 
 type Node struct {
-	RouteEntries  map[string]RouteEntry   `json:"routeEntries,omitempty"`
-	Checks        map[string]RouteCheck   `json:"checks,omitempty"`
-	ID            string                  `json:"id"`
-	CertificateID string                  `json:"certificateId"`
-	Desired       Desired                 `json:"desired"`
-	Receipt       *glivela.AppliedReceipt `json:"receipt,omitempty"`
-	ReportedAt    time.Time               `json:"reportedAt,omitempty"`
+	RouteEntries         map[string]RouteEntry `json:"routeEntries,omitempty"`
+	Checks               map[string]RouteCheck `json:"checks,omitempty"`
+	ID                   string                `json:"id"`
+	CertificateID        string                `json:"certificateId"`
+	Desired              Desired               `json:"desired"`
+	Receipt              *Observation          `json:"receipt,omitempty"`
+	ReportedAt           time.Time             `json:"reportedAt,omitempty"`
+	EntryHealthBarrierAt time.Time             `json:"entryHealthBarrierAt,omitempty"`
 }
 
 // Store is a bounded single-process state file for the MVP. Callers must run
@@ -74,8 +75,11 @@ func OpenStore(path string) (*Store, error) {
 		if _, ok := s.nodes[node.CertificateID]; ok {
 			return nil, errors.New("control: duplicate enrollment")
 		}
-		if node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, *node.Receipt) != nil {
+		if node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, node.Receipt.AppliedReceipt) != nil {
 			return nil, errors.New("control: invalid stored receipt")
+		}
+		if node.Receipt != nil && validateEntryHealth(node.Desired, node.Receipt.EntryHealth) != nil {
+			return nil, errors.New("control: invalid stored entry observation")
 		}
 		for entry, check := range node.Checks {
 			if entry != check.Request.EntryID || !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
@@ -140,6 +144,7 @@ func (s *Store) Put(node Node) error {
 	}
 	// Administrative imports cannot manufacture a ready node.
 	node.Receipt = nil
+	node.EntryHealthBarrierAt = time.Time{}
 	node.ReportedAt = time.Time{}
 	node.Desired = node.Desired.clone()
 	node.RouteEntries = maps.Clone(node.RouteEntries)
@@ -153,7 +158,7 @@ func (s *Store) Put(node Node) error {
 	return s.commit(next)
 }
 
-func (s *Store) Exchange(ctx context.Context, certificate string, receipt *glivela.AppliedReceipt) (Desired, error) {
+func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Observation) (Desired, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -164,22 +169,41 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *glive
 		return Desired{}, errors.New("control: not enrolled")
 	}
 	now := time.Now().UTC()
-	wasReady := runtimeFresh(node, now)
+	old := node
+	if node.Desired.Entry != nil && receipt != nil && receipt.EntryHealth != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, receipt.AppliedReceipt) == nil && !receipt.EntryHealth.SampledAt.IsZero() && !receipt.EntryHealth.SampledAt.After(now) && !receipt.EntryHealth.SampledAt.After(node.EntryHealthBarrierAt) {
+		// Delayed/replayed old success must not overwrite a newer blocked
+		// observation or extend freshness. It still receives current policy.
+		return node.Desired.clone(), nil
+	}
 	// Every authenticated observation supersedes the previous health report.
 	// A missing/stale report can occur after failed recovery or lost local state;
 	// keeping the old successful receipt would incorrectly show a healthy node.
 	node.Receipt = nil
 	if receipt != nil {
-		copyReceipt := *receipt
-		if glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, copyReceipt) == nil {
+		copyReceipt := receipt.clone()
+		if glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, copyReceipt.AppliedReceipt) == nil {
+			// Bad/incomplete peer data supersedes the previous proof but must
+			// not stop an enrolled node receiving its current desired policy.
+			if validateEntryHealth(node.Desired, copyReceipt.EntryHealth) != nil || copyReceipt.EntryHealth != nil && copyReceipt.EntryHealth.SampledAt.After(now) {
+				copyReceipt.EntryHealth = nil
+			}
 			node.Receipt = &copyReceipt
+		}
+	}
+	if node.Desired.Entry != nil {
+		if node.Receipt != nil && node.Receipt.EntryHealth != nil {
+			node.EntryHealthBarrierAt = node.Receipt.EntryHealth.SampledAt
+		} else {
+			node.EntryHealthBarrierAt = now
 		}
 	}
 	node.ReportedAt = now
 	next := s.copy()
 	next[certificate] = node
-	if node.Desired.Entry != nil && wasReady != runtimeFresh(node, now) {
-		invalidateEntryChecks(next, node.ID)
+	if node.Desired.Entry != nil {
+		if err := invalidateChangedEntryProofs(next, old, node, now); err != nil {
+			return Desired{}, err
+		}
 	}
 	if err := s.commit(next); err != nil {
 		return Desired{}, err

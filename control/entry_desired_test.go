@@ -130,13 +130,13 @@ func TestEntryEnrollmentPreservesIdentityAndRevokesOldVerifier(t *testing.T) {
 
 func TestEntryUpdatesAndReadinessCannotReuseOldRouteProof(t *testing.T) {
 	s := store(t)
-	landing, entry := artifact(1), entryArtifact(t, "entry-a", 1)
+	landing, entry := artifact(1), withRoutedEntry(t, entryArtifact(t, "entry-a", 1))
 	landingCert, entryCert := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	if err := s.Put(Node{ID: "landing-a", CertificateID: landingCert, Desired: landing, RouteEntries: map[string]RouteEntry{"entry-a": {CertificateID: entryCert, Address: "100.64.0.3"}}}); err != nil {
+	if err := s.Put(Node{ID: "landing-example", CertificateID: landingCert, Desired: landing, RouteEntries: map[string]RouteEntry{"entry-a": {CertificateID: entryCert, Address: "100.64.0.3"}}}); err != nil {
 		t.Fatal(err)
 	}
 	reportRuntime(t, s, landingCert, landing)
-	check := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: 1, ConfigSHA256: landing.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
+	check := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-example", Revision: 1, ConfigSHA256: landing.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: entry.EntryNetwork.Peers[0].Target, ExpectedExit: entry.EntryNetwork.Peers[0].ExpectedExit}
 	verify := func() {
 		t.Helper()
 		if err := s.AssignRouteChecks([]RouteCheck{{CertificateID: entryCert, Request: check}}); err != nil {
@@ -155,21 +155,30 @@ func TestEntryUpdatesAndReadinessCannotReuseOldRouteProof(t *testing.T) {
 	// Diagnostics may observe the real route while entry deployment is still
 	// unverified. That observation alone must never clear the runtime warning.
 	verify()
-	status, err := s.AcceptLandingRoutes("landing-a", "snapshot-a", 1, landing.ConfigSHA256)
+	status, err := s.AcceptLandingRoutes("landing-example", "snapshot-a", 1, landing.ConfigSHA256)
 	if err != nil || status.RoutesPassed || status.Reason != "entry-runtime-unverified" {
 		t.Fatal("route observation replaced entry runtime proof", err)
 	}
 	reportRuntime(t, s, entryCert, entry)
-	if len(s.nodes[landingCert].Checks) != 0 {
+	if s.nodes[landingCert].Checks["entry-a"].Result != nil {
 		t.Fatal("first entry runtime proof reused pre-application route results")
 	}
 	verify()
-	status, err = s.AcceptLandingRoutes("landing-a", "snapshot-a", 1, landing.ConfigSHA256)
+	status, err = s.AcceptLandingRoutes("landing-example", "snapshot-a", 1, landing.ConfigSHA256)
+	if err != nil || status.RoutesPassed || status.Reason != "entry-route-unverified" {
+		t.Fatal("process receipt replaced peer gate evidence", err)
+	}
+	observation := healthyEntryObservation(entry, time.Now())
+	if _, err := s.Exchange(context.Background(), entryCert, &observation); err != nil {
+		t.Fatal(err)
+	}
+	verify()
+	status, err = s.AcceptLandingRoutes("landing-example", "snapshot-a", 1, landing.ConfigSHA256)
 	if err != nil || !status.RoutesPassed {
 		t.Fatal("fresh applied entry and new route proof not accepted", err)
 	}
 	_, err = s.Exchange(context.Background(), entryCert, nil)
-	if err != nil || len(s.nodes[landingCert].Checks) != 0 {
+	if err != nil || s.nodes[landingCert].Checks["entry-a"].Result != nil {
 		t.Fatal("lost entry readiness retained old success", err)
 	}
 	plan := entry.clone().Entry

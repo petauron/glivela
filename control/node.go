@@ -14,11 +14,11 @@ import (
 // Inspect must check actual runtime state, not merely return its last receipt.
 type Runtime interface {
 	Apply(context.Context, Desired) error
-	Inspect(context.Context) (glivela.AppliedReceipt, error)
+	Inspect(context.Context) (Observation, error)
 }
 
 type ExchangeClient interface {
-	Exchange(context.Context, *glivela.AppliedReceipt) (Desired, error)
+	Exchange(context.Context, *Observation) (Desired, error)
 }
 
 type NodeRunner struct {
@@ -34,7 +34,7 @@ func (n NodeRunner) Step(ctx context.Context) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("control: cannot establish current runtime state")
 	}
-	var report *glivela.AppliedReceipt
+	var report *Observation
 	if err == nil {
 		report = &current
 	}
@@ -49,7 +49,7 @@ func (n NodeRunner) Step(ctx context.Context) error {
 		if desired.Revision < current.Revision || desired.Revision == current.Revision && desired.ConfigSHA256 != current.ConfigSHA256 {
 			return errors.New("control: controller attempted revision rollback or reuse")
 		}
-		if glivela.VerifyAppliedReceipt(desired.DesiredArtifact, current) == nil {
+		if glivela.VerifyAppliedReceipt(desired.DesiredArtifact, current.AppliedReceipt) == nil {
 			return nil
 		}
 		// Health loss alone does not authorize restarting the same revision.
@@ -61,7 +61,7 @@ func (n NodeRunner) Step(ctx context.Context) error {
 		return err
 	}
 	actual, err := n.Runtime.Inspect(ctx)
-	if err != nil || glivela.VerifyAppliedReceipt(desired.DesiredArtifact, actual) != nil {
+	if err != nil || glivela.VerifyAppliedReceipt(desired.DesiredArtifact, actual.AppliedReceipt) != nil {
 		return errors.New("control: runtime acceptance failed")
 	}
 	// Report independently observed state. If the control connection fails,

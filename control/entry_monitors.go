@@ -17,6 +17,7 @@ type entryMonitorGroup struct {
 	desired  Desired
 	active   map[string]bool
 	statuses map[string]landing.MonitorStatus
+	stopping bool
 }
 
 type entryMonitors struct {
@@ -28,6 +29,7 @@ func (m *entryMonitors) close(ctx context.Context) error {
 	m.mu.Lock()
 	g := m.group
 	if g != nil {
+		g.stopping = true
 		g.cancel()
 	}
 	m.mu.Unlock()
@@ -57,7 +59,7 @@ func (m *entryMonitors) verify(desired Desired) error {
 		return nil
 	}
 	g := m.group
-	if g == nil || g.desired.Revision != desired.Revision || g.desired.ConfigSHA256 != desired.ConfigSHA256 || !reflect.DeepEqual(g.desired.EntryNetwork, desired.EntryNetwork) {
+	if g == nil || g.stopping || g.desired.Revision != desired.Revision || g.desired.ConfigSHA256 != desired.ConfigSHA256 || !reflect.DeepEqual(g.desired.EntryNetwork, desired.EntryNetwork) {
 		return errors.New("control: entry monitor revision differs")
 	}
 	select {
@@ -86,6 +88,33 @@ func (d *EntryDriver) PeerStatus() map[string]landing.MonitorStatus {
 		}
 	}
 	return result
+}
+
+func (d *EntryDriver) EntryHealth(desired Desired) *EntryHealthReport {
+	d.monitors.mu.Lock()
+	defer d.monitors.mu.Unlock()
+	g := d.monitors.group
+	if desired.Entry == nil || desired.EntryNetwork == nil || g == nil || g.stopping || g.desired.Revision != desired.Revision || g.desired.ConfigSHA256 != desired.ConfigSHA256 || !reflect.DeepEqual(g.desired.EntryNetwork, desired.EntryNetwork) {
+		return nil
+	}
+	select {
+	case <-g.done:
+		return nil
+	default:
+	}
+	health := &EntryHealthReport{SampledAt: time.Now().UTC(), Peers: map[string]EntryPeerObservation{}}
+	if g.desired.EntryNetwork.Source != nil {
+		source := *g.desired.EntryNetwork.Source
+		health.Source = &source
+	}
+	for _, peer := range g.desired.EntryNetwork.Peers {
+		status, found := g.statuses[peer.EgressID]
+		if !found || !g.active[peer.EgressID] {
+			return nil
+		}
+		health.Peers[peer.EgressID] = EntryPeerObservation{Identity: peer.Identity, Status: status}
+	}
+	return health
 }
 
 func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGate) error {
@@ -156,6 +185,9 @@ func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGat
 			err := monitor.Run(ctx)
 			d.monitors.mu.Lock()
 			g.active[peer.EgressID] = false
+			if err != nil && ctx.Err() == nil {
+				g.stopping = true
+			}
 			g.statuses[peer.EgressID] = landing.MonitorStatus{Revision: desired.Revision, State: "blocked", Reason: "monitor-stopped", CheckedAt: time.Now().UTC()}
 			d.monitors.mu.Unlock()
 			if err != nil && ctx.Err() == nil {
