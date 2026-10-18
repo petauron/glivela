@@ -106,6 +106,18 @@ func run(ctx context.Context, path string) error {
 		if len(cfg.Nodes) != 0 || cfg.Listen != "" {
 			return errors.New("node cannot enroll peers or listen")
 		}
+		// The native installer extracts both executables from the same verified
+		// application bundle. Derive its directory from this running executable,
+		// never from bootstrap data or a guessed host installation layout.
+		executable, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		executable, err = filepath.EvalSymlinks(executable)
+		if err != nil {
+			return err
+		}
+		cfg.Xray.Distribution = filepath.Dir(executable)
 		cfg.Xray, err = cfg.Xray.ResolveInstallation()
 		if err != nil {
 			return err

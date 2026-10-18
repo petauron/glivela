@@ -28,7 +28,7 @@ import (
 // The package installer must provision the matching unit and its firewall
 // dependency; this adapter refuses unowned/replaced installation files.
 type SystemdDriver struct {
-	Distribution string `json:"distribution"`
+	Distribution string `json:"-"`
 	Installation string `json:"installation"`
 	Service      string `json:"service"`
 	Binary       string `json:"-"`

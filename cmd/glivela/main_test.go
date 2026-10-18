@@ -2,10 +2,21 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestBootstrapCannotSelectDistribution(t *testing.T) {
+	var cfg configuration
+	decoder := json.NewDecoder(strings.NewReader(`{"mode":"node","xray":{"distribution":"/tmp/untrusted"}}`))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err == nil {
+		t.Fatal("bootstrap overrode installed distribution")
+	}
+}
 
 func TestBootstrapFailsClosed(t *testing.T) {
 	for _, body := range []string{`{}`, `{"mode":"arbitrary"}`, `{"mode":"node","unknown":true}`, `{"mode":"node"} {}`} {
