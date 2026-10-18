@@ -17,6 +17,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/petauron/glivela/landing"
@@ -30,15 +31,36 @@ type SystemdDriver struct {
 	Binary       string `json:"binary"`
 	BinarySHA256 string `json:"binarySha256"`
 	UnitSHA256   string `json:"unitSha256"`
+	Unit         string `json:"unit"`
+	WorkerUser   string `json:"workerUser"`
 	WorkerUID    uint32 `json:"workerUid"`
 	Interface    string `json:"interface"`
 }
 
-const xrayUnitPath = "/etc/systemd/system/glivela-xray.service"
-
 // Ownership changes require explicit handover, not silent rule replacement.
 func (d SystemdDriver) Binding() string {
-	return "glivela-xray:" + strconv.FormatUint(uint64(d.WorkerUID), 10) + ":" + d.Interface
+	return d.Unit + ":" + d.WorkerUser + ":" + strconv.FormatUint(uint64(d.WorkerUID), 10) + ":" + d.Interface
+}
+
+// Names are supplied by the local installation, never by desired node messages.
+// Accept only concrete service/account names; no paths, templates or options.
+func (d SystemdDriver) installationNames() (string, error) {
+	valid := func(name string) bool {
+		if name == "" || len(name) > 128 || name[0] == '-' {
+			return false
+		}
+		for _, c := range name {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+				return false
+			}
+		}
+		return true
+	}
+	if !strings.HasSuffix(d.Unit, ".service") || !valid(strings.TrimSuffix(d.Unit, ".service")) ||
+		!valid(d.WorkerUser) || len(d.WorkerUser) > 32 || d.WorkerUser == "root" || d.WorkerUID == 0 {
+		return "", errors.New("control: explicit dedicated service and worker identity required")
+	}
+	return filepath.Join("/etc/systemd/system", d.Unit), nil
 }
 
 func verifyExecutableFile(path, expected string) error {
@@ -81,7 +103,11 @@ func (d SystemdDriver) Validate(ctx context.Context, config string) error {
 }
 
 func (d SystemdDriver) service(ctx context.Context, action string) error {
-	if err := verifyExecutableFile(xrayUnitPath, d.UnitSHA256); err != nil {
+	unitPath, err := d.installationNames()
+	if err != nil {
+		return err
+	}
+	if err := verifyExecutableFile(unitPath, d.UnitSHA256); err != nil {
 		return err
 	}
 	// Health polling must not rehash a multi-megabyte binary every cycle.
@@ -91,7 +117,7 @@ func (d SystemdDriver) service(ctx context.Context, action string) error {
 			return err
 		}
 	}
-	if exec.CommandContext(ctx, "/usr/bin/systemctl", action, "glivela-xray.service").Run() != nil {
+	if exec.CommandContext(ctx, "/usr/bin/systemctl", action, d.Unit).Run() != nil {
 		return errors.New("control: Xray service operation failed")
 	}
 	return nil
@@ -100,7 +126,10 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 	if err := desired.Validate(); err != nil {
 		return landing.ServerFirewall{}, err
 	}
-	worker, err := user.Lookup("glivela-xray")
+	if _, err := d.installationNames(); err != nil {
+		return landing.ServerFirewall{}, err
+	}
+	worker, err := user.Lookup(d.WorkerUser)
 	if err != nil || worker.Uid != strconv.FormatUint(uint64(d.WorkerUID), 10) {
 		return landing.ServerFirewall{}, errors.New("control: dedicated worker identity differs")
 	}
