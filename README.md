@@ -92,6 +92,18 @@ replacement or a blind container restart. In particular, actual 26.7.28
 post-resolution/address-family enforcement still needs installed acceptance;
 successful parsing does not prove that newer JSON options are honored.
 
+The Glivela-owned `landing.TrafficGate` and `Monitor` preserve peer-scoped
+runtime fencing for host-GID and retained-bridge entry containers. Each new
+revision starts closed. Only fresh, identity-bound direct transport checks
+around a successful business probe for the exact expected exit can renew a
+15-second maximum kernel lease. Cancellation, failed checks and expired proof
+close that peer only; the monitor has no shared Xray process lifecycle methods.
+Xray UDP relay ports are per-association, so UDP fencing binds the dedicated
+runtime GID/bridge and exact private peer rather than Dante's old fixed range.
+Policy read-back, expiry, closed-revision cleanup and unrelated-peer preservation
+are tested separately. These primitives are not yet wired into the unfinished
+entry container adapter or its boot fence; they do not authorize deployment.
+
 The `verifier` mode runs on an enrolled entry using its own private bootstrap,
 state-directory lease and mTLS identity. It polls `/v1/route-checks`, performs
 one bounded SOCKS/TLS/observed-exit check at a time, and reports success or
