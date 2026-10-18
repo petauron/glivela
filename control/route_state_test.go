@@ -2,10 +2,18 @@ package control
 
 import (
 	"context"
+	glivela "github.com/petauron/glivela"
 	"strings"
 	"testing"
 	"time"
 )
+
+func reportRuntime(t *testing.T, s *Store, certificate string, d Desired) {
+	t.Helper()
+	if _, err := s.Exchange(context.Background(), certificate, &glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRouteAttemptsAreBoundAndDurable(t *testing.T) {
 	s := store(t)
@@ -15,6 +23,10 @@ func TestRouteAttemptsAreBoundAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
+	if err := s.AssignRouteCheck(entry, p); err == nil {
+		t.Fatal("desired state treated as applied runtime")
+	}
+	reportRuntime(t, s, landing, d)
 	if err := s.AssignRouteCheck(entry, p); err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +44,17 @@ func TestRouteAttemptsAreBoundAndDurable(t *testing.T) {
 	if _, err := s.RouteExchange(context.Background(), entry, &wrong); err == nil {
 		t.Fatal("wrong attempt accepted")
 	}
+	if _, err := s.Exchange(context.Background(), landing, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RouteExchange(context.Background(), entry, &r); err == nil {
+		t.Fatal("route success accepted after runtime proof lost")
+	}
+	hidden, err := s.RouteExchange(context.Background(), entry, nil)
+	if err != nil || len(hidden) != 0 {
+		t.Fatal("unhealthy runtime still dispatched")
+	}
+	reportRuntime(t, s, landing, d)
 	if _, err := s.RouteExchange(context.Background(), entry, &r); err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +119,7 @@ func TestRouteExpiredAssignmentCannotAcceptResult(t *testing.T) {
 	if err := s.Put(Node{ID: "landing-a", CertificateID: landing, Desired: d}); err != nil {
 		t.Fatal(err)
 	}
+	reportRuntime(t, s, landing, d)
 	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
 	if err := s.AssignRouteCheck(entry, p); err != nil {
 		t.Fatal(err)

@@ -21,6 +21,7 @@ func TestRouteChannelUsesVerifiedPeer(t *testing.T) {
 	if err := s.Put(Node{ID: "landing-a", CertificateID: strings.Repeat("a", 64), Desired: d}); err != nil {
 		t.Fatal(err)
 	}
+	reportRuntime(t, s, strings.Repeat("a", 64), d)
 	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
 	if err := s.AssignRouteCheck(CertificateID(cert), p); err != nil {
 		t.Fatal(err)
@@ -60,7 +61,7 @@ func TestRouteChannelUsesVerifiedPeer(t *testing.T) {
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("report over TLS: %v %v", pending, err)
 	}
-	if s.nodes[strings.Repeat("a", 64)].Receipt != nil {
-		t.Fatal("route report manufactured runtime readiness")
+	if s.nodes[strings.Repeat("a", 64)].Checks[p.EntryID].Result == nil {
+		t.Fatal("route result not persisted")
 	}
 }

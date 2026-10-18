@@ -22,6 +22,10 @@ type RouteCheck struct {
 	ReceivedAt    time.Time         `json:"receivedAt,omitempty"`
 }
 
+func runtimeFresh(node Node, now time.Time) bool {
+	return node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, *node.Receipt) == nil && !node.ReportedAt.IsZero() && !node.ReportedAt.After(now) && now.Sub(node.ReportedAt) <= time.Minute
+}
+
 // AssignRouteCheck is a local controller operation, never exposed to nodes.
 // Each assignment gets a fresh attempt identity; a previous successful report
 // cannot complete a retry, even if its snapshot and configuration are unchanged.
@@ -42,6 +46,9 @@ func (s *Store) AssignRouteCheck(certificate string, request RouteProbe) error {
 		}
 		if node.Desired.Revision != request.Revision || node.Desired.ConfigSHA256 != request.ConfigSHA256 {
 			return errors.New("control: route assignment is stale")
+		}
+		if !runtimeFresh(node, time.Now().UTC()) {
+			return errors.New("control: applied runtime proof required before route check")
 		}
 		node.Checks = maps.Clone(node.Checks)
 		if node.Checks == nil {
@@ -108,6 +115,9 @@ func (s *Store) RouteExchange(ctx context.Context, certificate string, report *R
 				found = true
 				break
 			}
+			if !runtimeFresh(node, now) {
+				return nil, errors.New("control: applied runtime proof lost")
+			}
 			if now.Sub(check.IssuedAt) > 5*time.Minute || report.CheckedAt.Before(check.IssuedAt.Add(-5*time.Second)) || report.CheckedAt.After(now.Add(5*time.Second)) {
 				return nil, errors.New("control: route attempt expired")
 			}
@@ -130,6 +140,9 @@ func (s *Store) RouteExchange(ctx context.Context, certificate string, report *R
 	}
 	var pending []RouteProbe
 	for _, node := range s.nodes {
+		if !runtimeFresh(node, now) {
+			continue
+		}
 		for _, check := range node.Checks {
 			if check.CertificateID == certificate && check.Result == nil && now.Sub(check.IssuedAt) <= 5*time.Minute && check.Request.Revision == node.Desired.Revision && check.Request.ConfigSHA256 == node.Desired.ConfigSHA256 {
 				pending = append(pending, check.Request)
