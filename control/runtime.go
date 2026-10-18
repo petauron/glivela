@@ -190,6 +190,9 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 	if desired.Validate() != nil {
 		return errors.New("control: invalid runtime artifact")
 	}
+	if err := checkLegacyCutoverApply(r, desired); err != nil {
+		return err
+	}
 	state, err := r.journal()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -344,6 +347,9 @@ func (r *NativeRuntime) backup(a Desired) error {
 func (r *NativeRuntime) Recover(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := RecoverLegacyCutover(ctx, r); err != nil {
+		return err
+	}
 	state, err := r.journal()
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

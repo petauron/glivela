@@ -133,6 +133,23 @@ func (d SystemdDriver) Validate(ctx context.Context, config string) error {
 }
 
 func (d SystemdDriver) service(ctx context.Context, action string) error {
+	if err := d.verifyLoadedService(ctx); err != nil {
+		return err
+	}
+	// Health polling must not rehash a multi-megabyte binary every cycle.
+	// Validate/activation verify it before use; a health poll runs systemctl.
+	if action != "is-active" {
+		if err := verifyExecutableFile(d.Binary, d.BinarySHA256); err != nil {
+			return err
+		}
+	}
+	if exec.CommandContext(ctx, "/usr/bin/systemctl", action, d.Unit).Run() != nil {
+		return errors.New("control: Xray service operation failed")
+	}
+	return nil
+}
+
+func (d SystemdDriver) verifyLoadedService(ctx context.Context) error {
 	if d.WorkerUID == 0 {
 		return errors.New("control: worker identity has not been resolved")
 	}
@@ -153,16 +170,6 @@ func (d SystemdDriver) service(ctx context.Context, action string) error {
 		"--property=LoadState,FragmentPath,DropInPaths,NeedDaemonReload,User").Output()
 	if err != nil || !d.loadedUnitMatches(string(raw)) {
 		return errors.New("control: loaded Xray service differs from owned installation")
-	}
-	// Health polling must not rehash a multi-megabyte binary every cycle.
-	// Validate/activation verify it before use; a health poll runs systemctl.
-	if action != "is-active" {
-		if err := verifyExecutableFile(d.Binary, d.BinarySHA256); err != nil {
-			return err
-		}
-	}
-	if exec.CommandContext(ctx, "/usr/bin/systemctl", action, d.Unit).Run() != nil {
-		return errors.New("control: Xray service operation failed")
 	}
 	return nil
 }

@@ -73,6 +73,22 @@ are retained for diagnosis. The private output path and checkpoint contents must
 not be published. A subsequent cutover still requires a writer fence and fresh
 validation; this read-only source snapshot is not that fence.
 
+The root-only offline command
+`glivela switch-legacy-landing -config <node-bootstrap> -node-id <existing-id> -checkpoint <snapshot.json>`
+requires an unused native runtime and a persistently stopped/masked old Agent.
+It revalidates the backup, exact old firewall, source/interface policy, installed
+candidate service and official Xray configuration before stopping Dante. A
+durable pending record precedes service changes. The old service is disabled
+for boot, its exact firewall is withdrawn, and the native runtime activates the
+candidate. Failure attempts bounded recovery through the retained executable;
+failed recovery retains its pending record. Node startup handles interrupted
+first switches before normal runtime recovery. A rolled-back switch blocks
+automatic retries. The command returns `awaiting-routes`; later revisions remain
+blocked until the remaining controller-side acceptance/authority handover is
+implemented. This command path is not yet accepted for production: real systemd
+first-cutover/recovery integration and complete data/control handover remain
+outstanding.
+
 This is **not yet an installable landing replacement**. The installer still
 needs to provision the dedicated Xray unit and its enforced firewall dependency;
 this code refuses an unknown unit rather than installing an unsafe substitute.

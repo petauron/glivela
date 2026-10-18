@@ -36,6 +36,13 @@ type configuration struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "switch-legacy-landing" {
+		if err := switchLandingCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela first cutover did not complete; inspect retained local recovery state")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "backup-legacy-landing" {
 		if err := backupLandingCommand(os.Args[2:], os.Stdout, backupLegacyLanding); err != nil {
 			log.Print("Glivela legacy backup failed; no authority or service changes performed")
@@ -76,24 +83,32 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, path string) error {
+func readConfiguration(path string) (configuration, error) {
+	var cfg configuration
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 8<<20 {
-		return errors.New("invalid bootstrap file")
+		return cfg, errors.New("invalid bootstrap file")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return cfg, err
 	}
-	var cfg configuration
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&cfg) != nil {
-		return errors.New("invalid bootstrap configuration")
+		return cfg, errors.New("invalid bootstrap configuration")
 	}
 	var extra any
 	if decoder.Decode(&extra) != io.EOF || cfg.Mode != "controller" && cfg.Mode != "node" && cfg.Mode != "verifier" {
-		return errors.New("invalid bootstrap mode")
+		return cfg, errors.New("invalid bootstrap mode")
+	}
+	return cfg, nil
+}
+
+func run(ctx context.Context, path string) error {
+	cfg, err := readConfiguration(path)
+	if err != nil {
+		return err
 	}
 	unlock, err := control.LockDirectory(cfg.Directory)
 	if err != nil {
@@ -138,16 +153,7 @@ func run(ctx context.Context, path string) error {
 		// The native installer extracts both executables from the same verified
 		// application bundle. Derive its directory from this running executable,
 		// never from bootstrap data or a guessed host installation layout.
-		executable, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		executable, err = filepath.EvalSymlinks(executable)
-		if err != nil {
-			return err
-		}
-		cfg.Xray.Distribution = filepath.Dir(executable)
-		cfg.Xray, err = cfg.Xray.ResolveInstallation()
+		cfg.Xray, err = resolveNodeDriver(cfg.Xray)
 		if err != nil {
 			return err
 		}
@@ -203,4 +209,17 @@ func run(ctx context.Context, path string) error {
 		}
 		return ctx.Err()
 	}
+}
+
+func resolveNodeDriver(driver control.SystemdDriver) (control.SystemdDriver, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return control.SystemdDriver{}, err
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return control.SystemdDriver{}, err
+	}
+	driver.Distribution = filepath.Dir(executable)
+	return driver.ResolveInstallation()
 }
