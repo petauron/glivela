@@ -126,7 +126,7 @@ func (d SystemdDriver) Validate(ctx context.Context, config string) error {
 	}
 	// Output can include configuration/credentials. Discard it and expose only
 	// a generic error; never attach unredacted Xray output to a receipt.
-	if exec.CommandContext(ctx, d.Binary, "run", "-test", "-config", config).Run() != nil {
+	if exec.CommandContext(ctx, d.Binary, "run", "-test", "-format", "json", "-config", config).Run() != nil {
 		return errors.New("control: Xray validation failed")
 	}
 	return nil
@@ -254,7 +254,23 @@ func (d SystemdDriver) Activate(ctx context.Context, desired Desired, previous *
 			return err
 		}
 	}
-	return d.service(ctx, "start")
+	if err := d.service(ctx, "start"); err != nil {
+		return err
+	}
+	ready, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if d.Healthy(ready, desired) == nil {
+			return nil
+		}
+		select {
+		case <-ready.Done():
+			return errors.New("control: Xray did not establish its owned listener")
+		case <-ticker.C:
+		}
+	}
 }
 
 func (d SystemdDriver) Stop(ctx context.Context, desired Desired) error {
@@ -279,7 +295,10 @@ func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 	if err != nil {
 		return err
 	}
-	return policy.Verify(ctx)
+	if err := policy.Verify(ctx); err != nil {
+		return err
+	}
+	return verifyOwnedListener(desired.Landing.Address, landing.SOCKSPort, d.WorkerUID)
 }
 
 func probeSOCKSTLS(ctx context.Context, socksAddress, probeURL string, roots *x509.CertPool) error {

@@ -81,7 +81,24 @@ func restoreLegacyLandingRuntime(ctx context.Context, checkpoint, nodeID string,
 			return errors.New("control: legacy runtime not active after recovery")
 		}
 	}
-	return nil
+	plan, policy, err := saved.migrationPlan()
+	if err != nil {
+		return err
+	}
+	ready, cancelReady := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelReady()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if verifyOwnedListener(plan.Address, 1080, policy.UID) == nil {
+			return nil
+		}
+		select {
+		case <-ready.Done():
+			return errors.New("control: legacy runtime did not restore its owned listener")
+		case <-ticker.C:
+		}
+	}
 }
 
 func requireLegacyUnitLoaded(ctx context.Context, unit string) error {
