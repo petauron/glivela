@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,9 @@ func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string
 	if os.Geteuid() != 0 {
 		return errors.New("control: legacy recovery requires root")
 	}
+	if err := requireLegacyWriterStopped(ctx); err != nil {
+		return err
+	}
 	saved, program, err := loadLegacyBackup(checkpoint, nodeID, 0)
 	if err != nil {
 		return err
@@ -25,6 +29,9 @@ func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string
 	current, err := SnapshotLegacyLanding(nodeID)
 	if err != nil || !sameLegacyResources(saved, current) {
 		return errors.New("control: legacy resources changed; recovery refused")
+	}
+	if err := requireLegacyWriterStopped(ctx); err != nil {
+		return err
 	}
 	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -38,6 +45,33 @@ func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string
 		return errors.New("control: retained firewall recovery failed")
 	}
 	return nil
+}
+
+// Initial authority transfer requires an explicit maintenance fence. Merely
+// pausing task claims is insufficient: the old Agent has autonomous account
+// and subscription writers. This check does not stop or mask any host service.
+func requireLegacyWriterStopped(ctx context.Context) error {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(bounded, "/usr/bin/systemctl", "show", "vastora-agent.service", "--property=LoadState,ActiveState,SubState,MainPID,ControlPID,UnitFileState").Output()
+	if err != nil || !legacyWriterStopped(string(raw)) {
+		return errors.New("control: legacy writer must be stopped and persistently masked before recovery")
+	}
+	return nil
+}
+
+func legacyWriterStopped(raw string) bool {
+	want := map[string]string{"LoadState": "masked", "ActiveState": "inactive", "SubState": "dead", "MainPID": "0", "ControlPID": "0", "UnitFileState": "masked"}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		expected, known := want[key]
+		if !ok || !known || seen[key] || expected != value {
+			return false
+		}
+		seen[key] = true
+	}
+	return len(seen) == len(want)
 }
 
 func sameLegacyResources(saved, current LegacyLandingSnapshot) bool {

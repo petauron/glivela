@@ -3,8 +3,30 @@ package control
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestLegacyWriterFenceRequiresPersistentStoppedUnit(t *testing.T) {
+	valid := "LoadState=masked\nActiveState=inactive\nSubState=dead\nMainPID=0\nControlPID=0\nUnitFileState=masked\n"
+	if !legacyWriterStopped(valid) {
+		t.Fatal("stopped persistent fence refused")
+	}
+	for _, bad := range []string{
+		strings.Replace(valid, "LoadState=masked", "LoadState=loaded", 1),
+		strings.Replace(valid, "ActiveState=inactive", "ActiveState=active", 1),
+		strings.Replace(valid, "MainPID=0", "MainPID=123", 1),
+		strings.Replace(valid, "ControlPID=0", "ControlPID=123", 1),
+		strings.Replace(valid, "UnitFileState=masked", "UnitFileState=masked-runtime", 1),
+		strings.Replace(valid, "SubState=dead\n", "", 1),
+		strings.Replace(valid, "SubState=dead", "Unknown=", 1),
+		valid + "MainPID=0\n",
+	} {
+		if legacyWriterStopped(bad) {
+			t.Fatal("incomplete writer fence accepted")
+		}
+	}
+}
 
 func TestRecoveryResourceBindingDoesNotDependOnCurrentAgentBinary(t *testing.T) {
 	root, _ := legacyFixture(t)
