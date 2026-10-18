@@ -21,6 +21,7 @@ import { CopyButton, StateBadge, TechnicalError, copy, userError } from "@/views
 import { RegionCombobox, regionBaseName } from "@/views/RegionCombobox";
 import { GlivelaRoutes } from "./Routes";
 import { SourceRecovery } from "./SourceRecovery";
+import { SubscriptionPreview } from "./SubscriptionPreview";
 
 const gibibyte = 1024 ** 3;
 
@@ -29,8 +30,9 @@ export function GlivelaManagerSheet({ application, data, language, mutate, onClo
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [created, setCreated] = useState<MeridianAccountCreated | null>(null);
+  const [inspectedEndpointId, setInspectedEndpointId] = useState("");
   const inventory = data.meridian;
-  const endpoint = inventory.endpoints.find((value) => value.applicationId === application?.id);
+  const endpoint = inventory.endpoints.find((value) => inspectedEndpointId ? value.id === inspectedEndpointId : value.applicationId === application?.id);
   const endpointPublication = endpoint ? data.publications.find((value) => value.serviceId === endpoint.serviceId && value.kind === "public_shared_443" && value.status !== "stopped") : undefined;
   const managementReady = inventory.cutover.subscriptionAuthority === "meridian" && (inventory.cutover.state === "not_required" || inventory.cutover.state === "complete");
 
@@ -39,6 +41,7 @@ export function GlivelaManagerSheet({ application, data, language, mutate, onClo
     setBusy("");
     setError("");
     setCreated(null);
+    setInspectedEndpointId("");
   }, [application?.id, inventory.cutover.subscriptionAuthority, inventory.cutover.state]);
 
   const run = async (key: string, operation: () => Promise<unknown>, success: string) => {
@@ -68,7 +71,7 @@ export function GlivelaManagerSheet({ application, data, language, mutate, onClo
         <div className="mt-4 max-h-[calc(100vh-12rem)] overflow-y-auto pb-6">
           {inventory.cutover.lastError ? <Alert className="mb-4" variant="destructive"><ShieldAlertIcon /><AlertTitle>{copy(language, "迁移需要处理", "Migration needs attention")}</AlertTitle><AlertDescription>{inventory.cutover.lastError}</AlertDescription></Alert> : null}
           <TabsContent value="overview"><div className="flex flex-col gap-4">{inventory.cutover.state === "complete" ? <details><summary className="cursor-pointer text-sm text-muted-foreground">{copy(language, "迁移记录", "Migration history")}</summary><CutoverPanel cutover={inventory.cutover} language={language} busy={busy} error={error} onRun={run} /></details> : <CutoverPanel cutover={inventory.cutover} language={language} busy={busy} error={error} onRun={run} />}{managementReady || endpoint?.status === "failed" ? <EndpointPanel application={application} endpoint={endpoint} publication={endpointPublication} language={language} busy={busy} error={error} onRun={run} /> : null}</div></TabsContent>
-          <TabsContent value="accounts"><AccountsPanel created={created} data={data} language={language} busy={busy} error={error} onCreated={setCreated} onRun={run} /></TabsContent>
+          <TabsContent value="accounts"><AccountsPanel onInspectEndpoint={(id) => { setInspectedEndpointId(id); setTab("overview"); }} created={created} data={data} language={language} busy={busy} error={error} onCreated={setCreated} onRun={run} /></TabsContent>
           <TabsContent value="routes"><GlivelaRoutes key={endpoint?.id ?? "all"} data={data} endpointId={endpoint?.id} language={language} mutate={mutate} /></TabsContent>
         </div>
       </Tabs>
@@ -194,7 +197,7 @@ function EndpointPanel({ application, endpoint, publication, language, busy, err
   </FieldGroup></form>;
 }
 
-function AccountsPanel({ created, data, language, busy, error, onCreated, onRun }: { created: MeridianAccountCreated | null; data: AppData; language: Language; busy: string; error: string; onCreated: (value: MeridianAccountCreated | null) => void; onRun: (key: string, operation: () => Promise<unknown>, success: string) => Promise<void> }) {
+function AccountsPanel({ onInspectEndpoint, created, data, language, busy, error, onCreated, onRun }: { onInspectEndpoint: (id: string) => void; created: MeridianAccountCreated | null; data: AppData; language: Language; busy: string; error: string; onCreated: (value: MeridianAccountCreated | null) => void; onRun: (key: string, operation: () => Promise<unknown>, success: string) => Promise<void> }) {
   const [name, setName] = useState("");
   const [quota, setQuota] = useState("0");
   const [resetDays, setResetDays] = useState("0");
@@ -218,11 +221,11 @@ function AccountsPanel({ created, data, language, busy, error, onCreated, onRun 
       <Field orientation="horizontal"><div className="flex flex-1 flex-col gap-1"><FieldLabel htmlFor="meridian-account-enabled">{copy(language, "立即启用", "Enable now")}</FieldLabel><FieldDescription>{copy(language, "应用完成前订阅不会提前发布。", "The subscription is not published before all runtime receipts complete.")}</FieldDescription></div><Switch id="meridian-account-enabled" checked={enabled} onCheckedChange={setEnabled} /></Field>
       </details>{error ? <FieldError>{error}</FieldError> : null}<Button disabled={busy === "account" || !name.trim()} type="submit">{busy === "account" ? <Spinner data-icon="inline-start" /> : <PlusIcon data-icon="inline-start" />}{copy(language, "创建账号", "Create account")}</Button>
     </FieldGroup></form></details>
-    <div className="flex flex-col gap-3">{data.meridian.accounts.map((account) => <AccountCard account={account} busy={busy} key={account.id} language={language} onRun={onRun} />)}</div>
+    <div className="flex flex-col gap-3">{data.meridian.accounts.map((account) => <AccountCard onInspectEndpoint={onInspectEndpoint} account={account} busy={busy} key={account.id} language={language} onRun={onRun} />)}</div>
   </div>;
 }
 
-function AccountCard({ account, busy, language, onRun }: { account: MeridianAccount; busy: string; language: Language; onRun: (key: string, operation: () => Promise<unknown>, success: string) => Promise<void> }) {
+function AccountCard({ onInspectEndpoint, account, busy, language, onRun }: { onInspectEndpoint: (id: string) => void; account: MeridianAccount; busy: string; language: Language; onRun: (key: string, operation: () => Promise<unknown>, success: string) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(account.displayName);
   const [quota, setQuota] = useState(String(account.totalBytes / gibibyte));
@@ -248,6 +251,7 @@ function AccountCard({ account, busy, language, onRun }: { account: MeridianAcco
       <div className="grid gap-4 sm:grid-cols-3"><Field><FieldLabel htmlFor={`meridian-account-quota-${account.id}`}>{copy(language, "共享流量（GiB）", "Shared quota (GiB)")}</FieldLabel><Input id={`meridian-account-quota-${account.id}`} min="0" onChange={(event) => setQuota(event.target.value)} step="0.1" type="number" value={quota} /></Field><Field><FieldLabel htmlFor={`meridian-account-reset-${account.id}`}>{copy(language, "重置周期（天）", "Reset interval (days)")}</FieldLabel><Input id={`meridian-account-reset-${account.id}`} max="3650" min="0" onChange={(event) => setResetDays(event.target.value)} type="number" value={resetDays} /></Field><Field><FieldLabel htmlFor={`meridian-account-expiry-${account.id}`}>{copy(language, "到期时间", "Expiry time")}</FieldLabel><Input id={`meridian-account-expiry-${account.id}`} min={localDateTimeValue(Date.now())} onChange={(event) => setExpiry(event.target.value)} type="datetime-local" value={expiry} /></Field></div>
       <div className="flex flex-wrap gap-2"><Button disabled={busy === operation || !name.trim()} size="sm" type="submit">{busy === operation ? <Spinner data-icon="inline-start" /> : null}{copy(language, "保存套餐", "Save plan")}</Button><Button disabled={busy === operation} onClick={() => setEditing(false)} size="sm" type="button" variant="ghost">{copy(language, "取消", "Cancel")}</Button></div>
     </FieldGroup></form> : <div className="mt-3 flex flex-wrap gap-2"><Button disabled={Boolean(busy)} onClick={() => setEditing(true)} size="sm" variant="outline"><PencilIcon data-icon="inline-start" />{copy(language, "编辑套餐", "Edit plan")}</Button><Button disabled={Boolean(busy)} size="sm" variant="outline" onClick={() => void onRun(`toggle-${account.id}`, () => api.updateMeridianAccount(account.id, { displayName: account.displayName, totalBytes: account.totalBytes, expiryTime: account.expiryTime, resetDays: account.resetDays, enabled: !account.enabled }), account.enabled ? copy(language, "账号已停用。", "Account disabled.") : copy(language, "账号已启用。", "Account enabled."))}>{busy === `toggle-${account.id}` ? <Spinner data-icon="inline-start" /> : null}{account.enabled ? copy(language, "停用", "Disable") : copy(language, "启用", "Enable")}</Button></div>}
+    <SubscriptionPreview accountId={account.id} language={language} onInspectEndpoint={onInspectEndpoint} />
   </div>;
 }
 
