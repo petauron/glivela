@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { Trash2Icon } from "lucide-react";
 import { api } from "@/api";
-import type { AppData, Mutate } from "@/App";
+import type { AppData, Mutate } from "@/host-contract";
 import type { LandingView } from "@/landing-types";
 import type { Language } from "@/translations";
 import { SelectControl } from "@/components/SelectControl";

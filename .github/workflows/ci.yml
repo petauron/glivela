@@ -65,35 +65,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: petauron/vastora
-          ref: 513d7bb0235e5cfdf8c112c5952b2aef32fee640
-          path: vastora
-          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.19.0'
           cache: npm
-          cache-dependency-path: |
-            ui/package-lock.json
-            vastora/web/package-lock.json
+          cache-dependency-path: ui/package-lock.json
       - name: Install reviewed UI dependencies
         run: |
-          npm ci --prefix vastora/web
           npm ci --prefix ui
       - name: Audit application dependencies
         run: npm audit --prefix ui --audit-level=high
       - name: Verify app interface
-        env:
-          VASTORA_WEB_SOURCE: ${{ github.workspace }}/vastora/web/src
         run: |
           npm run check --prefix ui
           npm test --prefix ui
       - name: Build independently delivered UI
         id: ui_bundle
-        env:
-          VASTORA_WEB_SOURCE: ${{ github.workspace }}/vastora/web/src
         run: |
           npm run build --prefix ui
           version=$(jq -er .version ui/package.json)

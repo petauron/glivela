@@ -3,17 +3,13 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
 import manifest from "./package.json" with { type: "json" };
-import { reviewedCenterSource } from "./platform-source.mjs";
-
-reviewedCenterSource();
 
 export default defineConfig(({ command }) => ({
   plugins: [tailwindcss(), react()],
   define: command === "build" ? { "process.env.NODE_ENV": JSON.stringify("production") } : undefined,
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./.center-src", import.meta.url)) },
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
     dedupe: ["react", "react-dom"],
-    preserveSymlinks: true,
   },
   test: { include: ["src/**/*.test.{ts,tsx}"] },
   build: {

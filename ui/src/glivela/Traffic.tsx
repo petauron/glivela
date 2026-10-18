@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
 import { api } from "@/api";
-import type { AppData } from "@/App";
+import type { AppData } from "@/host-contract";
 import type { MeridianTraffic } from "@/meridian-types";
 import type { Language } from "@/translations";
 import { Button } from "@/components/ui/button";

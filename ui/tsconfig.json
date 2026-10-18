@@ -13,7 +13,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "types": ["vite/client"],
-    "paths": { "@/*": ["./.center-src/*"] }
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src"]
 }
