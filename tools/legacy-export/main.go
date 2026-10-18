@@ -65,6 +65,14 @@ type archive struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "adopt-final" {
+		if adoptFinalCommand(context.Background(), os.Args[2:]) != nil {
+			fmt.Fprintln(os.Stderr, "offline business adoption failed; inspect private state and keep old writers stopped")
+			os.Exit(1)
+		}
+		fmt.Println("business ownership committed; runtime and routes remain unverified")
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "capture-final" {
 		if captureFinalCommand(context.Background(), os.Args[2:]) != nil {
 			fmt.Fprintln(os.Stderr, "final offline capture failed; keep old writers stopped and inspect private state")

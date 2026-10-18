@@ -13,8 +13,9 @@ import (
 )
 
 // businessState is loaded only by the controller while it holds the directory
-// lease. Import evidence remains private and immutable until the complete
-// writer-fence and runtime handover succeeds. Loading is NOT activation.
+// lease. The staged checkpoint is recovery evidence; business.json becomes
+// the sole current business source after offline ownership commit. Loading
+// either does not establish runtime or end-to-end route health.
 type businessState struct {
 	snapshotID string
 	material   glivela.ImportMaterial
@@ -105,7 +106,14 @@ func (s *Store) LoadBusiness(keyPath string) error {
 		return errors.New("control: business state already loaded")
 	}
 	directory := filepath.Dir(s.path)
+	owned, err := businessAdoptionStarted(directory)
+	if err != nil {
+		return err
+	}
 	if keyPath == "" {
+		if owned {
+			return errors.New("control: owned business requires its storage key")
+		}
 		_, err := os.Lstat(filepath.Join(directory, "business.pending.json"))
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -117,7 +125,11 @@ func (s *Store) LoadBusiness(keyPath string) error {
 		return err
 	}
 	defer clear(key)
-	material, snapshot, err := readStagedImport(directory, key)
+	read := readStagedImport
+	if owned {
+		read = readOwnedBusiness
+	}
+	material, snapshot, err := read(directory, key)
 	if err != nil {
 		return errors.New("control: business checkpoint unavailable or invalid")
 	}
@@ -168,6 +180,9 @@ func (s *Store) Business() BusinessInventory {
 	}
 	m := s.business.material
 	view.State, view.SnapshotID = "awaiting-handover", s.business.snapshotID
+	if m.Ownership != nil {
+		view.State = "owned-unverified"
+	}
 	for id, node := range m.References.Nodes {
 		view.Nodes = append(view.Nodes, BusinessNode{ID: id, Name: node.Name})
 	}

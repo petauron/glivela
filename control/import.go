@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,9 @@ func StageImport(directory, snapshotID string, sealed, transferKey, storageKey [
 	if err != nil {
 		return err
 	}
+	if material.Ownership != nil {
+		return errors.New("control: a transfer archive cannot grant business authority")
+	}
 	stored, err := glivela.SealImportMaterial(material, storageKey, snapshotID)
 	if err != nil {
 		return err
@@ -38,6 +42,9 @@ func StageImport(directory, snapshotID string, sealed, transferKey, storageKey [
 		return err
 	}
 	defer unlock()
+	if started, err := businessAdoptionStarted(directory); err != nil || started {
+		return errors.New("control: owned business state cannot be reinitialized by staging")
+	}
 	path := filepath.Join(directory, "business.pending.json")
 	if _, err := os.Lstat(path); err == nil {
 		previous, id, err := readStagedImport(directory, storageKey)
@@ -69,11 +76,34 @@ func ReadStagedImport(directory string, storageKey []byte) (glivela.ImportMateri
 		return glivela.ImportMaterial{}, "", err
 	}
 	defer unlock()
+	if started, err := businessAdoptionStarted(directory); err != nil || started {
+		return glivela.ImportMaterial{}, "", errors.New("control: staged data is no longer the current business state")
+	}
 	return readStagedImport(directory, storageKey)
 }
 
 func readStagedImport(directory string, storageKey []byte) (glivela.ImportMaterial, string, error) {
-	path := filepath.Join(directory, "business.pending.json")
+	material, snapshot, err := readBusinessCheckpoint(directory, "business.pending.json", storageKey)
+	if err == nil && material.Ownership != nil {
+		return glivela.ImportMaterial{}, "", errors.New("control: authority in staged import is invalid")
+	}
+	return material, snapshot, err
+}
+
+func readOwnedBusiness(directory string, storageKey []byte) (glivela.ImportMaterial, string, error) {
+	material, snapshot, err := readBusinessCheckpoint(directory, "business.json", storageKey)
+	if err != nil {
+		return glivela.ImportMaterial{}, "", err
+	}
+	intent, intentErr := readBusinessAdoptionIntent(directory)
+	if material.Ownership == nil || intentErr != nil || intent.SnapshotID != snapshot || intent.SourceSHA256 != material.SourceSHA256 || intent.CaptureSHA256 != material.Ownership.CaptureSHA256 {
+		return glivela.ImportMaterial{}, "", errors.New("control: owned business checkpoint requires matching authenticated ownership")
+	}
+	return material, snapshot, err
+}
+
+func readBusinessCheckpoint(directory, name string, storageKey []byte) (glivela.ImportMaterial, string, error) {
+	path := filepath.Join(directory, name)
 	info, err := os.Lstat(path)
 	if err != nil {
 		return glivela.ImportMaterial{}, "", err
@@ -86,7 +116,7 @@ func readStagedImport(directory string, storageKey []byte) (glivela.ImportMateri
 		return glivela.ImportMaterial{}, "", err
 	}
 	var state stagedImport
-	if err := json.Unmarshal(raw, &state); err != nil || state.Version != 1 {
+	if err := decode(bytes.NewReader(raw), &state); err != nil || state.Version != 1 {
 		return glivela.ImportMaterial{}, "", errors.New("control: invalid staged import")
 	}
 	material, err := glivela.OpenImportMaterial(state.Sealed, storageKey, state.SnapshotID)

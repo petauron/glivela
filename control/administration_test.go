@@ -63,6 +63,7 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 	enrollment := map[string]any{"id": "landing-a", "certificateId": landingCertificate, "plan": d.Landing, "routeEntries": map[string]RouteEntry{"entry-a": {CertificateID: CertificateID(entryCert), Address: "100.64.0.3"}}}
 	post(entryHTTP, "/v1/admin/business", map[string]any{}, http.StatusForbidden)
 	post(admin, "/v1/admin/business", map[string]any{"activate": true}, http.StatusBadRequest)
+	post(admin, "/v1/admin/adopt-final", map[string]any{"snapshotId": "snapshot-example"}, http.StatusNotFound)
 	businessResponse := post(admin, "/v1/admin/business", map[string]any{}, http.StatusOK)
 	businessRaw, err := io.ReadAll(businessResponse.Body)
 	businessResponse.Body.Close()

@@ -42,10 +42,19 @@ watermarks, directional counters and endpoint/node bindings. This detached view
 excludes protocol secrets, subscription tokens, private keys and the raw source
 archive. 64-bit quota, revision and traffic values use decimal strings in this
 API to avoid browser-number rounding; persisted typed values remain unchanged.
-Imported data remains `awaiting-handover`: historical status and successful
+Staged data remains `awaiting-handover`: historical status and successful
 decryption do not prove that the old business writer is fenced, that final usage
 is reconciled, or that all routes passed. This read-only slice is not the complete
 business UI/API replacement or permission to clear migration/health alerts.
+
+The separate one-time offline tool can commit data ownership from the final
+stopped-writer snapshot (`adopt-final`; see its README). It creates encrypted
+`business.json` as the sole current business source while retaining the staged
+checkpoint only for private recovery. The controller reports `owned-unverified`,
+not ready/healthy. Owned-state corruption never falls back to staging, and
+reimport cannot overwrite owned accounts or ledger values. This does not yet
+complete the runtime/business UI migration or authorize restoring an old proxy
+writer; runtime acceptance and removal of replaced paths remain required.
 
 On the same private mTLS listener, a separately authorized management identity
 can POST `/v1/admin/landings` with `id`, `certificateId`, `plan` and

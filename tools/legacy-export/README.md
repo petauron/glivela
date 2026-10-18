@@ -42,6 +42,48 @@ using the existing command below; its schema, key binding, integrity and scope
 checks remain required. Neither capture nor export activates subscriptions,
 accepts route health or releases the old node writer fence.
 
+### Commit data ownership from the final snapshot
+
+Use the final captured backup (not an earlier preparation backup) for export
+and staging. Once staged in the stopped Glivela controller directory, run:
+
+```sh
+legacy-export adopt-final \
+  -data-directory /private/old-center-data \
+  -backup-directory /private/new-final-backup \
+  -state-directory /private/glivela-controller \
+  -snapshot migration-example \
+  -storage-key /private/glivela-storage/key
+```
+
+The root-only command rereads the private capture marker, final database/key
+copies and still-stopped old Center. It verifies source hashes and stopped
+identity before committing; it does not accept a caller-supplied boolean as a
+writer fence. The storage key must differ from the old platform key. The source
+data, backup and controller directories must be separate. Old writers must stay
+stopped during this maintenance window until the replacement boundary is ready;
+this command does not stop/start containers or unmask/restart Agents.
+
+The commit first persists a private `business.adoption.json` intent, then creates
+encrypted `business.json`, with snapshot ownership evidence authenticated inside
+the ciphertext. The intent alone never grants authority. The commit preserves configuration,
+identities, history, quotas, counters and reset schedules without resampling or
+reinitialization. Repeating the same commit does not rewrite owned data. The
+original `business.pending.json` remains recovery evidence, not a second live
+source: staging cannot overwrite owned state, and a corrupt owned file blocks
+startup rather than falling back. A lost owned file after adoption intent also
+blocks startup and cannot be recreated by replaying older staged values. Failed
+partial files/intent are retained for explicit recovery inspection; never delete
+them blindly or automatically downgrade data.
+
+Controller bootstrap still references only its independent `businessKey` file.
+It loads `business.json` once ownership exists and reports `owned-unverified`.
+This is data ownership only, **not complete runtime migration**: imported health
+is historical, subscription publication still needs actual runtime/route
+acceptance, the old proxy business paths still require removal, and the generic
+Agent must be restored normally after that boundary change. Do not describe
+this operation as finishing #54 or clearing current proxy alarms.
+
 This isolated Go module is the **only** Glivela module allowed to depend on
 `modernc.org/sqlite v1.60.1`. It is not built by the native runtime distribution
 and neither controller nor node imports it. CI tests this module separately and

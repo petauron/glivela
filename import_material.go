@@ -23,11 +23,17 @@ type ImportMaterial struct {
 	HysteriaSecrets    map[string]string                `json:"hysteriaSecrets"`
 	ResetSchedules     map[string]ImportResetSchedule   `json:"resetSchedules"`
 	TrafficCounters    map[string]ImportTrafficCounters `json:"trafficCounters"`
+	Ownership          *BusinessOwnership               `json:"ownership,omitempty"`
 }
 
 func (m ImportMaterial) Validate() error {
 	if _, err := m.sourceSnapshot(); err != nil {
 		return err
+	}
+	if m.Ownership != nil {
+		if err := m.Ownership.Validate(m.SourceSHA256); err != nil {
+			return err
+		}
 	}
 	plan, err := PlanImport(m.Plan.Accounts)
 	if err != nil || plan.SHA256 != m.Plan.SHA256 {
