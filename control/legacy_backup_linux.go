@@ -97,5 +97,9 @@ func loadLegacyBackup(path, nodeID string, owner uint32) (LegacyLandingSnapshot,
 		program.Close()
 		return refuse()
 	}
+	if _, _, err := snapshot.migrationPlan(); err != nil {
+		program.Close()
+		return LegacyLandingSnapshot{}, nil, err
+	}
 	return snapshot, program, nil
 }

@@ -169,6 +169,9 @@ func snapshotLegacyLanding(root, nodeID string, owner uint32) (LegacyLandingSnap
 		return result, errors.New("control: incomplete legacy ownership inventory")
 	}
 	result = LegacyLandingSnapshot{Version: 1, NodeID: nodeID, Revision: metadata.Revision, Journal: journal, Files: make(map[string]LegacyOwnedFile)}
+	if _, _, err := result.migrationPlan(); err != nil {
+		return LegacyLandingSnapshot{}, err
+	}
 	for _, name := range legacyLandingFiles {
 		limit := int64(128 << 10)
 		if name == "/etc/vastora-landing/danted" {

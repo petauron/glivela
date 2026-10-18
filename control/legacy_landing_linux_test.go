@@ -36,7 +36,7 @@ func legacyFixture(t *testing.T) (string, map[string]any) {
 		digest := sha256.Sum256(raw)
 		files[path] = hex.EncodeToString(digest[:])
 	}
-	metadata := map[string]any{"nodeId": "node-example", "uid": 12345, "revision": 7, "files": files, "policy": map[string]any{"example": true}, "removed": false}
+	metadata := map[string]any{"nodeId": "node-example", "uid": 12345, "revision": 7, "files": files, "policy": map[string]any{"revision": 7, "uid": 12345, "interface": "mesh0", "address": "100.64.0.10", "egressIp": "8.8.8.8", "sources": []string{"100.64.0.11", "100.64.0.12"}, "tcpOnlySources": []string{"100.64.0.12"}}, "removed": false}
 	writeLegacyJournal(t, root, metadata)
 	return root, metadata
 }
