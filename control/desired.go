@@ -14,8 +14,9 @@ import (
 // Vastora neither transports nor interprets this application-owned state.
 type Desired struct {
 	glivela.DesiredArtifact
-	Landing *landing.Plan     `json:"landing,omitempty"`
-	Entry   *glivela.XrayPlan `json:"entry,omitempty"`
+	Landing      *landing.Plan     `json:"landing,omitempty"`
+	Entry        *glivela.XrayPlan `json:"entry,omitempty"`
+	EntryNetwork *EntryNetwork     `json:"entryNetwork,omitempty"`
 }
 
 func NewDesired(plan landing.Plan) (Desired, error) {
@@ -27,7 +28,7 @@ func NewDesired(plan landing.Plan) (Desired, error) {
 	return Desired{DesiredArtifact: a, Landing: &plan}, nil
 }
 
-func NewEntryDesired(plan glivela.XrayPlan) (Desired, error) {
+func NewEntryDesired(plan glivela.XrayPlan, network EntryNetwork) (Desired, error) {
 	if _, err := entryPlanIdentity(plan); err != nil {
 		return Desired{}, err
 	}
@@ -35,7 +36,10 @@ func NewEntryDesired(plan glivela.XrayPlan) (Desired, error) {
 	if err != nil {
 		return Desired{}, err
 	}
-	return (Desired{DesiredArtifact: artifact, Entry: &plan}).clone(), nil
+	if err := network.validate(plan); err != nil {
+		return Desired{}, err
+	}
+	return (Desired{DesiredArtifact: artifact, Entry: &plan, EntryNetwork: &network}).clone(), nil
 }
 
 func (d Desired) Validate() error {
@@ -44,6 +48,9 @@ func (d Desired) Validate() error {
 	}
 	if (d.Landing == nil) == (d.Entry == nil) {
 		return errors.New("control: exactly one entry or landing plan required")
+	}
+	if (d.Entry == nil) != (d.EntryNetwork == nil) {
+		return errors.New("control: exact entry network policy required")
 	}
 	var expected glivela.DesiredArtifact
 	var err error
@@ -54,6 +61,9 @@ func (d Desired) Validate() error {
 			return err
 		}
 		expected, err = glivela.BuildDesiredArtifact(*d.Entry)
+		if err == nil {
+			err = d.EntryNetwork.validate(*d.Entry)
+		}
 	}
 	if err != nil || expected.Revision != d.Revision || expected.ConfigSHA256 != d.ConfigSHA256 || !bytes.Equal(expected.Config, d.Config) {
 		return errors.New("control: configuration and owned proxy plan differ")
@@ -80,6 +90,10 @@ func (d Desired) clone() Desired {
 		plan.Grants = slices.Clone(plan.Grants)
 		plan.Peers = slices.Clone(plan.Peers)
 		d.Entry = &plan
+	}
+	if d.EntryNetwork != nil {
+		network := d.EntryNetwork.clone()
+		d.EntryNetwork = &network
 	}
 	return d
 }

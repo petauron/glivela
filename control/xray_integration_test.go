@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 // Uses an independently verified official binary. No production network,
@@ -155,7 +156,10 @@ func TestOfficialXrayEntryPlanValidation(t *testing.T) {
 	plan.Credentials = append(plan.Credentials, glivela.CredentialMaterial{Credential: route, ProtocolID: protocolID})
 	plan.Grants = []glivela.RouteGrant{{ID: "grant-example", AccountID: route.AccountID, EntryID: route.EntryID, EgressID: route.EgressID, InboundTag: plan.RealityEndpoints[0].InboundTag, Base: base.Credential, Route: route, Mode: glivela.FixedMode, Enabled: true, DesiredRev: 1}}
 	plan.Peers = []glivela.RoutePeer{{EgressID: "landing-example", Address: "100.64.0.2", Port: 1080}}
-	routed, err := NewEntryDesired(*plan)
+	network := d.EntryNetwork.clone()
+	network.Source = &landing.PeerIdentity{ID: "entry-mesh", PublicKey: "nodekey:entry", Address: "100.64.0.3"}
+	network.Peers = []EntryPeer{{EgressID: "landing-example", Identity: landing.PeerIdentity{ID: "landing-mesh", PublicKey: "nodekey:landing", Address: "100.64.0.2"}, Target: "https://probe.example.test/exit", ExpectedExit: "8.8.8.8"}}
+	routed, err := NewEntryDesired(*plan, network)
 	if err != nil {
 		t.Fatal(err)
 	}

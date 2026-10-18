@@ -15,7 +15,7 @@ import (
 const hostGateConnectionMark = 0x474c5650
 
 func NewHostGate(peer PeerIdentity, gid uint32, revision uint64) (*TrafficGate, error) {
-	if !tailnetIPv4(peer.Address) || peer.ID == "" || peer.PublicKey == "" || gid == 0 || gid == 65534 || revision == 0 {
+	if peer.Validate() != nil || gid == 0 || gid == 65534 || revision == 0 {
 		return nil, errors.New("landing: invalid host gate identity")
 	}
 	identity, _ := json.Marshal(struct {

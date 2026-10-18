@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,8 +56,7 @@ func (p RouteProbe) Validate() error {
 	if err != nil || proxy.Port() == 0 || !(proxy.Addr().IsPrivate() || proxy.Addr().IsLoopback() || netip.MustParsePrefix("100.64.0.0/10").Contains(proxy.Addr())) {
 		return errors.New("control: route check requires private SOCKS endpoint")
 	}
-	target, err := url.Parse(p.Target)
-	if err != nil || target.Scheme != "https" || target.Hostname() == "" || target.User != nil || target.Fragment != "" || target.RawQuery != "" {
+	if !validRouteTarget(p.Target) {
 		return errors.New("control: controlled HTTPS target required")
 	}
 	exit, err := netip.ParseAddr(p.ExpectedExit)
@@ -64,6 +64,20 @@ func (p RouteProbe) Validate() error {
 		return errors.New("control: expected public exit required")
 	}
 	return nil
+}
+
+func validRouteTarget(value string) bool {
+	target, err := url.Parse(value)
+	if err != nil || len(value) > 2048 || target.Scheme != "https" || target.Hostname() == "" || target.User != nil || target.Fragment != "" || target.RawQuery != "" {
+		return false
+	}
+	if target.Port() != "" {
+		port, err := strconv.Atoi(target.Port())
+		if err != nil || port < 1 || port > 65535 {
+			return false
+		}
+	}
+	return true
 }
 
 // CheckRoute must run on the enrolled entry, not on the controller or landing.

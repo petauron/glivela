@@ -215,7 +215,7 @@ func TestEntryContainerPreservesExplicitHY2HostAndBridgeBoundaries(t *testing.T)
 		plan.HysteriaEndpoints = []glivela.HysteriaEndpoint{{ID: "hy2-example", EntryID: c.ApplicationID, InboundTag: "hy2-example", ListenPort: 443, AdvertiseHost: "entry.example.test", AdvertisePort: 443, ServerName: "127.0.0.1", CertificatePEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Certificate[0]})), PrivateKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateDER}))}}
 		plan.Credentials[0].HysteriaAuth = "anonymous-hy2-auth"
 		plan.Credentials[0].HysteriaIdentity = glivela.Identity(plan.Credentials[0].HysteriaAuth)
-		d, err = NewEntryDesired(plan)
+		d, err = NewEntryDesired(plan, *d.EntryNetwork)
 		if err != nil {
 			t.Fatal("anonymous HY2 fixture", err)
 		}

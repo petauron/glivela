@@ -24,7 +24,7 @@ func entryArtifact(t *testing.T, id string, revision uint64) Desired {
 		RealityEndpoints: []glivela.RealityEndpoint{{ID: id + "-endpoint", EntryID: id, InboundTag: id + "-inbound", ListenAddress: "100.64.0.3", ListenPort: 10443, AdvertiseHost: id + ".example.test", AdvertisePort: 443, Target: "www.example.com:443", ServerNames: []string{"www.example.com"}, PrivateKey: base64.RawURLEncoding.EncodeToString(key.Bytes()), PublicKey: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), ShortIDs: []string{"abcd"}, Fingerprint: "chrome"}},
 		Credentials:      []glivela.CredentialMaterial{{Credential: glivela.Credential{ID: id + "-native", AccountID: "account-example", Kind: glivela.NativeCredential, User: id + "-user", Identity: glivela.Identity(protocolID), EntryID: id, Enabled: true}, ProtocolID: protocolID}},
 	}
-	desired, err := NewEntryDesired(plan)
+	desired, err := NewEntryDesired(plan, EntryNetwork{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestEntryDesiredBindsExactRoleIdentityAndKeyPair(t *testing.T) {
 		t.Fatal("clone altered original entry configuration")
 	}
 	input := *d.Entry
-	wanted, err := NewEntryDesired(input)
+	wanted, err := NewEntryDesired(input, *d.EntryNetwork)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestEntryUpdatesAndReadinessCannotReuseOldRouteProof(t *testing.T) {
 	}
 	plan := entry.clone().Entry
 	plan.Revision++
-	next, err := NewEntryDesired(*plan)
+	next, err := NewEntryDesired(*plan, *entry.EntryNetwork)
 	if err != nil {
 		t.Fatal(err)
 	}

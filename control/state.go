@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -116,7 +117,10 @@ func (s *Store) Put(node Node) error {
 		if (old.Desired.Entry == nil) != (node.Desired.Entry == nil) {
 			return errors.New("control: changing node role requires explicit handover")
 		}
-		if node.Desired.Revision < old.Desired.Revision || node.Desired.Revision == old.Desired.Revision && node.Desired.ConfigSHA256 != old.Desired.ConfigSHA256 {
+		// Transport identity/probe policy is not encoded in Xray's config hash.
+		// Reusing its revision would let the node deduplicate a required gate
+		// change and accept a receipt for the previous policy.
+		if node.Desired.Revision < old.Desired.Revision || node.Desired.Revision == old.Desired.Revision && (node.Desired.ConfigSHA256 != old.Desired.ConfigSHA256 || !reflect.DeepEqual(node.Desired.EntryNetwork, old.Desired.EntryNetwork)) {
 			return errors.New("control: non-monotonic desired state")
 		}
 		if node.Desired.Revision == old.Desired.Revision && maps.Equal(node.RouteEntries, old.RouteEntries) {

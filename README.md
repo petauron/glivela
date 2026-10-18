@@ -69,7 +69,8 @@ node or verifier reports. This API is not yet a replacement business UI or a
 complete legacy-data importer.
 
 The same administrator can POST `/v1/admin/entries` with `id`,
-`certificateId` and a Glivela `XrayPlan`. Here `id` is the existing entry
+`certificateId`, a Glivela `XrayPlan` as `plan`, and explicit `network` policy.
+Here `id` is the existing entry
 application ID; its physical host relationship stays in the business references.
 Exactly one entry application may appear in its endpoints, credentials and
 grants. REALITY private/public keys must form the same X25519 pair. The controller
@@ -80,6 +81,23 @@ also verify that same entry, but cannot obtain another node configuration or
 administrative access. Rotation updates the linked verifier identity atomically
 and invalidates route proofs. Desired entry configuration is sensitive: keep
 the private `nodes.json` and runtime journals out of public logs and artifacts.
+
+`network` is an `EntryNetwork`, not a platform capability description. A pure
+native entry supplies an empty object and does not need a private-link monitor.
+A routed entry supplies its recorded private source identity and exactly the
+peers used by its routes (including an existing composite route's second exit).
+Each peer binds `egressId` separately from its private node ID/key/address, plus
+a controlled HTTPS `target` and public `expectedExit`. The actual SOCKS address
+and port must agree with the generated plan; duplicate, missing, unrelated,
+self-targeting or wrong-family peers are rejected. No identity is inferred from
+an IP or a display name. These records still require fresh node-local evidence
+before any gate may open.
+
+Changes to source/peer identity, probe target or expected exit require a new
+revision even when the Xray configuration bytes/hash are unchanged. A previous
+runtime receipt cannot acknowledge that new policy; it must go through actual
+application/verification. Real mTLS/journal regression covers this delivery and
+deduplication boundary with a test worker, not an actual container or gate.
 
 Entry desired state can now use the direct channel and the shared revision/
 recovery journal. **The entry container execution adapter is still incomplete.**

@@ -71,12 +71,13 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				ID            string           `json:"id"`
 				CertificateID string           `json:"certificateId"`
 				Plan          glivela.XrayPlan `json:"plan"`
+				Network       *EntryNetwork    `json:"network"`
 			}
-			if decode(http.MaxBytesReader(w, r.Body, maxMessage), &request) != nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
+			if decode(http.MaxBytesReader(w, r.Body, maxMessage), &request) != nil || request.Network == nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
 				http.Error(w, "invalid entry identity or plan", http.StatusBadRequest)
 				return
 			}
-			desired, err := NewEntryDesired(request.Plan)
+			desired, err := NewEntryDesired(request.Plan, *request.Network)
 			if err != nil {
 				http.Error(w, "invalid entry policy", http.StatusBadRequest)
 				return

@@ -28,7 +28,7 @@ type TrafficGate struct {
 }
 
 func NewBridgeGate(peer PeerIdentity, bridge string, revision uint64) (*TrafficGate, error) {
-	if !tailnetIPv4(peer.Address) || peer.ID == "" || peer.PublicKey == "" || !bridgeNamePattern.MatchString(bridge) || revision == 0 {
+	if peer.Validate() != nil || !bridgeNamePattern.MatchString(bridge) || revision == 0 {
 		return nil, errors.New("landing: invalid bridge gate identity")
 	}
 	return newTrafficGate(peer, bridge, revision)

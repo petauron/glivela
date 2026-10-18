@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,18 @@ type PeerIdentity struct {
 	ID        string `json:"id"`
 	PublicKey string `json:"publicKey"`
 	Address   string `json:"address"`
+}
+
+// Validate checks the recorded identity shape, not its authenticity. Only a
+// fresh local tailscaled read-back can prove the ID/key/address association.
+func (p PeerIdentity) Validate() error {
+	part := func(value string, limit int) bool {
+		return value != "" && len(value) <= limit && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\r\n\x00")
+	}
+	if !tailnetIPv4(p.Address) || !part(p.ID, 128) || !part(p.PublicKey, 512) {
+		return errors.New("landing: invalid recorded private peer identity")
+	}
+	return nil
 }
 
 type LinkResult struct {
@@ -136,7 +149,11 @@ func (c *LinkChecker) SelfIdentity(ctx context.Context, expectedAddress string) 
 	if status.BackendState != "Running" || status.Self == nil || status.Self.ID == "" || status.Self.PublicKey == "" || !slices.Contains(status.Self.TailscaleIPs, expectedAddress) {
 		return PeerIdentity{}, errors.New("landing: private node identity is unavailable")
 	}
-	return PeerIdentity{ID: status.Self.ID, PublicKey: status.Self.PublicKey, Address: expectedAddress}, nil
+	identity := PeerIdentity{ID: status.Self.ID, PublicKey: status.Self.PublicKey, Address: expectedAddress}
+	if err := identity.Validate(); err != nil {
+		return PeerIdentity{}, err
+	}
+	return identity, nil
 }
 
 func (c *LinkChecker) Check(ctx context.Context, expected PeerIdentity) LinkResult {
@@ -147,7 +164,7 @@ func (c *LinkChecker) Check(ctx context.Context, expected PeerIdentity) LinkResu
 		return result
 	}
 	address, err := netip.ParseAddr(expected.Address)
-	if err != nil || !netip.MustParsePrefix("100.64.0.0/10").Contains(address) || expected.ID == "" || expected.PublicKey == "" {
+	if err != nil || expected.Validate() != nil {
 		return finish("unknown", "invalid_peer_identity")
 	}
 	ctx, cancel := context.WithTimeout(ctx, CheckTimeout)
