@@ -149,6 +149,7 @@ def main():
     (ROOT / "key.pem").chmod(0o600)
     target = http.server.HTTPServer(("8.8.4.4", 4433), ExitHandler)
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
     tls.load_cert_chain(ROOT / "cert.pem", ROOT / "key.pem")
     target.socket = tls.wrap_socket(target.socket, server_side=True)
     threading.Thread(target=target.serve_forever, daemon=True).start()
@@ -211,6 +212,35 @@ def exercise_cutover(bundle, target):
         if child.poll() is None:
             child.kill()
             child.wait(timeout=5)
+    restore_old_fixture()
+    # Occupy the listener only after the old worker is stopped. This tests both
+    # a real bind conflict and retention of the recovery-required state when
+    # the same conflict also prevents the old worker from recovering.
+    conflict = ROOT / "conflict.py"
+    write(conflict, "import os,signal,socket\n"
+          "s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n"
+          "s.bind(('100.64.0.8',1080));s.listen(1)\n"
+          "n=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM)\n"
+          "a=os.environ['NOTIFY_SOCKET'];a='\\0'+a[1:] if a.startswith('@') else a\n"
+          "n.sendto(b'READY=1',a);signal.pause()\n")
+    conflict_unit = Path("/etc/systemd/system/glivela-lab-conflict.service")
+    check(not conflict_unit.exists(), "refusing an existing conflict test service")
+    write(conflict_unit, "[Service]\nType=notify\n"
+          f"ExecStart=/usr/bin/python3 {conflict}\nRestart=no\n", 0o644)
+    configure_worker("ExecStartPre=+/usr/bin/systemctl start glivela-lab-conflict.service\n")
+    try:
+        failed = command(*switch_args(backup()), check=False, timeout=60)
+        check(failed.returncode != 0 and phase() == "pending" and not active(WORKER),
+              "bind conflict or failed recovery was reported complete")
+        results["portConflictRetainsFailedRecovery"] = True
+        command("systemctl", "stop", "glivela-lab-conflict.service")
+        recovered = command(str(bundle / "glivela"), "-config", str(ROOT / "node.json"), check=False, timeout=40)
+        check(recovered.returncode != 0 and phase() == "rolled-back" and active("vastora-landing.service"),
+              "failed recovery could not resume after the conflict was removed")
+        entry_request()
+        results["failedRecoveryRetryRestoredTLS"] = True
+    finally:
+        command("systemctl", "stop", "glivela-lab-conflict.service", check=False)
     target.shutdown()
     document(ROOT / "results.json", results)
     print(json.dumps(results, sort_keys=True))

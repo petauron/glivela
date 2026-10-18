@@ -29,9 +29,11 @@ legacy or test installations. All proxy, synthetic entry and HTTPS target
 traffic stays within the guest's test interfaces/namespaces. TLS verification
 remains enabled and the target reports its observed source address.
 
-The three scenarios are a failing systemd start with verified Dante recovery,
-a successful Xray switch with the original selected exit and TLS path, and a
-real SIGKILL during pending activation followed by node-startup recovery.
+The scenarios are a failing systemd start with verified Dante recovery,
+a successful Xray switch with the original selected exit and TLS path, a
+real SIGKILL during pending activation followed by node-startup recovery,
+and a bind conflict that also prevents recovery. Removing that conflict must
+permit a later recovery attempt to restore the old TLS path.
 `awaiting-routes` is checked explicitly; local activation never counts as
 controller acceptance. `results.json` contains only anonymous boolean results.
 
@@ -43,6 +45,8 @@ The exercise found and fixed extensionless systemd credentials needing explicit
 Both the new and restored old runtime now require the exact listener address,
 port and dedicated UID. This is local runtime evidence; full legacy business
 data, controller acceptance and old-writer retirement remain separate work.
+The controlled HTTPS server explicitly requires TLS 1.2 or later; entry requests
+retain normal certificate and hostname verification.
 
 The guest retains original resources, private recovery checkpoints and logs
 for inspection. It must remain isolated; stopping or destroying it uses the
