@@ -45,7 +45,7 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 	seenGrantIDs := map[string]bool{}
 	for accountIndex := range plan.Accounts {
 		item := &plan.Accounts[accountIndex]
-		if item.Account.Validate() != nil || seenAccounts[item.Account.ID] || !validTokenFingerprint(item.SubscriptionTokenFingerprint) || seenTokens[item.SubscriptionTokenFingerprint] || len(item.Credentials) == 0 || len(item.Credentials) > 1024 {
+		if item.Account.Validate() != nil || seenAccounts[item.Account.ID] || !validTokenFingerprint(item.SubscriptionTokenFingerprint) || seenTokens[item.SubscriptionTokenFingerprint] || len(item.Credentials) > 1024 {
 			return ImportPlan{}, errors.New("glivela: conflicting import account")
 		}
 		seenAccounts[item.Account.ID], seenTokens[item.SubscriptionTokenFingerprint] = true, true
@@ -89,8 +89,14 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 				return ImportPlan{}, errors.New("glivela: invalid import usage ledger")
 			}
 		}
-		if _, err := ProjectQuota(item.Account.Plan, item.Usage); err != nil {
-			return ImportPlan{}, err
+		// An account can exist before the first endpoint is installed. Preserve
+		// that configuration and token without inventing a credential or traffic
+		// observation. Live quota/subscription projection still rejects an empty
+		// credential inventory; importing it does not grant network access.
+		if len(item.Credentials) > 0 {
+			if _, err := ProjectQuota(item.Account.Plan, item.Usage); err != nil {
+				return ImportPlan{}, err
+			}
 		}
 	}
 	encoded, err := json.Marshal(plan.Accounts)

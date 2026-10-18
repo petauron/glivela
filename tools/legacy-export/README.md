@@ -39,6 +39,38 @@ tables/secret-reference columns, foreign-key violations and authentication
 failures abort without a successful output. Console output contains no records
 or underlying database errors.
 
+## Stage the original account model
+
+After exporting, the same **offline-only** tool can translate the reviewed
+account/credential/route/usage tables into Glivela's existing import model and
+stage it in a stopped controller's private directory:
+
+```sh
+legacy-export stage-accounts \
+  -archive /private/transfer/legacy.sealed \
+  -snapshot migration-example \
+  -transfer-key /private/transfer/key \
+  -storage-key /private/controller/storage.key \
+  -state-directory /private/controller/state
+```
+
+This uses the source application identity as the entry identity, not a new
+registration. Original account/credential/grant IDs, protocol UUIDs, subscription
+tokens, Hysteria authentication, desired/applied revisions, disabled flags,
+reset timestamps, quota baselines, observed totals and directional/raw counters
+are copied and cross-validated. Missing usage watermarks, changed credentials,
+unknown references or wrong storage classes abort. A legitimately absent line
+sample remains unobserved; it is not fabricated from the raw counters.
+
+The existing controller directory lease excludes a running process. Its
+`accounts.pending.json` is encrypted with an independent storage key, not the
+temporary transfer key. Identical retries do not rewrite it; changed counters
+under the same snapshot cannot replace the verified checkpoint. This operation
+does not activate accounts, publish subscriptions or accept route health.
+Keep the complete encrypted export and original backup: account staging alone
+does not import endpoints, landing policy or history, and is not permission to
+delete or stop any old resources.
+
 This is a **business-table extraction checkpoint, not a complete handover**.
 Platform object references, selected landing settings, diagnostic/task history
 outside these tables, and final usage observations still require explicit
@@ -50,3 +82,10 @@ Tests use synthetic records and verify identities, counters above 2^53, blob/
 null distinctions, scoped secret recovery, wrong key/snapshot, tamper refusal,
 unchanged source bytes, no overwrite, sidecar/symlink refusal and schema drift.
 Do not publish real backup archives, keys or migration data in PRs/CI artifacts.
+
+The 2026-10-19 anonymous integration run generated a complete schema-113 backup
+using the retained Vastora source's shared-endpoint/route fixtures, then ran the
+actual export and staging commands. Independent decryption/reopen compared the
+entire normalized model and verified two accounts, three credentials, one route,
+exact quotas above 2^53, reset schedules and directional samples. This proves
+offline account staging only, not an active subscription or a complete cutover.

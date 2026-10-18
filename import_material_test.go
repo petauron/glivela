@@ -67,3 +67,38 @@ func TestImportMaterialRejectsMissingChangedAndOrphanedSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestImportPreservesUnassignedAccountWithoutInventingAccess(t *testing.T) {
+	account := Account{ID: "account-unassigned", DisplayName: "Unassigned", Plan: AccountPlan{Enabled: true, TotalBytes: 123456789}, DesiredRevision: 2, AppliedRevision: 1}
+	plan, err := PlanImport([]ImportAccount{{Account: account, SubscriptionTokenFingerprint: SubscriptionTokenFingerprint("unassigned-token")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ImportMaterial{Plan: plan, SubscriptionTokens: map[string]string{account.ID: "unassigned-token"}, ResetSchedules: map[string]ImportResetSchedule{account.ID: {NextResetAt: "2026-11-19T00:00:00Z"}}}
+	key := bytes.Repeat([]byte{6}, 32)
+	sealed, err := SealImportMaterial(m, key, "snapshot-unassigned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := OpenImportMaterial(sealed, key, "snapshot-unassigned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Plan.Accounts[0].Account != account || len(got.Plan.Accounts[0].Credentials) != 0 || len(got.TrafficCounters) != 0 {
+		t.Fatal("unassigned account was reinitialized")
+	}
+	if _, err := ProjectQuota(account.Plan, got.Plan.Accounts[0].Usage); err == nil {
+		t.Fatal("unassigned account granted live quota")
+	}
+	for _, change := range []func(*ImportAccount){
+		func(a *ImportAccount) { a.Usage = []UsageMember{{CredentialID: "phantom", Observed: 1}} },
+		func(a *ImportAccount) { a.HysteriaIdentities = map[string]string{"phantom": Identity("secret")} },
+		func(a *ImportAccount) { a.Grants = []RouteGrant{{ID: "phantom"}} },
+	} {
+		a := ImportAccount{Account: account, SubscriptionTokenFingerprint: SubscriptionTokenFingerprint("unassigned-token")}
+		change(&a)
+		if _, err := PlanImport([]ImportAccount{a}); err == nil {
+			t.Fatal("unassigned account accepted orphaned access or usage")
+		}
+	}
+}

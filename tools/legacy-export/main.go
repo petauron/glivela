@@ -62,6 +62,14 @@ type archive struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "stage-accounts" {
+		if stageAccountsCommand(os.Args[2:]) != nil {
+			fmt.Fprintln(os.Stderr, "offline account staging failed; existing authority unchanged")
+			os.Exit(1)
+		}
+		fmt.Println("account identities and ledger staged; authority remains unchanged")
+		return
+	}
 	database := flag.String("database", "", "absolute frozen standalone backup path")
 	sourceKey := flag.String("source-key", "", "private Center key file from the same backup")
 	transferKey := flag.String("transfer-key", "", "independent private 32-byte transfer key file")
