@@ -1,5 +1,29 @@
 # Petauron Glivela
 
+## Landing ownership migration (#54, in progress)
+
+The target boundary is a Glivela controller communicating **directly** with a
+Glivela node process. Glivela owns proxy configuration, component compatibility,
+migration and business health. Vastora installs, updates and uninstalls the
+application; it is not a command broker for this channel. No generic host hook
+or application capability negotiation is introduced.
+
+`control/` implements the first isolated part of this migration: mutually
+authenticated HTTPS exchanges, certificate-bound node isolation, revision/hash
+receipts, private durable controller state and bounded node reconciliation.
+It uses Go's TLS/HTTP implementation and existing Glivela artifact contracts.
+Certificate enrollment is a local administrative operation, not a node API.
+Run only one controller per state directory; use a private, operator-owned
+directory and independently provisioned CA/server/node identities.
+
+This is **not yet an installable landing replacement**. The production runtime
+adapter, controller/node executables, existing-data handover, catalog packaging,
+and removal of the old Vastora business path are not implemented by this slice.
+The Runtime tests use a fake executor and do not prove real Xray, DNS, firewall,
+TLS forwarding or QUIC behavior. Do not deploy this slice or close #54 based on
+its tests. The existing architecture described below remains active until the
+complete migration is implemented and independently accepted.
+
 Formerly Meridian. See [the in-place brand migration](BRANDING.md) for stable
 installation identities and coordinated release steps.
 
