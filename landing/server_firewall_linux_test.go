@@ -39,10 +39,55 @@ func TestKernelFirewallLifecycle(t *testing.T) {
 	}
 	for _, egress := range []string{"192.168.50.2", "2606:4700::1111"} {
 		t.Run(egress, func(t *testing.T) { kernelPolicyLifecycle(t, ctx, egress) })
+		t.Run("legacy-"+egress, func(t *testing.T) { kernelLegacyRemoval(t, ctx, egress) })
 	}
 	after, err := runNFT(ctx, nil, "--json", "list", "table", "inet", "glivela_fixture_unrelated")
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("unrelated firewall modified")
+	}
+}
+
+func kernelLegacyRemoval(t *testing.T, ctx context.Context, egress string) {
+	t.Helper()
+	p := LegacyDanteFirewall{EgressIP: egress, Revision: 7, Address: "100.64.0.8", Sources: []string{"100.64.0.9", "100.64.0.10"}, TCPOnlySources: []string{"100.64.0.10"}, Interface: "mesh-test", UID: 12346}
+	var commands []any
+	for _, object := range p.objects() {
+		op := "create"
+		if object["rule"] != nil {
+			op = "add"
+		}
+		commands = append(commands, nftObject{op: object})
+	}
+	raw, _ := json.Marshal(nftObject{"nftables": commands})
+	if _, err := runNFT(ctx, raw, "--json", "--file", "-"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Verify(ctx); err != nil {
+		t.Fatal("legacy kernel ownership rejected", err)
+	}
+	if err := p.Remove(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Remove(ctx); err != nil {
+		t.Fatal("legacy removal retry failed", err)
+	}
+	if p.Verify(ctx) == nil {
+		t.Fatal("removed legacy policy reported present")
+	}
+	// Recreate then introduce drift. Production removal must leave the table.
+	if _, err := runNFT(ctx, raw, "--json", "--file", "-"); err != nil {
+		t.Fatal(err)
+	}
+	table, _ := p.identity()
+	mutation, _ := json.Marshal(nftObject{"nftables": []any{nftObject{"add": nftObject{"rule": nftObject{"family": "inet", "table": table, "chain": "sources", "expr": []any{nftObject{"accept": nil}}}}}}})
+	if _, err := runNFT(ctx, mutation, "--json", "--file", "-"); err != nil {
+		t.Fatal(err)
+	}
+	if p.Remove(ctx) == nil {
+		t.Fatal("changed legacy table removed")
+	}
+	if _, err := runNFT(ctx, nil, "--json", "list", "table", "inet", table); err != nil {
+		t.Fatal("changed table disappeared")
 	}
 }
 

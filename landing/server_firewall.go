@@ -61,6 +61,12 @@ func (policy ServerFirewall) identity() (string, string) {
 
 func (policy ServerFirewall) objects() []map[string]nftObject {
 	table, marker := policy.identity()
+	return policy.renderObjects(table, marker, false)
+}
+
+// legacy is used only by the one-time Dante removal verifier. It never
+// installs or selects an old runtime policy.
+func (policy ServerFirewall) renderObjects(table, marker string, legacy bool) []map[string]nftObject {
 	objects := []map[string]nftObject{
 		{"table": {"family": "inet", "name": table, "comment": marker}},
 		{"chain": {"family": "inet", "table": table, "name": "input", "type": "filter", "hook": "input", "prio": -10, "policy": "accept"}},
@@ -81,7 +87,9 @@ func (policy ServerFirewall) objects() []map[string]nftObject {
 	for _, protocol := range []string{"tcp", "udp"} {
 		var port any = SOCKSPort
 		if protocol == "udp" {
-			port = SOCKSPort
+			if legacy {
+				port = nftObject{"range": []int{1081, 1208}}
+			}
 		}
 		rule("input", match(payload("ip", "daddr"), policy.Address), match(payload(protocol, "dport"), port), nftObject{"jump": nftObject{"target": "sources"}})
 	}
@@ -108,7 +116,9 @@ func (policy ServerFirewall) objects() []map[string]nftObject {
 			// association. Replies retain the dedicated UID, exact interface,
 			// landing/source addresses and conntrack reply-direction checks;
 			// they cannot be constrained to the TCP control listener's port.
-			if protocol == "tcp" {
+			if protocol == "udp" && legacy {
+				expr = append(expr, match(payload("udp", "sport"), nftObject{"range": []int{1081, 1208}}))
+			} else if protocol == "tcp" {
 				expr = append(expr, match(payload("tcp", "sport"), SOCKSPort))
 			} else {
 				expr = append(expr, match(meta("l4proto"), "udp"))
@@ -191,12 +201,16 @@ func (policy ServerFirewall) remove(ctx context.Context, run func(context.Contex
 		return err
 	}
 	table, _ := policy.identity()
+	return removeOwnedFirewall(ctx, run, table, policy.objects())
+}
+
+func removeOwnedFirewall(ctx context.Context, run func(context.Context, []byte, ...string) ([]byte, error), table string, objects []map[string]nftObject) error {
 	data, err := run(ctx, nil, "--json", "list", "ruleset")
 	var document nftDocument
 	if err != nil || len(data) > nftOutputLimit || json.Unmarshal(data, &document) != nil {
 		return errors.New("landing: cannot inspect native firewall before removal")
 	}
-	found, err := validateNFTPolicy(document, table, policy.objects(), false)
+	found, err := validateNFTPolicy(document, table, objects, false)
 	if err != nil || !found {
 		return err
 	}
@@ -209,7 +223,7 @@ func (policy ServerFirewall) remove(ctx context.Context, run func(context.Contex
 	if err != nil || len(data) > nftOutputLimit || json.Unmarshal(data, &document) != nil {
 		return errors.New("landing: cannot confirm native firewall removal")
 	}
-	found, err = validateNFTPolicy(document, table, policy.objects(), false)
+	found, err = validateNFTPolicy(document, table, objects, false)
 	if err != nil || found {
 		return errors.Join(removeErr, err, errors.New("landing: native firewall removal was not confirmed"))
 	}
