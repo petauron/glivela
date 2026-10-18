@@ -83,6 +83,19 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
+      - name: Verify isolated offline migration tool
+        working-directory: tools/legacy-export
+        run: |
+          go mod verify
+          go vet ./...
+          go test ./... -count=1
+      - name: Keep SQLite out of runtime dependencies
+        run: |
+          go list -deps ./cmd/glivela > "$RUNNER_TEMP/glivela-runtime-deps"
+          if grep -q '^modernc.org/' "$RUNNER_TEMP/glivela-runtime-deps"; then
+            echo 'Offline-only dependencies leaked into the runtime'
+            exit 1
+          fi
       - name: Verify native firewall in isolated network namespace
         run: |
           sudo apt-get update -qq
