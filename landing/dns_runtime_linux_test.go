@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -47,7 +48,23 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	for _, address := range []string{"100.64.0.10/32", "100.64.0.11/32", "100.64.0.12/32", "192.168.50.2/32", "93.184.216.34/32", "1.1.1.1/32", "1.0.0.1/32"} {
 		ip("addr", "add", address, "dev", "lo")
 	}
-	directory := t.TempDir()
+	// The unprivileged worker needs traversal; no credentials are stored here.
+	directory, err := os.MkdirTemp("", "glivela-isolated-dns-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	if err := os.Chmod(directory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	core, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary = filepath.Join(directory, "xray")
+	if err := os.WriteFile(binary, core, 0755); err != nil {
+		t.Fatal(err)
+	}
 	start := func(command *exec.Cmd) {
 		t.Helper()
 		if err := command.Start(); err != nil {
@@ -123,13 +140,23 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := filepath.Join(directory, "xray.json")
-	if err := os.WriteFile(config, raw, 0600); err != nil {
+	if err := os.WriteFile(config, raw, 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := exec.CommandContext(ctx, binary, "run", "-test", "-config", config).Run(); err != nil {
 		t.Fatal("official core rejected rendered policy", err)
 	}
-	start(exec.CommandContext(ctx, binary, "run", "-config", config))
+	const workerUID = 12345
+	policy, err := plan.Firewall(workerUID, "lo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := policy.Install(ctx); err != nil {
+		t.Fatal(err)
+	}
+	worker := exec.CommandContext(ctx, binary, "run", "-config", config)
+	worker.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: workerUID, Gid: workerUID, Groups: []uint32{}}}
+	start(worker)
 	proxy := &url.URL{Scheme: "socks5", Host: fmt.Sprintf("%s:%d", plan.Address, SOCKSPort)}
 	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP("100.64.0.11")}, Timeout: time.Second}
 	deadline = time.Now().Add(4 * time.Second)
@@ -143,6 +170,13 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 			t.Fatal("rendered listener unavailable", err)
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+	status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", worker.Process.Pid))
+	if err != nil || !strings.Contains(string(status), "\nUid:\t12345\t12345\t12345\t12345\n") {
+		t.Fatal("fixture worker is not running under isolated non-root UID", err)
+	}
+	if err := policy.Verify(ctx); err != nil {
+		t.Fatal("actual kernel policy missing", err)
 	}
 	transport := &http.Transport{Proxy: http.ProxyURL(proxy), DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
