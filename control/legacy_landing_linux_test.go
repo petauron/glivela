@@ -66,6 +66,9 @@ func TestLegacySnapshotPreservesExactOwnedResources(t *testing.T) {
 		t.Fatal("journal was rewritten", err)
 	}
 	backups := t.TempDir()
+	if err := os.Chmod(backups, 0700); err != nil {
+		t.Fatal(err)
+	}
 	first, err := backupLegacyLanding(backups, snapshot)
 	if err != nil {
 		t.Fatal(err)
