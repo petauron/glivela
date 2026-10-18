@@ -103,11 +103,18 @@ func (policy ServerFirewall) objects() []map[string]nftObject {
 			if protocol == "udp" && slices.Contains(policy.TCPOnlySources, source) {
 				continue
 			}
-			var port any = SOCKSPort
-			if protocol == "udp" {
-				port = SOCKSPort
+			expr := []any{match(meta("oifname"), policy.Interface), match(payload("ip", "saddr"), policy.Address), match(payload("ip", "daddr"), source)}
+			// Official Xray allocates a separate ephemeral UDP socket for each
+			// association. Replies retain the dedicated UID, exact interface,
+			// landing/source addresses and conntrack reply-direction checks;
+			// they cannot be constrained to the TCP control listener's port.
+			if protocol == "tcp" {
+				expr = append(expr, match(payload("tcp", "sport"), SOCKSPort))
+			} else {
+				expr = append(expr, match(meta("l4proto"), "udp"))
 			}
-			rule("destinations", match(meta("oifname"), policy.Interface), match(payload("ip", "saddr"), policy.Address), match(payload("ip", "daddr"), source), match(payload(protocol, "sport"), port), match(nftObject{"ct": nftObject{"key": "direction"}}, "reply"), nftObject{"return": nil})
+			expr = append(expr, match(nftObject{"ct": nftObject{"key": "direction"}}, "reply"), nftObject{"return": nil})
+			rule("destinations", expr...)
 		}
 	}
 	for _, cidr := range blockedIPv4 {

@@ -12,6 +12,37 @@ func testServerFirewall() ServerFirewall {
 	return ServerFirewall{EgressIP: "192.168.50.2", Revision: 1, Address: "100.64.0.8", Sources: []string{"100.64.0.9"}, Interface: "tailscale0", UID: 990}
 }
 
+func TestUDPRepliesRemainSourceAndDirectionScoped(t *testing.T) {
+	policy := testServerFirewall()
+	policy.Sources = append(policy.Sources, "100.64.0.10")
+	policy.TCPOnlySources = []string{"100.64.0.10"}
+	var replies []string
+	for _, object := range policy.objects() {
+		rule := object["rule"]
+		if rule == nil || rule["chain"] != "destinations" {
+			continue
+		}
+		encoded, _ := json.Marshal(rule["expr"])
+		text := string(encoded)
+		if strings.Contains(text, `"reply"`) && strings.Contains(text, `"udp"`) {
+			replies = append(replies, text)
+		}
+	}
+	if len(replies) != 1 {
+		t.Fatalf("expected exactly one authorized UDP reply rule, got %d", len(replies))
+	}
+	for _, required := range []string{`"oifname"`, `"tailscale0"`, `"saddr"`, `"100.64.0.8"`, `"daddr"`, `"100.64.0.9"`, `"l4proto"`, `"direction"`, `"reply"`} {
+		if !strings.Contains(replies[0], required) {
+			t.Fatalf("UDP reply lost constraint %s", required)
+		}
+	}
+	for _, forbidden := range []string{`"sport"`, `"100.64.0.10"`, `"accept"`} {
+		if strings.Contains(replies[0], forbidden) {
+			t.Fatalf("UDP reply has fixed port or authorization bypass: %s", forbidden)
+		}
+	}
+}
+
 func TestServerFirewallRejectsUnscopedIdentity(t *testing.T) {
 	for _, change := range []func(*ServerFirewall){
 		func(p *ServerFirewall) { p.UID = 0 },
