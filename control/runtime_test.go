@@ -89,6 +89,39 @@ func TestReadyRenameSyncFailureAndFailedRecoveryRemainPending(t *testing.T) {
 		t.Fatal("previous runtime not recovered", err)
 	}
 }
+
+func TestPendingUnlinkSyncFailureDoesNotExposeCandidateSuccess(t *testing.T) {
+	r, d := nativeFixture(t)
+	ctx := context.Background()
+	if err := r.Apply(ctx, artifact(1)); err != nil {
+		t.Fatal(err)
+	}
+	r.syncCommitDirectory = func(*os.File) error { return errors.New("injected fsync failure after unlink") }
+	d.activationError = func(desired Desired) error {
+		if desired.Revision == 1 {
+			return errors.New("injected recovery unavailable")
+		}
+		return nil
+	}
+	if err := r.Apply(ctx, artifact(2)); err == nil || !strings.Contains(err.Error(), "recovery required") {
+		t.Fatal("uncertain cleanup accepted", err)
+	}
+	if _, err := r.Inspect(ctx); err == nil {
+		t.Fatal("candidate reported ready after failed unlink sync")
+	}
+	restarted := &NativeRuntime{Directory: r.Directory, Driver: d}
+	if _, err := restarted.Inspect(ctx); err == nil {
+		t.Fatal("restart lost unfinished recovery")
+	}
+	d.activationError = nil
+	if err := restarted.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := restarted.Inspect(ctx)
+	if err != nil || actual.Revision != 1 {
+		t.Fatal("previous revision not recovered", err)
+	}
+}
 func (f *driverFixture) Stop(context.Context, Desired) error { f.stops++; return nil }
 func (f *driverFixture) Healthy(context.Context, Desired) error {
 	if f.onHealth != nil {

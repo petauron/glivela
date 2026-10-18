@@ -40,10 +40,11 @@ type runtimeJournal struct {
 // Existing applications must be explicitly handed over before use; an
 // unjournaled config file is never silently adopted or overwritten.
 type NativeRuntime struct {
-	mu           sync.Mutex
-	Directory    string
-	Driver       Driver
-	writeJournal func(string, string, []byte) error
+	mu                  sync.Mutex
+	Directory           string
+	Driver              Driver
+	writeJournal        func(string, string, []byte) error
+	syncCommitDirectory func(*os.File) error
 }
 
 func (r *NativeRuntime) journal() (runtimeJournal, error) {
@@ -111,15 +112,40 @@ func (r *NativeRuntime) save(state runtimeJournal) error {
 }
 
 func (r *NativeRuntime) clearCommitIntent() error {
-	if err := os.Remove(filepath.Join(r.Directory, "commit-pending.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	path := filepath.Join(r.Directory, "commit-pending.json")
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	directory, err := os.Open(r.Directory)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 3*maxMessage {
+		return errors.New("control: unsafe pending commit cleanup")
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	defer directory.Close()
-	return directory.Sync()
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	directory, err := os.Open(r.Directory)
+	if err == nil {
+		if r.syncCommitDirectory != nil {
+			err = r.syncCommitDirectory(directory)
+		} else {
+			err = directory.Sync()
+		}
+		_ = directory.Close()
+	}
+	if err != nil {
+		// Unlink without a confirmed directory sync is not a committed cleanup.
+		// Restore the SAME pending record, rather than trusting visible ready
+		// bytes or creating another transaction protocol/state file.
+		if restoreErr := replacePrivate(r.Directory, "commit-pending.json", raw); restoreErr != nil {
+			return errors.New("control: pending commit cleanup and persistence failed")
+		}
+		return errors.New("control: pending commit cleanup was not durable")
+	}
+	return nil
 }
 
 func replacePrivate(directory, name string, contents []byte) error {
@@ -240,8 +266,15 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 		return errors.New("control: commit failed; previous state restored")
 	}
 	// Only remove the recovery intent after the ready journal is durable.
-	// Cleanup failure does not start another rollback of a committed runtime.
-	return r.clearCommitIntent()
+	if err := r.clearCommitIntent(); err != nil {
+		recovery, cancel := recoveryContext()
+		defer cancel()
+		if restoreErr := r.restore(recovery, state); restoreErr != nil {
+			return errors.New("control: commit cleanup failed; recovery required")
+		}
+		return errors.New("control: commit cleanup failed; previous state restored")
+	}
+	return nil
 }
 
 func (r *NativeRuntime) restore(ctx context.Context, state runtimeJournal) error {
