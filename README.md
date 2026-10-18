@@ -104,6 +104,19 @@ Policy read-back, expiry, closed-revision cleanup and unrelated-peer preservatio
 are tested separately. These primitives are not yet wired into the unfinished
 entry container adapter or its boot fence; they do not authorize deployment.
 
+`control.EntryContainer` adds read-only ownership checks for the new owned
+entry profile: immutable full container/image IDs, the pinned official image,
+exact command/entrypoint/environment, a single read-only private config mount,
+minimal capabilities and private PID/IPC isolation. Host mode binds the
+dedicated GID; retained bridge mode binds the exact network ID and bridge name,
+not a reusable display name. Inspection uses only the fixed local Docker socket,
+with bounded output/time and no inherited Docker context or diagnostic dumps.
+Old Vastora labels do not count as ownership. This is not a lifecycle driver or
+legacy adopter: conversion of the frozen legacy resource inventory, config-byte
+and listener verification, boot fencing and activation/recovery are still needed.
+The current tests mutate anonymous inspect snapshots; they do not create a real
+container or prove actual installed Docker acceptance.
+
 The `verifier` mode runs on an enrolled entry using its own private bootstrap,
 state-directory lease and mTLS identity. It polls `/v1/route-checks`, performs
 one bounded SOCKS/TLS/observed-exit check at a time, and reports success or
