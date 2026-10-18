@@ -1,30 +1,54 @@
 # Glivela application UI
 
-This directory owns Glivela's page composition and its independently signed
-browser bundle. Center provides authenticated data, platform actions, and the
-shared component library; it does not compile Glivela pages into its own web
-application after the migration.
+## Independent build
 
-The build uses the reviewed Vastora UI source at commit
-`583e2f23ae3fbc91671ed6633b8776dbce4f9b95`. Set `VASTORA_WEB_SOURCE` to
-that checkout's `web/src` directory. The build fails if the checkout points to
-a different commit. `src/index.tsx` exports the versioned `mount`/`update`/
-`unmount` entry used by Center. The output filename is tied to this package
-version and is published as a TUF target with the official app catalog.
-`npm run check` validates the same pinned dependency and type-checks the
-application-owned pages against its platform contract before publication. It
-creates an ignored `.center-src` link to the reviewed checkout; CI uses the
-same preparation step for both catalog build passes.
+All UI components, hooks, API clients, DTOs and tests live in this repository.
+A checkout of Glivela and the locked npm dependencies are sufficient:
 
-Center remains responsible for authentication and authorization on every API
-request. Loading the UI bundle does not grant new permissions to an app or a
-third-party catalog source.
+```sh
+npm ci --prefix ui
+npm run check --prefix ui
+npm test --prefix ui
+npm run build --prefix ui
+```
 
-The shared shadcn Tailwind utilities are ejected unchanged from the locked
-`shadcn@4.21.0` stylesheet into `src/style.css`, with its MIT notice retained,
-following the official [eject procedure](https://ui.shadcn.com/docs/changelog/2026-05-shadcn-eject).
-The UI uses Center's existing component source, not the shadcn generation CLI.
-Keeping that CLI as an application dependency unnecessarily included its MCP
-server and unpatched `braces` dependency chain. Future shared-style changes must
-be reviewed as source changes; they are not silently pulled in by CLI updates.
-CI audits the complete UI lockfile and rejects high or critical advisories.
+No Vastora checkout, source symlink, environment variable or source revision is
+required. The `@` alias resolves exclusively to `ui/src`. CI uses one checkout
+and one npm installation. Dependencies are pinned by `package-lock.json`; CI
+retains its dependency audit and bundle size/style checks.
+
+## Runtime boundary
+
+`src/index.tsx` exports `apiVersion = 1`, `mount` and `mountManager`. Each mount
+returns `update` and `unmount`. Glivela owns the React tree and its cleanup.
+The host passes data and management callbacks described by
+`src/app-workspaces/types.ts` and `src/host-contract.ts`. These are local wire
+contracts, not imports of the host implementation. Changes to that interface
+require coordinated contract review; a breaking change requires a new API
+version.
+
+This step separates **build ownership**, not backend ownership. Center still
+provides authenticated same-origin APIs, SSE, host data and platform actions.
+`src/api.ts` includes only operations used by this UI, preserving CSRF and
+same-origin credential handling. Center must authorize every API request.
+Host theme tokens and the application window remain runtime integration points.
+
+The tests cover page behavior, stream recovery, API transport and real page
+mount/update/unmount. UI fixes and their regression tests are maintained here.
+There is no recurring copy or synchronization from Vastora source.
+
+## Publication
+
+Build output is named from `package.json` and published through the separately
+signed application catalog. Source CI does not deploy installed applications.
+See `../RELEASING.md` for the catalog build transition.
+
+## Source and license
+
+The initial local component, model and test migration came from Vastora commit
+`513d7bb0235e5cfdf8c112c5952b2aef32fee640`, under Apache-2.0, the same license as
+this repository. This is provenance only, not an ongoing build pin.
+
+The shared shadcn Tailwind utilities were ejected from `shadcn@4.21.0` into
+`src/style.css`; their MIT notice remains in that file. Future style changes
+are reviewed local source changes, not fetched through the generation CLI.

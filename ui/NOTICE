@@ -1,0 +1,10 @@
+Portions of this UI were derived from Vastora:
+
+Vastora
+Copyright 2026 Vastora contributors
+
+This product includes software developed by third parties. Dependency notices
+are generated as part of the release process and distributed with releases.
+
+The migrated source is maintained locally by Glivela. See README.md for
+provenance. The MIT notice for the ejected shadcn styles is in src/style.css.

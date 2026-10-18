@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowRightLeftIcon, CheckCircle2Icon, KeyRoundIcon, PencilIcon, PlusIcon, RadioTowerIcon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react";
 import { api } from "@/api";
-import type { AppData, Mutate } from "@/App";
+import type { AppData, Mutate } from "@/host-contract";
 import type { MeridianAccount, MeridianAccountCreated } from "@/meridian-types";
 import type { Application, ApplicationCommand } from "@/types";
 import type { Language } from "@/translations";

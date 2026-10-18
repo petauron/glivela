@@ -1,6 +1,6 @@
 import { Fragment, useId, useState } from "react";
 import { EllipsisIcon, PlusIcon } from "lucide-react";
-import type { AppData, Mutate } from "@/App";
+import type { AppData, Mutate } from "@/host-contract";
 import { GlivelaRoutes } from "./Routes";
 import { api } from "@/api";
 import type { LandingView } from "@/landing-types";

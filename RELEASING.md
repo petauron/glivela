@@ -25,3 +25,16 @@ complete. No local builds or tests are implied by this configuration change.
 
 CI builds and checks the UI but does not upload its bundle as an Actions
 artifact. The signed application catalog remains the publication channel.
+
+## Independent UI catalog build
+
+When the catalog first selects a released commit containing the independent UI,
+remove its Vastora source checkout, Vastora npm installation and
+`VASTORA_WEB_SOURCE` setup from both reproducibility build passes. Each pass
+must build only that immutable Glivela commit with `ui/package-lock.json`.
+Keep existing integrity, reproducibility, signing and revision gates.
+
+Do not remove those inputs from a catalog still pinned to an older Glivela
+commit that requires them. Advancing the catalog pin and its build recipe is a
+separate reviewed publication; installed applications are not upgraded by this
+source change. No Vastora program release is required for this UI build change.

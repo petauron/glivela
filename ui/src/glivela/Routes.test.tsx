@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "@/api";
-import type { AppData } from "@/App";
+import type { AppData } from "@/host-contract";
 import type { LandingView } from "@/landing-types";
 import { GlivelaRoutes } from "./Routes";
 

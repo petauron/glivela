@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build && node scripts/check-bundle-styles.mjs",
-    "check": "node scripts/prepare-platform.mjs && tsc --noEmit",
+    "check": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

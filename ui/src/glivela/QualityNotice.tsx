@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AppData } from "@/App";
+import type { AppData } from "@/host-contract";
 import type { Language } from "@/translations";
 import type { InstalledAppInstance } from "@/views/installed-apps-model";
 import { Button } from "@/components/ui/button";
