@@ -37,12 +37,19 @@ type configuration struct {
 
 func main() {
 	path := flag.String("config", "", "private bootstrap configuration")
+	probePath := flag.String("verify-route", "", "entry-side route acceptance request file")
 	importPath := flag.String("stage-accounts", "", "private encrypted account migration package (offline only)")
 	importSnapshot := flag.String("snapshot", "", "account migration snapshot identity")
 	importDirectory := flag.String("state-directory", "", "private controller state directory for offline import")
 	transferKey := flag.String("transfer-key", "", "private raw 32-byte transfer key file")
 	storageKey := flag.String("storage-key", "", "private raw 32-byte controller storage key file")
 	flag.Parse()
+	if *probePath != "" {
+		if *path != "" || *importPath != "" || *importSnapshot != "" || *importDirectory != "" || *transferKey != "" || *storageKey != "" || verifyRoute(context.Background(), *probePath, os.Stdout) != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if *importPath != "" {
 		if *path != "" || stageAccounts(*importPath, *importSnapshot, *importDirectory, *transferKey, *storageKey) != nil {
 			log.Print("Glivela offline account staging failed; existing state retained")

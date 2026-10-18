@@ -102,6 +102,28 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 	if probeSOCKSTLS(ctx, address, target.URL, nil) == nil {
 		t.Fatal("untrusted TLS target accepted")
 	}
+	exitTarget := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("203.0.113.9\n")) }))
+	defer exitTarget.Close()
+	pool.AddCert(exitTarget.Certificate())
+	probe := RouteProbe{SnapshotID: "snapshot-example", EntryID: "entry-example", LandingID: "landing-example", Revision: 7, ConfigSHA256: strings.Repeat("a", 64), SOCKSAddress: address, Target: strings.Replace(exitTarget.URL, "127.0.0.1", "example.com", 1), ExpectedExit: "203.0.113.9"}
+	result, err := checkRoute(ctx, probe, pool)
+	if err != nil || !result.Passed || !result.TLSVerified || result.HTTPStatus != 200 || result.Revision != 7 || result.SnapshotID != probe.SnapshotID {
+		t.Fatal("entry-side route acceptance failed", err, result.Failure)
+	}
+	probe.ExpectedExit = "203.0.113.10"
+	result, err = checkRoute(ctx, probe, pool)
+	if err == nil || result.Passed || !result.TLSVerified || result.Failure != "exit-mismatch" {
+		t.Fatal("wrong exit accepted")
+	}
+	probe.Target = domainURL
+	result, err = checkRoute(ctx, probe, pool)
+	if err == nil || result.Passed || !result.TLSVerified || result.HTTPStatus != 404 || result.Failure != "http-status" {
+		t.Fatal("HTTP rejection confused with TLS failure")
+	}
+	result, err = checkRoute(ctx, probe, nil)
+	if err == nil || result.Passed || result.TLSVerified || result.HTTPStatus != 0 {
+		t.Fatal("untrusted certificate accepted by route check")
+	}
 	if err = os.WriteFile(path, []byte(`{"inbounds":[{"protocol":"invalid"}]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
