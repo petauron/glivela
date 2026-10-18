@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,7 +49,18 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "xray.json")
 	// Loopback forwarding is intentional in this isolated fixture; production
 	// landing safety rules must be validated separately, not weakened for it.
-	config := fmt.Sprintf(`{"log":{"loglevel":"none"},"inbounds":[{"listen":"127.0.0.1","port":%d,"protocol":"socks","settings":{"auth":"noauth","udp":false}}],"outbounds":[{"protocol":"freedom"}]}`, port)
+	// Exercise a mixed resolver inventory larger than the legacy adapter's
+	// address window. The IPv4 result must remain usable even when it is last.
+	var records []string
+	for i := 1; i <= 12; i++ {
+		records = append(records, fmt.Sprintf("2001:db8::%x", i))
+	}
+	records = append(records, "127.0.0.1")
+	hosts, err := json.Marshal(map[string][]string{"example.com": records})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := fmt.Sprintf(`{"log":{"loglevel":"none"},"dns":{"hosts":%s,"queryStrategy":"UseIPv4"},"inbounds":[{"listen":"127.0.0.1","port":%d,"protocol":"socks","settings":{"auth":"noauth","udp":false}}],"outbounds":[{"protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]}`, hosts, port)
 	if err = os.WriteFile(path, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +78,10 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 	defer target.Close()
 	pool := x509.NewCertPool()
 	pool.AddCert(target.Certificate())
+	if err := target.Certificate().VerifyHostname("example.com"); err != nil {
+		t.Fatal("TLS fixture lacks domain identity", err)
+	}
+	domainURL := strings.Replace(target.URL, "127.0.0.1", "example.com", 1)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		err = probeSOCKSTLS(ctx, address, target.URL, pool)
@@ -75,6 +92,12 @@ func TestOfficialXrayValidationAndTLS(t *testing.T) {
 			t.Fatal(err)
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+	if err := probeSOCKSTLS(ctx, address, domainURL, pool); err != nil {
+		t.Fatal("IPv4 SOCKS domain request failed with twelve preceding IPv6 records", err)
+	}
+	if probeSOCKSTLS(ctx, address, domainURL, nil) == nil {
+		t.Fatal("domain request skipped certificate verification")
 	}
 	if probeSOCKSTLS(ctx, address, target.URL, nil) == nil {
 		t.Fatal("untrusted TLS target accepted")
