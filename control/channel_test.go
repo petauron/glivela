@@ -238,6 +238,44 @@ func TestStoreRefusesUnsafeFiles(t *testing.T) {
 	}
 }
 
+func TestNewObservationInvalidatesPreviousSuccess(t *testing.T) {
+	for _, kind := range []string{"missing", "stale", "wrong-digest", "unhealthy"} {
+		t.Run(kind, func(t *testing.T) {
+			s := store(t)
+			_, ca, key := identity(t, nil, nil, false)
+			_, cert, _ := identity(t, ca, key, false)
+			id := CertificateID(cert)
+			desired := artifact(2)
+			if err := s.Put(Node{ID: "one", CertificateID: id, Desired: desired}); err != nil {
+				t.Fatal(err)
+			}
+			report := glivela.AppliedReceipt{Revision: 2, ConfigSHA256: desired.ConfigSHA256, RuntimeReady: true}
+			if _, err := s.Exchange(context.Background(), id, &report); err != nil || s.nodes[id].Receipt == nil {
+				t.Fatal("initial success not recorded", err)
+			}
+			observation := &report
+			switch kind {
+			case "missing":
+				observation = nil
+			case "stale":
+				report.Revision = 1
+			case "wrong-digest":
+				report.ConfigSHA256 = strings.Repeat("0", 64)
+			case "unhealthy":
+				report.RuntimeReady = false
+			}
+			got, err := s.Exchange(context.Background(), id, observation)
+			if err != nil || got.Revision != 2 || s.nodes[id].Receipt != nil {
+				t.Fatal("old success retained or reconciliation blocked", err)
+			}
+			reopened, err := OpenStore(s.path)
+			if err != nil || reopened.nodes[id].Receipt != nil || reopened.nodes[id].ReportedAt.IsZero() {
+				t.Fatal("health invalidation not durable", err)
+			}
+		})
+	}
+}
+
 func TestHandlerRejectsMalformedAndUnauthenticatedRequests(t *testing.T) {
 	s := store(t)
 	handler := Handler(s)

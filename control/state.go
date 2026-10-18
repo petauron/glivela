@@ -116,18 +116,21 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *glive
 	if !ok {
 		return Desired{}, errors.New("control: not enrolled")
 	}
-	if receipt != nil && receipt.Revision == node.Desired.Revision && receipt.ConfigSHA256 == node.Desired.ConfigSHA256 {
+	// Every authenticated observation supersedes the previous health report.
+	// A missing/stale report can occur after failed recovery or lost local state;
+	// keeping the old successful receipt would incorrectly show a healthy node.
+	node.Receipt = nil
+	if receipt != nil {
 		copyReceipt := *receipt
-		node.Receipt = nil
 		if glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, copyReceipt) == nil {
 			node.Receipt = &copyReceipt
 		}
-		node.ReportedAt = time.Now().UTC()
-		next := s.copy()
-		next[certificate] = node
-		if err := s.commit(next); err != nil {
-			return Desired{}, err
-		}
+	}
+	node.ReportedAt = time.Now().UTC()
+	next := s.copy()
+	next[certificate] = node
+	if err := s.commit(next); err != nil {
+		return Desired{}, err
 	}
 	// A stale report is not accepted as healthy, but must not prevent the node
 	// from receiving a newer desired revision after an interrupted update.
