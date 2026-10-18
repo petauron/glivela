@@ -19,7 +19,7 @@ import (
 
 func completeEndpointArchiveFixture(t *testing.T) archive {
 	t.Helper()
-	a := accountArchiveFixture()
+	a := accountRowsFixture()
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -45,6 +45,7 @@ func completeEndpointArchiveFixture(t *testing.T) archive {
 		"total_bytes": int64(9007199254740993), "used_bytes": int64(987654321), "quota_applied_enabled": 0, "reset_day": 19, "next_reset_at": "2026-11-19T00:00:00+08:00", "last_reset_at": "2026-10-19T00:00:00+08:00",
 		"desired_revision": 9, "applied_revision": 8, "runtime_healthy": 1, "legacy_retired": 1, "status": "failed", "last_error": "synthetic historical failure", "created_at": "2026-09-19T00:00:00Z", "updated_at": "2026-10-19T02:03:04.123456789Z", "source_peer_json": "{\"id\":\"example-peer\",\"address\":\"100.64.0.2\"}",
 	})
+	a.Tables["meridian_route_health_events"] = tableFixture(map[string]any{"id": 17, "route_id": "grant-example", "recorded_at": "2026-10-19T02:03:04Z", "fingerprint": glivela.Identity("synthetic-history"), "diagnostics_json": "{\"state\":\"failed\",\"reason\":\"synthetic\"}"})
 	return a
 }
 
@@ -54,7 +55,7 @@ func TestEndpointConversionRetainsOriginalConfiguration(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatal("endpoint conversion failed", err)
 	}
-	m, err := accountMaterial(a)
+	m, err := importMaterial(a)
 	if err != nil || glivela.ValidateEndpointImport(m, items) != nil {
 		t.Fatal("complete inventory failed", err)
 	}
@@ -160,7 +161,7 @@ func TestRealLegacyEndpointFixture(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatal("real endpoint conversion failed", err)
 	}
-	m, err := accountMaterial(a)
+	m, err := importMaterial(a)
 	if err != nil || glivela.ValidateEndpointImport(m, items) != nil {
 		t.Fatal("real endpoint inventory differs", err)
 	}

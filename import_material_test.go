@@ -2,6 +2,7 @@ package glivela
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -15,10 +16,23 @@ func importFixture(t *testing.T) ImportMaterial {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ImportMaterial{Plan: plan, SubscriptionTokens: map[string]string{account.ID: "fixture-token"}, ProtocolSecrets: map[string]string{credential.ID: secret}, HysteriaSecrets: map[string]string{credential.ID: "fixture-hy2"},
+	m := ImportMaterial{Plan: plan, SubscriptionTokens: map[string]string{account.ID: "fixture-token"}, ProtocolSecrets: map[string]string{credential.ID: secret}, HysteriaSecrets: map[string]string{credential.ID: "fixture-hy2"},
 		ResetSchedules:  map[string]ImportResetSchedule{account.ID: {LastResetAt: "2026-10-03T00:00:00+08:00", NextResetAt: "2026-11-03T00:00:00+08:00"}},
 		TrafficCounters: map[string]ImportTrafficCounters{credential.ID: {UploadBytes: 123456789, DownloadBytes: 876543210, RawUploadBytes: 1123456789, RawDownloadBytes: 1876543210, StartedAt: "2026-10-03T00:00:00+08:00", ObservedAt: "2026-10-18T02:03:04.123456789Z", WatermarkObservedAt: "2026-10-18T02:03:04Z"}},
 	}
+	m.Endpoints = []ImportEndpoint{importEndpointFixture(t)}
+	bindImportFixture(t, &m, "snapshot-a")
+	return m
+}
+
+func bindImportFixture(t *testing.T, m *ImportMaterial, snapshot string) {
+	t.Helper()
+	m.SourceSHA256 = Identity("synthetic-source-" + snapshot)
+	raw, err := json.Marshal(map[string]any{"version": 1, "sourceSchema": 113, "snapshotId": snapshot, "sourceSha256": m.SourceSHA256, "history": []string{"synthetic-event"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.RetainedSource = raw
 }
 
 func TestImportMaterialPreservesOriginalIdentitiesAndCounters(t *testing.T) {
@@ -68,6 +82,23 @@ func TestImportMaterialRejectsMissingChangedAndOrphanedSecrets(t *testing.T) {
 	}
 }
 
+func TestImportBindsCompleteSourceAndEndpointInventory(t *testing.T) {
+	for name, change := range map[string]func(*ImportMaterial){
+		"missing source":            func(m *ImportMaterial) { m.RetainedSource = nil },
+		"different source hash":     func(m *ImportMaterial) { m.SourceSHA256 = Identity("different-source") },
+		"missing endpoint":          func(m *ImportMaterial) { m.Endpoints = nil },
+		"different source identity": func(m *ImportMaterial) { bindImportFixture(t, m, "snapshot-other") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := importFixture(t)
+			change(&m)
+			if _, err := SealImportMaterial(m, bytes.Repeat([]byte{7}, 32), "snapshot-a"); err == nil {
+				t.Fatal("partial or substituted handover accepted")
+			}
+		})
+	}
+}
+
 func TestImportPreservesUnassignedAccountWithoutInventingAccess(t *testing.T) {
 	account := Account{ID: "account-unassigned", DisplayName: "Unassigned", Plan: AccountPlan{Enabled: true, TotalBytes: 123456789}, DesiredRevision: 2, AppliedRevision: 1}
 	plan, err := PlanImport([]ImportAccount{{Account: account, SubscriptionTokenFingerprint: SubscriptionTokenFingerprint("unassigned-token")}})
@@ -75,6 +106,7 @@ func TestImportPreservesUnassignedAccountWithoutInventingAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := ImportMaterial{Plan: plan, SubscriptionTokens: map[string]string{account.ID: "unassigned-token"}, ResetSchedules: map[string]ImportResetSchedule{account.ID: {NextResetAt: "2026-11-19T00:00:00Z"}}}
+	bindImportFixture(t, &m, "snapshot-unassigned")
 	key := bytes.Repeat([]byte{6}, 32)
 	sealed, err := SealImportMaterial(m, key, "snapshot-unassigned")
 	if err != nil {

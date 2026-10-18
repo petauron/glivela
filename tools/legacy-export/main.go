@@ -62,12 +62,12 @@ type archive struct {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "stage-accounts" {
-		if stageAccountsCommand(os.Args[2:]) != nil {
-			fmt.Fprintln(os.Stderr, "offline account staging failed; existing authority unchanged")
+	if len(os.Args) > 1 && os.Args[1] == "stage" {
+		if stageImportCommand(os.Args[2:]) != nil {
+			fmt.Fprintln(os.Stderr, "offline business staging failed; existing authority unchanged")
 			os.Exit(1)
 		}
-		fmt.Println("account identities and ledger staged; authority remains unchanged")
+		fmt.Println("business data staged; authority remains unchanged")
 		return
 	}
 	database := flag.String("database", "", "absolute frozen standalone backup path")

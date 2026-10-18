@@ -76,7 +76,13 @@ func (e ImportEndpoint) Validate() error {
 // entries selected for the first landing migration. Empty account inventories
 // may legitimately coexist with configured endpoints and vice versa.
 func ValidateEndpointImport(material ImportMaterial, endpoints []ImportEndpoint) error {
-	if material.Validate() != nil || len(endpoints) > 10000 {
+	material.Endpoints = endpoints
+	return material.Validate()
+}
+
+func (material ImportMaterial) validateEndpoints() error {
+	endpoints := material.Endpoints
+	if len(endpoints) > 10000 {
 		return errors.New("glivela: invalid endpoint inventory")
 	}
 	byEntry := map[string]ImportEndpoint{}

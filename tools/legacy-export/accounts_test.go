@@ -47,7 +47,7 @@ func tableFixture(rows ...map[string]any) table {
 	return t
 }
 
-func accountArchiveFixture() archive {
+func accountRowsFixture() archive {
 	const native = "11111111-1111-4111-8111-111111111111"
 	const routed = "22222222-2222-4222-8222-222222222222"
 	a := archive{Version: 1, Schema: 113, SnapshotID: "snapshot-example", SourceSHA256: glivela.Identity("synthetic-backup"), Tables: map[string]table{}, Secrets: map[string]secretValue{
@@ -92,7 +92,7 @@ func replaceCell(a *archive, tableName string, row int, column string, value cel
 }
 
 func TestAccountConversionPreservesIdentityAndIndependentCounters(t *testing.T) {
-	m, err := accountMaterial(accountArchiveFixture())
+	m, err := importMaterial(completeEndpointArchiveFixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,13 +122,13 @@ func TestAccountConversionPreservesIdentityAndIndependentCounters(t *testing.T) 
 }
 
 func TestAccountConversionPreservesAnUnassignedAccount(t *testing.T) {
-	a := accountArchiveFixture()
+	a := completeEndpointArchiveFixture(t)
 	for _, name := range []string{"meridian_credentials", "meridian_usage_watermarks", "meridian_line_usage", "meridian_route_grants"} {
 		value := a.Tables[name]
 		value.Rows = [][]cell{}
 		a.Tables[name] = value
 	}
-	m, err := accountMaterial(a)
+	m, err := importMaterial(a)
 	if err != nil || len(m.Plan.Accounts) != 1 || len(m.Plan.Accounts[0].Credentials) != 0 || len(m.TrafficCounters) != 0 || m.SubscriptionTokens["account-example"] != "example-token" {
 		t.Fatal("unassigned account was dropped or initialized", err)
 	}
@@ -185,9 +185,9 @@ func TestAccountConversionRejectsLossAndSubstitution(t *testing.T) {
 		"bad boolean": func(a *archive) { replaceCell(a, "meridian_accounts", 0, "enabled", cell{Kind: "integer", Text: "2"}) },
 	} {
 		t.Run(name, func(t *testing.T) {
-			a := accountArchiveFixture()
+			a := completeEndpointArchiveFixture(t)
 			change(&a)
-			if _, err := accountMaterial(a); err == nil {
+			if _, err := importMaterial(a); err == nil {
 				t.Fatal("lossy or substituted state accepted")
 			}
 		})
@@ -240,22 +240,26 @@ func TestArchiveToEncryptedControllerStaging(t *testing.T) {
 	// must reject it before any pending account checkpoint is created.
 	replaceCell(&a, "meridian_endpoints", 0, "listen_port", cell{Kind: "integer", Text: "65536"})
 	writeArchiveFixture(t, input, a, transfer)
-	if err := stageAccountsCommand(args); err == nil {
+	if err := stageImportCommand(args); err == nil {
 		t.Fatal("invalid endpoint did not fence staging")
 	}
-	if _, err := os.Lstat(filepath.Join(state, "accounts.pending.json")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(state, "business.pending.json")); !os.IsNotExist(err) {
 		t.Fatal("preflight failure wrote account state")
 	}
 	replaceCell(&a, "meridian_endpoints", 0, "listen_port", cell{Kind: "integer", Text: "10443"})
 	writeArchiveFixture(t, input, a, transfer)
-	if err := stageAccountsCommand(args); err != nil {
+	if err := stageImportCommand(args); err != nil {
 		t.Fatal(err)
 	}
-	got, id, err := control.ReadStagedAccounts(state, storage)
+	got, id, err := control.ReadStagedImport(state, storage)
 	if err != nil || id != a.SnapshotID {
 		t.Fatal("controller cannot reopen staged state", err)
 	}
-	want, err := accountMaterial(a)
+	var retained archive
+	if json.Unmarshal(got.RetainedSource, &retained) != nil || !reflect.DeepEqual(retained, a) || got.SourceSHA256 != a.SourceSHA256 || len(got.Endpoints) != 1 || len(retained.Tables["meridian_route_health_events"].Rows) != 1 {
+		t.Fatal("endpoint/source/history was omitted from the atomic checkpoint")
+	}
+	want, err := importMaterial(a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +272,7 @@ func TestArchiveToEncryptedControllerStaging(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatal("staging changed the business model", err)
 	}
-	path := filepath.Join(state, "accounts.pending.json")
+	path := filepath.Join(state, "business.pending.json")
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -276,10 +280,10 @@ func TestArchiveToEncryptedControllerStaging(t *testing.T) {
 	if bytes.Contains(before, []byte("example-token")) {
 		t.Fatal("plaintext persisted")
 	}
-	if _, _, err := control.ReadStagedAccounts(state, transfer); err == nil {
+	if _, _, err := control.ReadStagedImport(state, transfer); err == nil {
 		t.Fatal("temporary transfer key retained")
 	}
-	if err := stageAccountsCommand(args); err != nil {
+	if err := stageImportCommand(args); err != nil {
 		t.Fatal("idempotent retry failed", err)
 	}
 	after, err := os.ReadFile(path)
@@ -288,7 +292,7 @@ func TestArchiveToEncryptedControllerStaging(t *testing.T) {
 	}
 	replaceCell(&a, "meridian_line_usage", 0, "upload_bytes", cell{Kind: "integer", Text: "124"})
 	writeArchiveFixture(t, input, a, transfer)
-	if err := stageAccountsCommand(args); err == nil {
+	if err := stageImportCommand(args); err == nil {
 		t.Fatal("changed counters accepted under same snapshot")
 	}
 	after, err = os.ReadFile(path)
@@ -307,7 +311,7 @@ func TestArchiveToEncryptedControllerStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer unlock()
-	if err := stageAccountsCommand(args); err == nil {
+	if err := stageImportCommand(args); err == nil {
 		t.Fatal("running controller lease bypassed")
 	}
 }
@@ -335,11 +339,11 @@ func TestRealLegacyAccountStagingFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal("fixture authentication failed")
 	}
-	m, err := accountMaterial(a)
+	m, err := importMaterial(a)
 	if err != nil {
 		t.Fatal("fixture conversion failed")
 	}
-	got, id, err := control.ReadStagedAccounts(filepath.Join(dir, "controller"), storage)
+	got, id, err := control.ReadStagedImport(filepath.Join(dir, "controller"), storage)
 	if err != nil || id != a.SnapshotID {
 		t.Fatal("fixture checkpoint unavailable")
 	}
@@ -350,6 +354,10 @@ func TestRealLegacyAccountStagingFixture(t *testing.T) {
 	want, err := glivela.OpenImportMaterial(canonical, transfer, a.SnapshotID)
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatal("real legacy records differ after staging")
+	}
+	var retained archive
+	if json.Unmarshal(got.RetainedSource, &retained) != nil || !reflect.DeepEqual(retained, a) || len(got.Endpoints) != 1 || len(retained.Tables["meridian_route_health_events"].Rows) != 1 {
+		t.Fatal("real endpoint or nonempty route history missing from atomic checkpoint")
 	}
 	credentials, routes := 0, 0
 	for _, item := range got.Plan.Accounts {

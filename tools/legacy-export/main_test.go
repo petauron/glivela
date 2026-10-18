@@ -181,6 +181,11 @@ func TestPrivateFilesAndSidecars(t *testing.T) {
 	if err := os.WriteFile(path, []byte("synthetic"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	// A secure caller umask may have created this as 0600. The negative case
+	// must actually be public, not merely request public creation permissions.
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := privateFile(path, 32); err == nil {
 		t.Fatal("public input accepted")
 	}

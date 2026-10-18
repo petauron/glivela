@@ -9,11 +9,13 @@ import (
 	"io"
 )
 
-// ImportMaterial transfers the existing account identities, not replacements.
-// It is sensitive local handover material: never send it in a node receipt or
-// publish it in logs. Endpoints, landing state and history must be transferred
-// separately before the complete handover may be committed.
+// ImportMaterial is one atomic, sensitive handover checkpoint. RetainedSource
+// is immutable migration evidence/history, never a second live configuration
+// source. Do not send this material in a node receipt or publish it in logs.
 type ImportMaterial struct {
+	SourceSHA256       string                           `json:"sourceSha256"`
+	RetainedSource     json.RawMessage                  `json:"retainedSource"`
+	Endpoints          []ImportEndpoint                 `json:"endpoints"`
 	Plan               ImportPlan                       `json:"plan"`
 	SubscriptionTokens map[string]string                `json:"subscriptionTokens"`
 	ProtocolSecrets    map[string]string                `json:"protocolSecrets"`
@@ -23,6 +25,9 @@ type ImportMaterial struct {
 }
 
 func (m ImportMaterial) Validate() error {
+	if _, err := m.sourceSnapshot(); err != nil {
+		return err
+	}
 	plan, err := PlanImport(m.Plan.Accounts)
 	if err != nil || plan.SHA256 != m.Plan.SHA256 {
 		return errors.New("glivela: import inventory differs")
@@ -52,11 +57,26 @@ func (m ImportMaterial) Validate() error {
 	if len(m.SubscriptionTokens) != len(plan.Accounts) || len(m.ProtocolSecrets) != credentials || len(m.HysteriaSecrets) != hysteria {
 		return errors.New("glivela: unreferenced import credentials")
 	}
-	return nil
+	return m.validateEndpoints()
+}
+
+// Only the archive identity header is interpreted here. Legacy table formats
+// are read by the one-time offline tool, not by the controller or node runtime.
+func (m ImportMaterial) sourceSnapshot() (string, error) {
+	var header struct {
+		Version      int    `json:"version"`
+		Schema       int    `json:"sourceSchema"`
+		SnapshotID   string `json:"snapshotId"`
+		SourceSHA256 string `json:"sourceSha256"`
+	}
+	if len(m.RetainedSource) > maxImportMaterial || json.Unmarshal(m.RetainedSource, &header) != nil || header.Version != 1 || header.Schema != 113 || !ValidIdentifier(header.SnapshotID) || !ValidIdentity(m.SourceSHA256) || header.SourceSHA256 != m.SourceSHA256 {
+		return "", errors.New("glivela: missing or changed source snapshot identity")
+	}
+	return header.SnapshotID, nil
 }
 
 const maxImportMaterial = 64 << 20
-const importMaterialContext = "glivela-account-handover-v1"
+const importMaterialContext = "glivela-business-handover-v1"
 
 // SealImportMaterial uses standard authenticated encryption with an externally
 // supplied 256-bit transfer key. Nonces come from Go's GCM implementation. The
@@ -65,6 +85,9 @@ const importMaterialContext = "glivela-account-handover-v1"
 func SealImportMaterial(m ImportMaterial, key []byte, snapshotID string) ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
+	}
+	if source, _ := m.sourceSnapshot(); source != snapshotID {
+		return nil, errors.New("glivela: source snapshot differs from transfer identity")
 	}
 	aead, err := importCipher(key, snapshotID)
 	if err != nil {
@@ -97,6 +120,9 @@ func OpenImportMaterial(sealed, key []byte, snapshotID string) (ImportMaterial, 
 	var extra any
 	if decoder.Decode(&m) != nil || decoder.Decode(&extra) != io.EOF || m.Validate() != nil {
 		return ImportMaterial{}, errors.New("glivela: invalid import material")
+	}
+	if source, _ := m.sourceSnapshot(); source != snapshotID {
+		return ImportMaterial{}, errors.New("glivela: source snapshot differs from transfer identity")
 	}
 	return m, nil
 }

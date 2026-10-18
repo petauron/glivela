@@ -14,8 +14,8 @@ import (
 	"github.com/petauron/glivela/control"
 )
 
-func stageAccountsCommand(args []string) error {
-	flags := flag.NewFlagSet("stage-accounts", flag.ContinueOnError)
+func stageImportCommand(args []string) error {
+	flags := flag.NewFlagSet("stage", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	input := flags.String("archive", "", "private encrypted offline archive")
 	snapshot := flags.String("snapshot", "", "expected snapshot identity")
@@ -48,19 +48,15 @@ func stageAccountsCommand(args []string) error {
 			clear(secret.Value)
 		}
 	}()
-	material, err := accountMaterial(a)
+	material, err := importMaterial(a)
 	if err != nil {
 		return err
 	}
-	endpoints, err := endpointMaterial(a)
-	if err != nil || glivela.ValidateEndpointImport(material, endpoints) != nil {
-		return errors.New("endpoint configuration or complete entry inventory could not be verified")
-	}
-	accounts, err := glivela.SealImportMaterial(material, transfer, *snapshot)
+	sealedImport, err := glivela.SealImportMaterial(material, transfer, *snapshot)
 	if err != nil {
 		return err
 	}
-	return control.StageAccountImport(*directory, *snapshot, accounts, transfer, storage)
+	return control.StageImport(*directory, *snapshot, sealedImport, transfer, storage)
 }
 
 func openArchive(sealed, key []byte, snapshot string) (archive, error) {
@@ -180,7 +176,7 @@ func (r *record) secret(a archive, column, aad string, optional bool) string {
 	return string(s.Value)
 }
 
-func accountMaterial(a archive) (glivela.ImportMaterial, error) {
+func importMaterial(a archive) (glivela.ImportMaterial, error) {
 	m := glivela.ImportMaterial{
 		SubscriptionTokens: map[string]string{}, ProtocolSecrets: map[string]string{}, HysteriaSecrets: map[string]string{},
 		ResetSchedules: map[string]glivela.ImportResetSchedule{}, TrafficCounters: map[string]glivela.ImportTrafficCounters{},
@@ -302,6 +298,15 @@ func accountMaterial(a archive) (glivela.ImportMaterial, error) {
 	m.Plan, err = glivela.PlanImport(items)
 	if err != nil {
 		return m, err
+	}
+	m.Endpoints, err = endpointMaterial(a)
+	if err != nil {
+		return m, err
+	}
+	m.SourceSHA256 = a.SourceSHA256
+	m.RetainedSource, err = json.Marshal(a)
+	if err != nil {
+		return m, errors.New("source retention failed")
 	}
 	return m, m.Validate()
 }

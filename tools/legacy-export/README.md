@@ -39,14 +39,15 @@ tables/secret-reference columns, foreign-key violations and authentication
 failures abort without a successful output. Console output contains no records
 or underlying database errors.
 
-## Stage the original account model
+## Stage one complete private checkpoint
 
 After exporting, the same **offline-only** tool can translate the reviewed
-account/credential/route/usage tables into Glivela's existing import model and
-stage it in a stopped controller's private directory:
+account/credential/route/usage and endpoint tables into Glivela's import model.
+It retains the complete exported source records/history in the same encrypted
+checkpoint, in a stopped controller's private directory:
 
 ```sh
-legacy-export stage-accounts \
+legacy-export stage \
   -archive /private/transfer/legacy.sealed \
   -snapshot migration-example \
   -transfer-key /private/transfer/key \
@@ -69,20 +70,25 @@ accounts. A configured but disabled protocol retains its keys and certificates.
 The reviewed schema-113 constraint requires at least one configured protocol
 flag even for retired endpoints; retirement is preserved through its recorded
 status, not by clearing both protocol flags. Historical healthy/applied values
-never count as new runtime or TLS acceptance. This preflight does not yet make
-endpoints live or persist them into a new active business store: retain the
-complete encrypted export until the full atomic handover is implemented.
+never count as new runtime or TLS acceptance. These complete endpoint records
+are retained together with the accounts and immutable exported source, not in
+separate files that could be committed only halfway.
 
 The existing controller directory lease excludes a running process. Its
-`accounts.pending.json` is encrypted with an independent storage key, not the
+`business.pending.json` is encrypted with an independent storage key, not the
 temporary transfer key. Identical retries do not rewrite it; changed counters
 under the same snapshot cannot replace the verified checkpoint. This operation
 does not activate accounts, publish subscriptions or accept route health.
-Keep the complete encrypted export and original backup: account staging alone
-does not import endpoints, landing policy or history, and is not permission to
-delete or stop any old resources.
+Endpoint changes, retained-history changes and source hash changes also prevent
+a retry from overwriting the existing checkpoint, even if the account-plan hash
+is unchanged. The transfer authentication binds the embedded source snapshot ID.
+The replaced account-only command/envelope/reader is removed, not a fallback.
+Keep the complete encrypted export and original backup. This one atomic pending
+checkpoint is not the final write-authority transfer, and is not permission to
+delete or stop old resources. External references/settings/history outside the
+exported tables still require explicit reconciliation before activation.
 
-This is a **business-table extraction checkpoint, not a complete handover**.
+This is a **business-data staging checkpoint, not a complete handover**.
 Platform object references, selected landing settings, diagnostic/task history
 outside these tables, and final usage observations still require explicit
 transfer/reconciliation before activation. No API consumes this raw archive as
@@ -98,5 +104,7 @@ The 2026-10-19 anonymous integration run generated a complete schema-113 backup
 using the retained Vastora source's shared-endpoint/route fixtures, then ran the
 actual export and staging commands. Independent decryption/reopen compared the
 entire normalized model and verified two accounts, three credentials, one route,
-exact quotas above 2^53, reset schedules and directional samples. This proves
-offline account staging only, not an active subscription or a complete cutover.
+one nonempty route-health history record, exact quotas above 2^53, reset schedules
+and directional samples. Truncated or tampered checkpoints expose no partial
+material and cannot be silently overwritten on retry. This proves
+offline business staging only, not an active subscription or a complete cutover.
