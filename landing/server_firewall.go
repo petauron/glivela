@@ -138,10 +138,9 @@ func (policy ServerFirewall) objects() []map[string]nftObject {
 		rule("destinations", match(payload("ip6", "saddr"), policy.EgressIP), match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": "2000::", "len": 3}}), match(meta("l4proto"), "tcp"), nftObject{"return": nil})
 	} else {
 		for _, protocol := range []string{"tcp", "udp"} {
-			expr := []any{match(meta("nfproto"), "ipv4"), match(meta("l4proto"), protocol)}
-			if policy.EgressIP != "" {
-				expr = append(expr, match(payload("ip", "saddr"), policy.EgressIP))
-			}
+			// EgressIP is mandatory. Its IP payload match enforces IPv4;
+			// nft strips a redundant nfproto condition on kernel read-back.
+			expr := []any{match(meta("l4proto"), protocol), match(payload("ip", "saddr"), policy.EgressIP)}
 			rule("destinations", append(expr, nftObject{"return": nil})...)
 		}
 	}

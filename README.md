@@ -45,8 +45,11 @@ Existing-data handover, catalog packaging and removal of the old Vastora
 business path remain incomplete. The optional official-binary test verifies
 actual Xray configuration validation and SOCKS/TLS forwarding on loopback,
 including certificate rejection and HTTP 404 handling. Runtime recovery tests
-use a fake systemd driver; Linux systemd, firewall, DNS isolation and QUIC have
-not been accepted. Do not deploy or close #54 based on these tests. The existing
+use a fake systemd driver. Real Linux nftables lifecycle tests cover IPv4/IPv6
+install/read-back/remove, idempotence, drift rejection and unrelated-table
+preservation in an isolated network namespace, and run in CI. Packet-level
+enforcement, Linux systemd, DNS isolation and QUIC have not been accepted.
+Do not deploy or close #54 based on these tests. The existing
 architecture below stays active until the complete migration is accepted.
 
 Formerly Meridian. See [the in-place brand migration](BRANDING.md) for stable

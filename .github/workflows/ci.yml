@@ -49,6 +49,12 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
+      - name: Verify native firewall in isolated network namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nftables iproute2
+          go test -c -o "$RUNNER_TEMP/glivela-landing.test" ./landing
+          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelFirewallLifecycle$' -test.v -test.timeout 30s
       - name: Run complete tests with version-based race policy
         run: |
           version=$(jq -er '.["."] | select(type == "string")' .release-please-manifest.json)
