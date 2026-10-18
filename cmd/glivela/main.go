@@ -85,7 +85,7 @@ func run(ctx context.Context, path string) error {
 		return errors.New("invalid bootstrap configuration")
 	}
 	var extra any
-	if decoder.Decode(&extra) != io.EOF || cfg.Mode != "controller" && cfg.Mode != "node" {
+	if decoder.Decode(&extra) != io.EOF || cfg.Mode != "controller" && cfg.Mode != "node" && cfg.Mode != "verifier" {
 		return errors.New("invalid bootstrap mode")
 	}
 	unlock, err := control.LockDirectory(cfg.Directory)
@@ -108,6 +108,21 @@ func run(ctx context.Context, path string) error {
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(pem) {
 		return errors.New("invalid CA")
+	}
+	if cfg.Mode == "verifier" {
+		if len(cfg.Nodes) != 0 || cfg.Listen != "" || cfg.Xray != (control.SystemdDriver{}) {
+			return errors.New("verifier cannot enroll peers or listen")
+		}
+		client, err := control.NewClient(cfg.Controller, identity, roots)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+		return (control.RouteRunner{Client: client}).Run(ctx, 10*time.Second, func(err error) {
+			if err != nil {
+				log.Print("Glivela route verification did not complete")
+			}
+		})
 	}
 	if cfg.Mode == "node" {
 		if len(cfg.Nodes) != 0 || cfg.Listen != "" {

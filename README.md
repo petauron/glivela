@@ -25,6 +25,17 @@ an unchanged revision does not restart the service. The controller bootstrap
 enrolls certificate-bound desired artifacts; it is not a replacement business
 UI or a complete legacy-data importer.
 
+The `verifier` mode runs on an enrolled entry using its own private bootstrap,
+state-directory lease and mTLS identity. It polls `/v1/route-checks`, performs
+one bounded SOCKS/TLS/observed-exit check at a time, and reports success or
+failure directly to Glivela. It cannot enroll nodes, listen for commands or
+control Xray. Assignments are currently local controller operations, not a
+finished management UI. Each retry has a new attempt ID; reports are bound to
+that attempt, snapshot, entry certificate, landing and desired revision/hash.
+Completed reports are durable, and a lost acknowledgement does not cause the
+entry to repeat a completed attempt. This channel does not by itself complete
+legacy ownership transfer or authorize clearing a runtime-health alert.
+
 `landing/` renders the official Xray 26.7.28 SOCKS configuration and dedicated
 UID-scoped nftables policy from one explicit plan. The node channel binds this
 plan to the exact configuration digest. The runtime journals both together,
