@@ -174,7 +174,9 @@ func TestRenderedLandingUDP(t *testing.T) {
 		if source == "100.64.0.11" {
 			// Use one UDP source port for the allowed seed and forbidden next
 			// destination, not merely the same TCP association with fresh flows.
-			exchange = func(packet []byte) ([]byte, error) { return udpRuntimeExchangeOn(authorizedUDP, associationRelay, packet) }
+			exchange = func(packet []byte) ([]byte, error) {
+				return udpRuntimeExchangeOn(authorizedUDP, associationRelay, packet)
+			}
 			seed := udpRuntimeNonce(t)
 			got, err := exchange(udpRuntimePacket("93.184.216.34:8443", seed))
 			if err != nil {
@@ -499,8 +501,41 @@ func TestLandingUDPWorkerAttempt(t *testing.T) {
 		}
 		return
 	}
-	var timeout net.Error
-	if !errors.As(err, &timeout) || !timeout.Timeout() {
+	if !udpRuntimeKernelDenied(err) {
 		t.Fatal("kernel did not block direct worker UDP, or fixture failed", err)
+	}
+}
+
+func udpRuntimeKernelDenied(err error) bool {
+	var operation *net.OpError
+	if !errors.As(err, &operation) || operation.Net != "udp4" {
+		return false
+	}
+	// Local netfilter OUTPUT drops can fail sendto synchronously with EPERM.
+	// An INPUT drop instead produces a bounded read timeout. Do not accept
+	// bind failures, missing routes or refused destinations as firewall proof.
+	return operation.Op == "write" && errors.Is(operation.Err, syscall.EPERM) ||
+		operation.Op == "read" && operation.Timeout()
+}
+
+func TestUDPWorkerDenialClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"output-drop", &net.OpError{Op: "write", Net: "udp4", Err: os.NewSyscallError("sendto", syscall.EPERM)}, true},
+		{"input-drop", &net.OpError{Op: "read", Net: "udp4", Err: os.ErrDeadlineExceeded}, true},
+		{"bind-failed", &net.OpError{Op: "listen", Net: "udp4", Err: syscall.EPERM}, false},
+		{"target-refused", &net.OpError{Op: "read", Net: "udp4", Err: syscall.ECONNREFUSED}, false},
+		{"route-missing", &net.OpError{Op: "write", Net: "udp4", Err: syscall.ENETUNREACH}, false},
+		{"generic-permission", syscall.EPERM, false},
+		{"success", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := udpRuntimeKernelDenied(tc.err); got != tc.want {
+				t.Fatalf("denial classification = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
