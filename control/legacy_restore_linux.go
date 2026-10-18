@@ -12,11 +12,15 @@ import (
 )
 
 // restoreLegacyLandingFirewall is only a step of failed-cutover recovery. The
-// caller must first stop the candidate and keep the old writer fenced. It does
+// caller must keep the old writer fenced. It stops the owned candidate before
+// restoring old rules. It does
 // not start Dante, declare routes healthy, or release the migration fence.
-func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string) error {
+func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string, candidate Desired, driver SystemdDriver) error {
 	if os.Geteuid() != 0 {
 		return errors.New("control: legacy recovery requires root")
+	}
+	if candidate.Validate() != nil {
+		return errors.New("control: invalid replacement identity")
 	}
 	if err := requireLegacyWriterStopped(ctx); err != nil {
 		return err
@@ -29,6 +33,12 @@ func restoreLegacyLandingFirewall(ctx context.Context, checkpoint, nodeID string
 	current, err := SnapshotLegacyLanding(nodeID)
 	if err != nil || !sameLegacyResources(saved, current) {
 		return errors.New("control: legacy resources changed; recovery refused")
+	}
+	// Stop verifies the exact installed unit/binary identity and removes only
+	// this candidate's owned firewall table. Failure must not enable the old
+	// rules while the replacement could still be forwarding traffic.
+	if err := driver.Stop(ctx, candidate); err != nil {
+		return errors.New("control: replacement could not be stopped; recovery refused")
 	}
 	if err := requireLegacyWriterStopped(ctx); err != nil {
 		return err
