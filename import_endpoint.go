@@ -91,6 +91,15 @@ func (material ImportMaterial) validateEndpoints() error {
 	byEntry := map[string]ImportEndpoint{}
 	ids, services := map[string]bool{}, map[string]bool{}
 	for _, endpoint := range endpoints {
+		if endpoint.ResetDay > 0 {
+			zone := material.References.Services[endpoint.ServiceID].Timezone
+			if zone == "" {
+				return errors.New("glivela: endpoint reset timezone required")
+			}
+			if _, err := time.LoadLocation(zone); err != nil {
+				return errors.New("glivela: invalid endpoint reset timezone")
+			}
+		}
 		if endpoint.Validate() != nil || ids[endpoint.Reality.ID] || services[endpoint.ServiceID] {
 			return errors.New("glivela: conflicting endpoint inventory")
 		}

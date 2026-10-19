@@ -71,3 +71,20 @@ and route evidence, not imported healthy flags.
 Before retiring Vastora's old safety triggers, verify these Glivela paths and
 their real installed ownership. Preserve the shared Docker HAProxy and all
 unrelated routes, generic Agent management and private recovery evidence.
+
+## Names and billing cycles
+
+Keep imported node/service names verbatim; do not recreate the platform's old
+automatic name normalization. Imported services retain their IANA site timezone.
+Endpoint monthly boundaries advance in that timezone, including DST and short
+months, rather than using a timestamp's fixed offset as the timezone. The
+standard Go timezone database is embedded for the scratch controller image.
+An endpoint with a reset day but no source timezone is rejected; recapture the
+frozen source with the matching offline exporter, rather than guessing UTC.
+
+Authenticated node exchange advances overdue endpoint/account cycles from the
+recorded boundary. Repeated polls do not reset again, and raw core watermarks
+survive the reset. No online node means no remote configuration can change;
+the first authenticated poll catches up before sending the next policy.
+Account expiry disables authentication through the same desired projection,
+not through a platform task or restarting unrelated peers.

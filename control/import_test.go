@@ -2,11 +2,13 @@ package control
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	glivela "github.com/petauron/glivela"
 )
@@ -32,6 +34,73 @@ func dataImportFixture(t *testing.T) glivela.ImportMaterial {
 		t.Fatal(err)
 	}
 	return m
+}
+
+// Anonymous, existing fixtures only; no service or production access.
+func TestControllerBackupRestoreRetainsDataAndRequiresFreshHealth(t *testing.T) {
+	s, d, entry, landing := subscriptionFixture(t, true)
+	good := healthyEntryObservation(d, time.Now())
+	if _, err := s.Exchange(context.Background(), entry, &good); err != nil {
+		t.Fatal(err)
+	}
+	reportRuntime(t, s, landing, artifact(1))
+	if s.nodes[entry].Receipt == nil || len(s.nodes[landing].Checks) == 0 {
+		t.Fatal("fixture did not establish cached runtime/challenge state")
+	}
+	before := businessBytes(t, s)
+	if err := s.BackupController(time.Now().UTC()); err != nil {
+		t.Fatal("snapshot failed", err)
+	}
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(s.path), "controller-backup-*.gcm"))
+	if err != nil || len(paths) != 1 {
+		t.Fatal("bounded snapshot missing", err)
+	}
+	raw, err := os.ReadFile(paths[0])
+	if err != nil || bytes.Contains(raw, []byte("example-token")) {
+		t.Fatal("snapshot read or confidentiality failed", err)
+	}
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(parent, "restored")
+	if err := RestoreControllerBackup(paths[0], s.business.keyPath, destination); err != nil {
+		t.Fatal("restore failed", err)
+	}
+	loaded, err := OpenStore(filepath.Join(destination, "nodes.json"))
+	if err != nil {
+		t.Fatal("restored nodes cannot reload", err)
+	}
+	if err := loaded.LoadBusiness(s.business.keyPath); err != nil || !reflect.DeepEqual(loaded.business.material, s.business.material) {
+		t.Fatal("restored identity/configuration/counters/history changed", err)
+	}
+	for certificate, node := range loaded.nodes {
+		original := s.nodes[certificate]
+		if node.ID != original.ID || !reflect.DeepEqual(node.Desired, original.Desired) || !reflect.DeepEqual(node.RouteEntries, original.RouteEntries) || node.Receipt != nil || !node.ReportedAt.IsZero() || len(node.Checks) != 0 {
+			t.Fatal("restore changed configuration or retained live proof")
+		}
+	}
+	if w := getSubscription(t, loaded, "/sub/example-token", ""); w.Code != 503 {
+		t.Fatal("restored cached success published a route", w.Code)
+	}
+	if !bytes.Equal(before, businessBytes(t, s)) {
+		t.Fatal("backup/restore modified active business state")
+	}
+	raw[len(raw)-1] ^= 1
+	corrupt := filepath.Join(parent, "corrupt.gcm")
+	if err := os.WriteFile(corrupt, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	refused := filepath.Join(parent, "refused")
+	if RestoreControllerBackup(corrupt, s.business.keyPath, refused) == nil {
+		t.Fatal("corrupt snapshot accepted")
+	}
+	if _, err := os.Lstat(refused); !os.IsNotExist(err) {
+		t.Fatal("corrupt snapshot created a destination")
+	}
 }
 
 func TestImportPersistsWithoutReinitializing(t *testing.T) {

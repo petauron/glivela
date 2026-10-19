@@ -147,7 +147,7 @@ func referenceIDs(t table, columns []string, ids map[string]bool) error {
 }
 
 func readReferencedServices(ctx context.Context, db *sql.DB, appID string, services map[string]glivela.ImportService) error {
-	rows, err := db.QueryContext(ctx, `SELECT id,application_id,name,display_name,region_code,protocol,app_protocol,container_port,host_port,endpoint,status FROM services WHERE application_id=? AND (app_protocol IN ('meridian/entry','meridian/subscription') OR name='subscription' OR id IN (SELECT service_id FROM meridian_endpoints) OR id IN (SELECT service_id FROM landing_client_grants)) ORDER BY id`, appID)
+	rows, err := db.QueryContext(ctx, `SELECT id,application_id,name,display_name,region_code,protocol,app_protocol,container_port,host_port,endpoint,status,(SELECT timezone FROM sites WHERE id=services.site_id) FROM services WHERE application_id=? AND (app_protocol IN ('meridian/entry','meridian/subscription') OR name='subscription' OR id IN (SELECT service_id FROM meridian_endpoints) OR id IN (SELECT service_id FROM landing_client_grants)) ORDER BY id`, appID)
 	if err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func readReferencedServices(ctx context.Context, db *sql.DB, appID string, servi
 	for rows.Next() {
 		var id string
 		var s glivela.ImportService
-		if err := rows.Scan(&id, &s.ApplicationID, &s.Name, &s.DisplayName, &s.RegionCode, &s.Protocol, &s.ApplicationProtocol, &s.ContainerPort, &s.HostPort, &s.Endpoint, &s.PreviousStatus); err != nil {
+		if err := rows.Scan(&id, &s.ApplicationID, &s.Name, &s.DisplayName, &s.RegionCode, &s.Protocol, &s.ApplicationProtocol, &s.ContainerPort, &s.HostPort, &s.Endpoint, &s.PreviousStatus, &s.Timezone); err != nil {
 			return err
 		}
 		services[id] = s

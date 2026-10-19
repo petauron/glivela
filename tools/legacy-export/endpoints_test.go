@@ -53,6 +53,9 @@ func completeEndpointArchiveFixture(t *testing.T) archive {
 		Publications:     map[string]glivela.ImportPublication{"publication-example": {ServiceID: "service-example", EntryNodeID: "entry-host-example", Kind: "public_shared_443", IngressOwner: "application_node", Hostname: "entry.example.test", SNIHostname: "www.example.com", DNSProvider: "manual", DesiredRevision: 3, AppliedRevision: 2, PreviousStatus: "failed", PreviousError: "synthetic error", CreatedAt: "2026-09-19T00:00:00Z", UpdatedAt: "2026-10-19T02:03:04Z"}},
 		LandingSelection: &glivela.ImportLandingSelection{NodeIDs: []string{"landing-example"}, LandingRegionCodes: map[string]string{"landing-example": "US"}, LandingNameSuffixes: map[string]string{"landing-example": "Saved"}, Revision: 7},
 	}
+	service := a.References.Services["service-example"]
+	service.Timezone = "Asia/Shanghai"
+	a.References.Services["service-example"] = service
 	return a
 }
 

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/netip"
 	"strings"
+	"time"
+	_ "time/tzdata"
 	"unicode/utf8"
 )
 
@@ -33,6 +35,7 @@ type ImportApplication struct {
 	PreviousStatus string `json:"previousStatus"`
 }
 type ImportService struct {
+	Timezone            string `json:"timezone"`
 	ApplicationID       string `json:"applicationId"`
 	Name                string `json:"name"`
 	DisplayName         string `json:"displayName"`
@@ -117,6 +120,11 @@ func (m ImportMaterial) validateReferences() error {
 		}
 	}
 	for id, s := range r.Services {
+		if s.Timezone != "" {
+			if _, err := time.LoadLocation(s.Timezone); err != nil || len(s.Timezone) > 128 {
+				return invalid
+			}
+		}
 		if _, ok := r.Applications[s.ApplicationID]; !ok || !ValidIdentifier(id) || !displayText(s.Name) || !displayText(s.DisplayName) || !text(s.RegionCode, 16) || !text(s.ApplicationProtocol, 128) || !text(s.Endpoint, 1024) || s.ContainerPort < 0 || s.ContainerPort > 65535 || s.HostPort < 0 || s.HostPort > 65535 {
 			return invalid
 		}

@@ -29,6 +29,38 @@ func businessBytes(t *testing.T, s *Store) []byte {
 	return raw
 }
 
+func TestOwnedResetCatchupRetainsSiteTimezoneAndDoesNotReplayCounters(t *testing.T) {
+	source, d, _, _ := subscriptionFixture(t, false)
+	m := source.business.material
+	m.Ownership = nil
+	service := m.References.Services["service-example"]
+	service.Timezone = "America/Los_Angeles"
+	m.References.Services["service-example"] = service
+	m.Endpoints[0].ResetDay = 1
+	m.Endpoints[0].UsedBytes = 999
+	m.Endpoints[0].ResetSchedule.NextResetAt = "2026-10-01T00:00:00-07:00"
+	m.Plan.Accounts[0].Account.Plan.ResetDays = 30
+	m.ResetSchedules["account-example"] = glivela.ImportResetSchedule{NextResetAt: "2026-10-01T00:00:00Z"}
+	s, _, certificate, _ := ownedSubscriptionFixture(t, m, d, false)
+	now := time.Date(2026, 12, 2, 0, 0, 0, 0, time.UTC)
+	oldRaw := s.business.material.TrafficCounters["credential-example"]
+	if err := s.observeBusinessTrafficLocked(s.nodes[certificate], nil, now); err != nil {
+		t.Fatal(err)
+	}
+	after := s.business.material
+	if after.Endpoints[0].UsedBytes != 0 || after.Endpoints[0].ResetSchedule.NextResetAt != "2027-01-01T00:00:00-08:00" || after.Endpoints[0].ResetSchedule.LastResetAt != "2026-12-01T00:00:00-08:00" || after.ResetSchedules["account-example"].NextResetAt != "2026-12-30T00:00:00Z" {
+		t.Fatal("offline cycle catchup lost its recorded boundary or site timezone")
+	}
+	counter := after.TrafficCounters["credential-example"]
+	if counter.UploadBytes != 0 || counter.DownloadBytes != 0 || counter.RawUploadBytes != oldRaw.RawUploadBytes || counter.RawDownloadBytes != oldRaw.RawDownloadBytes || !reflect.DeepEqual(after.RetainedSource, m.RetainedSource) || !reflect.DeepEqual(after.References, m.References) {
+		t.Fatal("reset changed raw watermarks, names or history")
+	}
+	written := businessBytes(t, s)
+	if err := s.observeBusinessTrafficLocked(s.nodes[certificate], nil, now); err != nil || !bytes.Equal(written, businessBytes(t, s)) {
+		t.Fatal("retry repeated the reset or rewrote unchanged state", err)
+	}
+}
+
 func TestOwnedAccountPlanUpdatePreservesDataAndReconcilesOnlyAffectedEntry(t *testing.T) {
 	s, d, cert, _ := subscriptionFixture(t, true)
 	reportRuntime(t, s, cert, d)

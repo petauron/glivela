@@ -90,7 +90,11 @@ func (s *Store) BackupController(now time.Time) error {
 	}
 	value := controllerBackup{Version: 1, CreatedAt: now.UTC(), Files: map[string]json.RawMessage{}}
 	for _, name := range []string{"nodes.json", "business.json", "business.adoption.json"} {
-		raw, err := privateBackupBytes(filepath.Join(directory, name))
+		path := filepath.Join(directory, name)
+		if name == "nodes.json" {
+			path = s.path
+		}
+		raw, err := privateBackupBytes(path)
 		if err != nil {
 			return err
 		}

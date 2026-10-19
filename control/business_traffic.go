@@ -28,11 +28,17 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 		if endpoint.ResetDay == 0 || endpoint.Retired {
 			continue
 		}
+		zone := next.References.Services[endpoint.ServiceID].Timezone
+		location, err := time.LoadLocation(zone)
+		if zone == "" || err != nil {
+			return errors.New("control: endpoint reset timezone required")
+		}
 		schedule := &endpoint.ResetSchedule
 		if schedule.NextResetAt == "" {
-			due := monthlyReset(now.Year(), now.Month(), endpoint.ResetDay, now.Location())
+			local := now.In(location)
+			due := monthlyReset(local.Year(), local.Month(), endpoint.ResetDay, location)
 			if !due.After(now) {
-				due = monthlyReset(now.Year(), now.Month()+1, endpoint.ResetDay, now.Location())
+				due = monthlyReset(local.Year(), local.Month()+1, endpoint.ResetDay, location)
 			}
 			schedule.NextResetAt = due.Format(time.RFC3339Nano)
 			continue
@@ -41,6 +47,7 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 		if err != nil {
 			return errors.New("control: invalid endpoint reset schedule")
 		}
+		due = due.In(location)
 		if !due.After(now) {
 			endpoint.UsedBytes = 0
 			endpoint.QuotaAppliedEnabled = true
