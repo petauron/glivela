@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 
 	glivela "github.com/petauron/glivela"
 	"github.com/petauron/glivela/landing"
@@ -91,6 +92,20 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/admin/backup":
+			var input struct{}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
+				http.Error(w, "invalid backup request", http.StatusBadRequest)
+				return
+			}
+			if store.Business().State != "owned-unverified" || store.BackupController(time.Now()) != nil {
+				http.Error(w, "controller backup not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				BackedUp bool `json:"backedUp"`
+			}{true})
 		case "/v1/admin/account-subscription":
 			var request struct {
 				AccountID string `json:"accountId"`

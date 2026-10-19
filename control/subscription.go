@@ -168,7 +168,9 @@ func (s *Store) subscription(ctx context.Context, token string, mihomo bool) (su
 			if name == "" {
 				name = m.References.Applications[credential.EntryID].Name
 			}
-			if endpoint.VLESSEnabled && slices.ContainsFunc(entry.Desired.Entry.RealityEndpoints, func(current glivela.RealityEndpoint) bool { return reflect.DeepEqual(current, endpoint.Reality) }) {
+			if endpoint.VLESSEnabled && slices.ContainsFunc(entry.Desired.Entry.RealityEndpoints, func(current glivela.RealityEndpoint) bool {
+				return reflect.DeepEqual(current, pinnedImportedReality(endpoint))
+			}) {
 				link, err := glivela.LinkForCredential(endpoint.Reality, material, name)
 				if err != nil {
 					return subscriptionContent{}, errSubscriptionUnverified

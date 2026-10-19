@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -179,6 +180,15 @@ func sameConfiguredGrant(a, b glivela.RouteGrant) bool {
 	return sameGrantPolicy(a, b)
 }
 
+// Preserve the source hostname as business/history data, but retain its
+// previously reviewed fixed IP in the executable configuration. This does not
+// resolve or choose a replacement target during migration or ordinary updates.
+func pinnedImportedReality(endpoint glivela.ImportEndpoint) glivela.RealityEndpoint {
+	current := endpoint.Reality
+	current.Target = net.JoinHostPort(endpoint.TargetIP, "443")
+	return current
+}
+
 // Reproject only enrolled resources whose identities already match the owned
 // inventory. This does not create/adopt containers, infer peer identities or
 // recover missing transport configuration from an old source archive.
@@ -198,6 +208,21 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 		}
 		desired := node.Desired.clone()
 		plan := desired.Entry
+		for i, current := range plan.RealityEndpoints {
+			index := slices.IndexFunc(m.Endpoints, func(endpoint glivela.ImportEndpoint) bool {
+				return endpoint.Reality.ID == current.ID && endpoint.Reality.EntryID == node.ID
+			})
+			if index < 0 {
+				return nil, false, errors.New("control: entry target has no owned source")
+			}
+			expected := pinnedImportedReality(m.Endpoints[index])
+			originalTarget := current.Target
+			current.Target = expected.Target
+			if !reflect.DeepEqual(current, expected) || originalTarget != expected.Target && originalTarget != m.Endpoints[index].Reality.Target {
+				return nil, false, errors.New("control: entry target or TLS identity differs from owned source")
+			}
+			plan.RealityEndpoints[i] = expected
+		}
 		for i, current := range plan.Credentials {
 			expected, found := credentials[current.Credential.ID]
 			if !found || !sameCredentialIdentity(current, expected) {

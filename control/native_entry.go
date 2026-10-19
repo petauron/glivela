@@ -38,6 +38,9 @@ func (d *NativeEntryDriver) Validate(ctx context.Context, desired Desired, confi
 	if err := d.verifyLoadedService(ctx); err != nil {
 		return err
 	}
+	if err := verifyEntryRealityTargets(ctx, desired); err != nil {
+		return err
+	}
 	return validateXrayFile(ctx, d.Binary, d.BinarySHA256, config)
 }
 
@@ -105,6 +108,11 @@ func (d *NativeEntryDriver) Activate(ctx context.Context, desired Desired, previ
 		return err
 	}
 	resume := previous != nil && bytes.Equal(previous.Config, desired.Config) && sameEntryTransport(previous.EntryNetwork, desired.EntryNetwork) && d.readyProcess(ctx, desired) == nil
+	if !resume {
+		if err := verifyEntryRealityTargets(ctx, desired); err != nil {
+			return err
+		}
+	}
 	if err := d.monitors.close(ctx); err != nil {
 		return err
 	}

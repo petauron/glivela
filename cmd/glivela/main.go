@@ -47,6 +47,13 @@ type configuration struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "restore-controller-backup" {
+		if err := restoreControllerCommand(os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela controller restore not confirmed; live state unchanged, retain partial destination for inspection")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "stage-native-entry" {
 		if err := stageNativeEntryCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
 			log.Print("Glivela native entry staging not confirmed; keep source and recovery state unchanged")
@@ -363,6 +370,13 @@ func run(ctx context.Context, path string) error {
 			return err
 		}
 	}
+	backups, stopBackups := context.WithCancel(ctx)
+	backupsDone := make(chan struct{})
+	defer func() { stopBackups(); <-backupsDone }()
+	go func() {
+		defer close(backupsDone)
+		store.RunControllerBackups(backups, func(error) { log.Print("Glivela controller backup not confirmed; inspect retained recovery snapshots") })
+	}()
 	return serveController(ctx, server, subscriptions)
 }
 
