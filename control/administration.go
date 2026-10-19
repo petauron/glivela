@@ -91,6 +91,23 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/admin/account-subscription":
+			var request struct {
+				AccountID string `json:"accountId"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil {
+				http.Error(w, "invalid subscription disclosure request", http.StatusBadRequest)
+				return
+			}
+			link, err := store.SubscriptionURL(r.Context(), request.AccountID)
+			if err != nil {
+				http.Error(w, "subscription identity or published origin unavailable", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				URL string `json:"subscriptionUrl"`
+			}{link})
 		case "/v1/admin/routes":
 			var request RouteChange
 			if decode(http.MaxBytesReader(w, r.Body, 8192), &request) != nil {

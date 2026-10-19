@@ -25,24 +25,25 @@ import (
 )
 
 type configuration struct {
-	Mode                  string                  `json:"mode"`
-	Installation          string                  `json:"installation,omitempty"`
-	Service               string                  `json:"service,omitempty"`
-	Directory             string                  `json:"directory"`
-	Certificate           string                  `json:"certificate"`
-	Key                   string                  `json:"key"`
-	CA                    string                  `json:"ca"`
-	Listen                string                  `json:"listen,omitempty"`
-	SubscriptionsListen   string                  `json:"subscriptionsListen,omitempty"`
-	Controller            string                  `json:"controller,omitempty"`
-	Administrators        []string                `json:"administrators,omitempty"`
-	BusinessKey           string                  `json:"businessKey,omitempty"`
-	ManagementUI          bool                    `json:"managementUI,omitempty"`
-	Xray                  control.SystemdDriver   `json:"xray,omitempty"`
-	Entry                 *control.EntryContainer `json:"-"`
-	EntryScope            string                  `json:"entryScope,omitempty"`
-	EntryProvision        bool                    `json:"entryProvision,omitempty"`
-	LegacyEntryCheckpoint string                  `json:"legacyEntryCheckpoint,omitempty"`
+	Mode                     string                  `json:"mode"`
+	Installation             string                  `json:"installation,omitempty"`
+	Service                  string                  `json:"service,omitempty"`
+	Directory                string                  `json:"directory"`
+	Certificate              string                  `json:"certificate"`
+	Key                      string                  `json:"key"`
+	CA                       string                  `json:"ca"`
+	Listen                   string                  `json:"listen,omitempty"`
+	SubscriptionsListen      string                  `json:"subscriptionsListen,omitempty"`
+	PublicSubscriptionOrigin string                  `json:"publicSubscriptionOrigin,omitempty"`
+	Controller               string                  `json:"controller,omitempty"`
+	Administrators           []string                `json:"administrators,omitempty"`
+	BusinessKey              string                  `json:"businessKey,omitempty"`
+	ManagementUI             bool                    `json:"managementUI,omitempty"`
+	Xray                     control.SystemdDriver   `json:"xray,omitempty"`
+	Entry                    *control.EntryContainer `json:"-"`
+	EntryScope               string                  `json:"entryScope,omitempty"`
+	EntryProvision           bool                    `json:"entryProvision,omitempty"`
+	LegacyEntryCheckpoint    string                  `json:"legacyEntryCheckpoint,omitempty"`
 }
 
 func main() {
@@ -209,6 +210,9 @@ func readConfigurationMode(path string, maintenance bool) (configuration, error)
 	if cfg.SubscriptionsListen != "" && (cfg.Mode != "controller" || cfg.BusinessKey == "" || cfg.SubscriptionsListen == cfg.Listen) {
 		return cfg, errors.New("only a controller with business storage may publish a separate private subscription origin")
 	}
+	if cfg.Mode != "controller" && cfg.PublicSubscriptionOrigin != "" {
+		return cfg, errors.New("published subscription origin belongs to the controller only")
+	}
 	return cfg, nil
 }
 
@@ -333,6 +337,9 @@ func run(ctx context.Context, path string) error {
 		return err
 	}
 	if err := store.LoadBusiness(cfg.BusinessKey); err != nil {
+		return err
+	}
+	if err := store.ConfigureSubscriptionOrigin(cfg.PublicSubscriptionOrigin); err != nil {
 		return err
 	}
 	if cfg.ManagementUI {

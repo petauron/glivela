@@ -33,11 +33,12 @@ type Node struct {
 // is private (0600) and must never be logged or published. Imported business
 // data is separately authenticated/encrypted; node desired plans are projections.
 type Store struct {
-	mu           sync.Mutex
-	path         string
-	nodes        map[string]Node
-	business     *businessState
-	managementUI http.Handler
+	mu                 sync.Mutex
+	path               string
+	nodes              map[string]Node
+	business           *businessState
+	managementUI       http.Handler
+	subscriptionOrigin string
 }
 
 func OpenStore(path string) (*Store, error) {

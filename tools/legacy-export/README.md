@@ -85,7 +85,8 @@ stopped and the **persistent installed bootstrap source**, not its `/run` copy:
 glivela activate-controller \
   -config /private/installed-controller.json \
   -storage-key /private/glivela-storage/key \
-  -subscriptions-listen 127.0.0.1:7444
+  -subscriptions-listen 127.0.0.1:7444 \
+  -public-subscription-origin https://subscriptions.example.com
 glivela enroll-nodes \
   -config /private/installed-controller.json \
   -inventory /private/enrollment.json

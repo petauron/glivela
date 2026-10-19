@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/petauron/glivela/control"
@@ -99,6 +100,14 @@ func provisionEntryCommand(parent context.Context, args []string, output io.Writ
 // Application-owned initialization is explicit and atomic. The host's normal
 // upgrade never rewrites these post-install settings.
 func savePrivateConfiguration(path string, original []byte, cfg configuration) error {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return errors.New("private regular application bootstrap required")
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("application bootstrap ownership unavailable")
+	}
 	replacement, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -113,6 +122,19 @@ func savePrivateConfiguration(path string, original []byte, cfg configuration) e
 	}
 	defer file.Close()
 	defer os.Remove(file.Name())
+	created, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	createdOwner, ok := created.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("replacement bootstrap ownership unavailable")
+	}
+	if createdOwner.Uid != owner.Uid || createdOwner.Gid != owner.Gid {
+		if err := file.Chown(int(owner.Uid), int(owner.Gid)); err != nil {
+			return err
+		}
+	}
 	if _, err := file.Write(replacement); err != nil {
 		return err
 	}
@@ -121,6 +143,14 @@ func savePrivateConfiguration(path string, original []byte, cfg configuration) e
 	}
 	if err := file.Close(); err != nil {
 		return err
+	}
+	latest, err := os.Lstat(path)
+	if err != nil || !os.SameFile(info, latest) {
+		return errors.New("application bootstrap replaced during maintenance; existing state retained")
+	}
+	current, err = os.ReadFile(path)
+	if err != nil || !bytes.Equal(current, original) {
+		return errors.New("application bootstrap changed during maintenance; existing state retained")
 	}
 	if err := os.Rename(file.Name(), path); err != nil {
 		return err

@@ -20,7 +20,8 @@ func activateControllerCommand(args []string, output io.Writer) error {
 	path := flags.String("config", "", "private installed controller bootstrap")
 	key := flags.String("storage-key", "", "independent private adopted storage key file")
 	subscriptions := flags.String("subscriptions-listen", "", "private subscription origin address")
-	if flags.Parse(args) != nil || flags.NArg() != 0 || *path == "" || *key == "" || *subscriptions == "" {
+	publicOrigin := flags.String("public-subscription-origin", "", "existing published HTTPS subscription origin")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || *path == "" || *key == "" || *subscriptions == "" || *publicOrigin == "" {
 		return errors.New("controller configuration, storage key file and private subscription origin required")
 	}
 	cfg, err := readMaintenanceConfiguration(*path)
@@ -46,6 +47,9 @@ func activateControllerCommand(args []string, output io.Writer) error {
 	if store.Business().State != "owned-unverified" {
 		return errors.New("control: complete offline business adoption before activation")
 	}
+	if err := store.ConfigureSubscriptionOrigin(*publicOrigin); err != nil {
+		return err
+	}
 	address, err := privateControllerAddress(*subscriptions)
 	if err != nil {
 		return err
@@ -54,6 +58,7 @@ func activateControllerCommand(args []string, output io.Writer) error {
 		return err
 	}
 	cfg.BusinessKey, cfg.SubscriptionsListen = *key, *subscriptions
+	cfg.PublicSubscriptionOrigin = *publicOrigin
 	if err := savePrivateConfiguration(*path, original, cfg); err != nil {
 		return err
 	}
