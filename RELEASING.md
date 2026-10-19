@@ -21,6 +21,18 @@ paths while the controller is stopped. Generic upgrades preserve these files,
 not regenerate credentials or initialize application data. The control listener
 remains private mTLS, and subscription traffic uses its separate private origin.
 
+The controller runs as `65532:65532` on an ordinary bridge. Port publication is
+restricted by the existing installer to the approved private host address; the
+controller binds a concrete private container address, not every interface.
+The state volume must remain private (`0700`) and writable by that UID. Bootstrap
+and TLS files are private (`0600`) and readable by that UID; their parent paths
+must be traversable. The image's initial ownership is not proof of an existing
+volume's ownership. Inspect the actual retained volumes and imported files
+before starting; do not recursively chown an unknown volume to force startup.
+Wrong ownership must remain a failed startup/installation, not be acknowledged
+as successful migration. Initial staged installation checks the control port
+only; a subscription origin is not expected until owned data is activated.
+
 If image publication succeeds but a later draft-release step fails, do not
 overwrite the existing version image. First independently inspect that image's
 immutable digest, source provenance and both platforms against the exact checked

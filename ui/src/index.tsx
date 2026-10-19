@@ -2,10 +2,7 @@ import { createRoot } from "react-dom/client";
 import type { Application } from "@/types";
 import type { AppWorkspaceProps } from "@/app-workspaces/types";
 import type { AppManagerProps } from "@/app-workspaces/types";
-import { IPQualityProvider } from "@/views/IPQuality";
-import { LandingProvider } from "@/views/LandingControls";
-import { GlivelaWorkspace } from "./glivela/Workspace";
-import { GlivelaManagerSheet } from "./glivela/Manager";
+import { GlivelaLauncher } from "./glivela/Launcher";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 import "./style.css";
 import { GlivelaControl } from "./glivela/Control";
@@ -24,33 +21,13 @@ type GlivelaHostProps = AppWorkspaceProps & {
   onManagerClose?: () => void;
 };
 
-// The app bundle owns the React tree. Center passes platform data and actions,
-// but does not import or compile Glivela's page components.
+// The host mounts only an installation launcher. Business UI/API are served
+// directly by Glivela and never use the host session, SSE or task broker.
 export function mount(element: HTMLElement, initial: GlivelaHostProps) {
   const root = createRoot(element);
   let props = initial;
-  let localManager: Application | null = null;
   const render = () => root.render(
-    <AppErrorBoundary language={props.language}><IPQualityProvider enabled agents={props.data.agents}>
-      <LandingProvider enabled agents={props.data.agents}>
-        <GlivelaWorkspace {...props} onClients={(application) => {
-          localManager = application;
-          render();
-        }} />
-        <GlivelaManagerSheet
-          application={props.managerApplication ?? localManager}
-          data={props.data}
-          language={props.language}
-          mutate={props.mutate}
-          onClose={() => {
-            localManager = null;
-            props = { ...props, managerApplication: null };
-            props.onManagerClose?.();
-            render();
-          }}
-        />
-      </LandingProvider>
-    </IPQualityProvider></AppErrorBoundary>,
+    <AppErrorBoundary language={props.language}><GlivelaLauncher data={props.data} language={props.language} applications={props.group.controller ? [props.group.controller.application, ...props.group.instances.filter(instance => instance.application.id !== props.group.controller?.application.id).map(instance => instance.application)] : props.group.instances.map(instance => instance.application)} onManage={props.onManage} onUpgrade={props.onUpgrade} /></AppErrorBoundary>,
   );
   render();
   return {
@@ -68,9 +45,7 @@ export function mountManager(element: HTMLElement, initial: AppManagerProps) {
   const root = createRoot(element);
   let props = initial;
   const render = () => root.render(
-    <AppErrorBoundary language={props.language}><LandingProvider enabled agents={props.data.agents}>
-      <GlivelaManagerSheet {...props} />
-    </LandingProvider></AppErrorBoundary>,
+    <AppErrorBoundary language={props.language}>{props.application ? <GlivelaLauncher data={props.data} language={props.language} applications={props.data.applications.filter(application => application.appKey === props.application?.appKey)} /> : null}</AppErrorBoundary>,
   );
   render();
   return {

@@ -46,7 +46,11 @@ func activateControllerCommand(args []string, output io.Writer) error {
 	if store.Business().State != "owned-unverified" {
 		return errors.New("control: complete offline business adoption before activation")
 	}
-	if _, err := control.NewSubscriptionServer(*subscriptions, store); err != nil {
+	address, err := privateControllerAddress(*subscriptions)
+	if err != nil {
+		return err
+	}
+	if _, err := control.NewSubscriptionServer(address, store); err != nil {
 		return err
 	}
 	cfg.BusinessKey, cfg.SubscriptionsListen = *key, *subscriptions

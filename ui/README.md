@@ -28,24 +28,18 @@ cannot access the page. Configuration-save feedback is distinct from applied
 runtime and current route verification. The public subscription origin is
 separate and cannot serve management pages.
 
-The old host-mounted surface below has not yet been removed from this draft;
-its transition and removal of the host business writer are required before #54
-is complete. Do not treat a built standalone page as completed production
-migration.
-
 `src/index.tsx` exports `apiVersion = 1`, `mount` and `mountManager`. Each mount
-returns `update` and `unmount`. Glivela owns the React tree and its cleanup.
-The host passes data and management callbacks described by
-`src/app-workspaces/types.ts` and `src/host-contract.ts`. These are local wire
-contracts, not imports of the host implementation. Changes to that interface
-require coordinated contract review; a breaking change requires a new API
-version.
+returns `update` and `unmount`, but mounts only an installation launcher. It
+consumes generic application/service metadata and installation/update callbacks,
+not account, route, diagnostic or traffic APIs or host business SSE. It opens the
+private controller in a separate, explicitly labelled window; no token, host
+cookie or credential is added to the URL. The existing host theme and application
+window remain integration points. The controller itself serves the business UI
+directly and authenticates it with its own administrator mTLS.
 
-This step separates **build ownership**, not backend ownership. Center still
-provides authenticated same-origin APIs, SSE, host data and platform actions.
-`src/api.ts` includes only operations used by this UI, preserving CSRF and
-same-origin credential handling. Center must authorize every API request.
-Host theme tokens and the application window remain runtime integration points.
+Unused legacy component/client sources and the superseded Center/Agent business
+writer still require removal before #54 is complete. Do not treat a launcher or
+standalone-page build as installed handover or production acceptance.
 
 The tests cover page behavior, stream recovery, API transport and real page
 mount/update/unmount. UI fixes and their regression tests are maintained here.
