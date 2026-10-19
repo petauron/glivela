@@ -211,11 +211,10 @@ func RestoreControllerBackup(source, keyPath, destination string) error {
 		nodes[i].Receipt = nil
 		nodes[i].ReportedAt = time.Time{}
 		nodes[i].EntryHealthBarrierAt = time.Now().UTC()
-		for id, check := range nodes[i].Checks {
-			check.Result = nil
-			check.IssuedAt, check.ReceivedAt = time.Time{}, time.Time{}
-			nodes[i].Checks[id] = check
-		}
+		// Checks are issued runtime challenges, not configuration or history.
+		// An unissued zero timestamp is invalid persisted state; discard the
+		// cached challenges so reconciliation issues fresh ones after recovery.
+		nodes[i].Checks = nil
 	}
 	value.Files["nodes.json"], err = json.Marshal(nodes)
 	if err != nil {
