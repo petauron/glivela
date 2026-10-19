@@ -77,6 +77,33 @@ partial files/intent are retained for explicit recovery inspection; never delete
 them blindly or automatically downgrade data.
 
 Controller bootstrap still references only its independent `businessKey` file.
+When a transport-only controller was staged before the maintenance window,
+enable the adopted data using Glivela's own offline command, with the controller
+stopped and the **persistent installed bootstrap source**, not its `/run` copy:
+
+```sh
+glivela activate-controller \
+  -config /private/installed-controller.json \
+  -storage-key /private/glivela-storage/key \
+  -subscriptions-listen 127.0.0.1:7444
+glivela enroll-nodes \
+  -config /private/installed-controller.json \
+  -inventory /private/enrollment.json
+```
+
+The first command checks the existing owned business/key and enables only a
+separate private subscription origin. The second binds each preserved `id` and
+typed `desired` plan to one supplied `certificate` PEM; optional `routeEntries`
+bind landing source IDs to the corresponding entry certificate fingerprints.
+Certificates must validate for client authentication against this controller's
+CA and must not be management identities. Neither command generates replacement
+protocol keys, accepts historical health, starts services or reports migration
+complete. If a batch is interrupted, completed enrollments remain private and
+can be retried; business data is not reinitialized. Installed maintenance uses
+the declared persistent credential files because systemd's runtime copies no
+longer exist after stopping the unit. Start the installed controller/node
+services through normal maintenance after these commands.
+
 It loads `business.json` once ownership exists and reports `owned-unverified`.
 This is data ownership only, **not complete runtime migration**: imported health
 is historical, subscription publication still needs actual runtime/route

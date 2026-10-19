@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +26,8 @@ import (
 
 type configuration struct {
 	Mode                  string                  `json:"mode"`
+	Installation          string                  `json:"installation,omitempty"`
+	Service               string                  `json:"service,omitempty"`
 	Directory             string                  `json:"directory"`
 	Certificate           string                  `json:"certificate"`
 	Key                   string                  `json:"key"`
@@ -43,6 +46,13 @@ type configuration struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "activate-controller" {
+		if err := activateControllerCommand(os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela controller activation not confirmed; existing data retained")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "enroll-nodes" {
 		if err := enrollNodesCommand(os.Args[2:], os.Stdout); err != nil {
 			log.Print("Glivela enrollment not confirmed; retained state requires inspection")
@@ -105,7 +115,18 @@ func main() {
 }
 
 func readConfiguration(path string) (configuration, error) {
+	return readConfigurationMode(path, false)
+}
+
+func readMaintenanceConfiguration(path string) (configuration, error) {
+	return readConfigurationMode(path, true)
+}
+
+func readConfigurationMode(path string, maintenance bool) (configuration, error) {
 	var cfg configuration
+	if maintenance && (!filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/run" || strings.HasPrefix(path, "/run/") || path == "/var/run" || strings.HasPrefix(path, "/var/run/")) {
+		return cfg, errors.New("offline maintenance requires the persistent bootstrap, not a runtime copy")
+	}
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 8<<20 {
 		return cfg, errors.New("invalid bootstrap file")
@@ -122,6 +143,26 @@ func readConfiguration(path string) (configuration, error) {
 	var extra any
 	if decoder.Decode(&extra) != io.EOF || cfg.Mode != "controller" && cfg.Mode != "node" && cfg.Mode != "verifier" {
 		return cfg, errors.New("invalid bootstrap mode")
+	}
+	if (cfg.Installation == "") != (cfg.Service == "") || cfg.Mode == "verifier" && cfg.Installation != "" {
+		return cfg, errors.New("complete local installation identity required")
+	}
+	if maintenance && cfg.Installation != "" {
+		source, credentials, prefix, err := control.InstalledMaintenanceFiles(cfg.Installation, cfg.Service)
+		if err != nil || source != path {
+			return cfg, errors.New("persistent bootstrap ownership not confirmed")
+		}
+		for _, value := range []*string{&cfg.Certificate, &cfg.Key, &cfg.CA, &cfg.EntryScope} {
+			if !strings.HasPrefix(*value, prefix) {
+				continue
+			}
+			name := strings.TrimPrefix(*value, prefix)
+			path, found := credentials[name]
+			if !found {
+				return cfg, errors.New("persistent credential ownership not confirmed")
+			}
+			*value = path
+		}
 	}
 	if cfg.EntryScope != "" {
 		if cfg.Mode != "node" || !filepath.IsAbs(cfg.EntryScope) || filepath.Clean(cfg.EntryScope) != cfg.EntryScope {

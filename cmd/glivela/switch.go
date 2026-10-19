@@ -18,7 +18,7 @@ func switchLandingCommand(ctx context.Context, args []string, output io.Writer) 
 	if flags.Parse(args) != nil || flags.NArg() != 0 || *node == "" || *checkpoint == "" {
 		return errors.New("invalid first cutover options")
 	}
-	cfg, err := readConfiguration(*path)
+	cfg, err := readMaintenanceConfiguration(*path)
 	if err != nil {
 		return err
 	}

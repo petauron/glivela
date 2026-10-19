@@ -26,7 +26,7 @@ func enrollNodesCommand(args []string, output io.Writer) error {
 	if flags.Parse(args) != nil || flags.NArg() != 0 || *configPath == "" || *inventoryPath == "" {
 		return errors.New("controller bootstrap and private enrollment inventory required")
 	}
-	cfg, err := readConfiguration(*configPath)
+	cfg, err := readMaintenanceConfiguration(*configPath)
 	if err != nil || cfg.Mode != "controller" {
 		return errors.New("controller configuration required")
 	}

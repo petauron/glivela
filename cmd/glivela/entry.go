@@ -46,7 +46,7 @@ func provisionEntryCommand(parent context.Context, args []string, output io.Writ
 	if flags.Parse(args) != nil || flags.NArg() != 0 || *bootstrap == "" || *desiredPath == "" {
 		return errors.New("entry bootstrap and desired file required")
 	}
-	cfg, err := readConfiguration(*bootstrap)
+	cfg, err := readMaintenanceConfiguration(*bootstrap)
 	if err != nil || cfg.Mode != "node" || cfg.Entry == nil || cfg.Entry.ContainerID != "" || cfg.Entry.ImageID != "" {
 		return errors.New("entry provisioning requires an uninitialized local entry bootstrap")
 	}
@@ -88,15 +88,26 @@ func provisionEntryCommand(parent context.Context, args []string, output io.Writ
 	if *checkpoint != "" {
 		cfg.LegacyEntryCheckpoint = *checkpoint
 	}
+	if err := savePrivateConfiguration(*bootstrap, original, cfg); err != nil {
+		return err
+	}
+	return json.NewEncoder(output).Encode(struct {
+		Status string `json:"status"`
+	}{Status: "entry-provisioned-awaiting-route-verification"})
+}
+
+// Application-owned initialization is explicit and atomic. The host's normal
+// upgrade never rewrites these post-install settings.
+func savePrivateConfiguration(path string, original []byte, cfg configuration) error {
 	replacement, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	current, err := os.ReadFile(*bootstrap)
+	current, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(current, original) {
-		return errors.New("node bootstrap changed during provisioning; resource record retained")
+		return errors.New("application bootstrap changed during maintenance; existing state retained")
 	}
-	file, err := os.CreateTemp(filepath.Dir(*bootstrap), ".glivela-bootstrap-")
+	file, err := os.CreateTemp(filepath.Dir(path), ".glivela-bootstrap-")
 	if err != nil {
 		return err
 	}
@@ -111,10 +122,10 @@ func provisionEntryCommand(parent context.Context, args []string, output io.Writ
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(file.Name(), *bootstrap); err != nil {
+	if err := os.Rename(file.Name(), path); err != nil {
 		return err
 	}
-	directory, err := os.Open(filepath.Dir(*bootstrap))
+	directory, err := os.Open(filepath.Dir(path))
 	if err != nil {
 		return err
 	}
@@ -122,9 +133,7 @@ func provisionEntryCommand(parent context.Context, args []string, output io.Writ
 	if err := directory.Sync(); err != nil {
 		return err
 	}
-	return json.NewEncoder(output).Encode(struct {
-		Status string `json:"status"`
-	}{Status: "entry-provisioned-awaiting-route-verification"})
+	return nil
 }
 
 func backupEntryCommand(ctx context.Context, args []string, output io.Writer) error {
