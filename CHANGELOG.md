@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.25](https://github.com/petauron/glivela/compare/v0.1.0-alpha.24...v0.1.0-alpha.25) (2026-10-19)
+
+
+### Features
+
+* **control:** replace legacy proxies with application-owned native Xray ([b2a4c0d](https://github.com/petauron/glivela/commit/b2a4c0d3a29ecd3c1ea98f929a56151d47034b52))
+* **subscription:** unify inventories and add account previews ([011a0ef](https://github.com/petauron/glivela/commit/011a0efc977748d97afd195e1663da8a6775fae4))
+
+
+### Bug Fixes
+
+* **accounts:** preserve plan drafts when saving fails ([19e5750](https://github.com/petauron/glivela/commit/19e57507c4801f4df7b6c3543fc6a396bfadd2e4))
+
 ## [0.1.0-alpha.24](https://github.com/petauron/glivela/compare/v0.1.0-alpha.23...v0.1.0-alpha.24) (2026-10-18)
 
 
