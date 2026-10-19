@@ -66,3 +66,36 @@ func TestBootstrapFailsClosed(t *testing.T) {
 		t.Fatal("public bootstrap accepted")
 	}
 }
+
+func TestSubscriptionOriginRequiresSeparateControllerStorage(t *testing.T) {
+	for _, cfg := range []configuration{
+		{Mode: "node", SubscriptionsListen: "127.0.0.1:8080"},
+		{Mode: "verifier", SubscriptionsListen: "127.0.0.1:8080"},
+		{Mode: "controller", SubscriptionsListen: "127.0.0.1:8080"},
+		{Mode: "controller", BusinessKey: "/private/example/key", Listen: "127.0.0.1:8080", SubscriptionsListen: "127.0.0.1:8080"},
+	} {
+		path := filepath.Join(t.TempDir(), "bootstrap.json")
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readConfiguration(path); err == nil {
+			t.Fatal("subscription origin accepted without separate controller storage", cfg.Mode)
+		}
+	}
+	cfg := configuration{Mode: "controller", BusinessKey: "/private/example/key", Listen: "127.0.0.1:8443", SubscriptionsListen: "127.0.0.1:8080"}
+	path := filepath.Join(t.TempDir(), "bootstrap.json")
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readConfiguration(path); err != nil {
+		t.Fatal("valid private origin configuration refused", err)
+	}
+}

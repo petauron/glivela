@@ -56,6 +56,27 @@ reimport cannot overwrite owned accounts or ledger values. This does not yet
 complete the runtime/business UI migration or authorize restoring an old proxy
 writer; runtime acceptance and removal of replaced paths remain required.
 
+The controller may configure a separate `subscriptionsListen` private HTTP
+origin behind the installer's existing generic HTTPS ingress. It never shares
+the node/admin mTLS listener or accepts forwarded administrative identities.
+Wildcard/public origins, node/verifier mode and a missing controller business
+key are rejected. Failure of either listener stops the pair. The only public
+application route is `GET/HEAD /sub/{original-token}`; base64 links and
+`?target=clash`/`?format=mihomo` preserve the original credential identities and
+shared account quota header. Responses and failures are non-cacheable and do
+not log tokens or internal configuration.
+
+Staging alone cannot publish. Owned subscriptions require enabled, unexpired,
+unexhausted accounts, active credentials, exact applied entry configuration and
+fresh runtime evidence. Routed credentials additionally require the matching
+fresh peer lease and an independent, current route check bound to this owned
+snapshot and configured target/exit. Unrelated failed entries do not hide a
+verified route. Hidden-native policy never falls back to publishing the direct
+credential when the double hop is unavailable. Downloads do not rewrite quota,
+reset cycles, history or ownership. This is the Glivela-owned download path,
+not complete live business mutation/UI, external DNS/ingress acceptance,
+catalog publication, traffic collection or final installed handover evidence.
+
 On the same private mTLS listener, a separately authorized management identity
 can POST `/v1/admin/landings` with `id`, `certificateId`, `plan` and
 `routeEntries` (entry ID to `{certificateId,address}`). A configured entry

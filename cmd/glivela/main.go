@@ -24,16 +24,17 @@ import (
 )
 
 type configuration struct {
-	Mode           string                `json:"mode"`
-	Directory      string                `json:"directory"`
-	Certificate    string                `json:"certificate"`
-	Key            string                `json:"key"`
-	CA             string                `json:"ca"`
-	Listen         string                `json:"listen,omitempty"`
-	Controller     string                `json:"controller,omitempty"`
-	Administrators []string              `json:"administrators,omitempty"`
-	BusinessKey    string                `json:"businessKey,omitempty"`
-	Xray           control.SystemdDriver `json:"xray,omitempty"`
+	Mode                string                `json:"mode"`
+	Directory           string                `json:"directory"`
+	Certificate         string                `json:"certificate"`
+	Key                 string                `json:"key"`
+	CA                  string                `json:"ca"`
+	Listen              string                `json:"listen,omitempty"`
+	SubscriptionsListen string                `json:"subscriptionsListen,omitempty"`
+	Controller          string                `json:"controller,omitempty"`
+	Administrators      []string              `json:"administrators,omitempty"`
+	BusinessKey         string                `json:"businessKey,omitempty"`
+	Xray                control.SystemdDriver `json:"xray,omitempty"`
 }
 
 func main() {
@@ -89,6 +90,9 @@ func readConfiguration(path string) (configuration, error) {
 	}
 	if cfg.Mode != "controller" && cfg.BusinessKey != "" {
 		return cfg, errors.New("only controller may load business data")
+	}
+	if cfg.SubscriptionsListen != "" && (cfg.Mode != "controller" || cfg.BusinessKey == "" || cfg.SubscriptionsListen == cfg.Listen) {
+		return cfg, errors.New("only a controller with business storage may publish a separate private subscription origin")
 	}
 	return cfg, nil
 }
@@ -182,24 +186,44 @@ func run(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	finished := make(chan error, 1)
-	go func() { finished <- server.ListenAndServeTLS("", "") }()
-	select {
-	case err = <-finished:
-		return err
-	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		err = server.Shutdown(shutdown)
+	var subscriptions *http.Server
+	if cfg.SubscriptionsListen != "" {
+		subscriptions, err = control.NewSubscriptionServer(cfg.SubscriptionsListen, store)
 		if err != nil {
-			_ = server.Close()
 			return err
 		}
-		if serveErr := <-finished; !errors.Is(serveErr, http.ErrServerClosed) {
-			return serveErr
-		}
-		return ctx.Err()
 	}
+	return serveController(ctx, server, subscriptions)
+}
+
+func serveController(ctx context.Context, server, subscriptions *http.Server) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	servers := []*http.Server{server}
+	if subscriptions != nil {
+		servers = append(servers, subscriptions)
+	}
+	finished := make(chan error, len(servers))
+	go func() { finished <- server.ListenAndServeTLS("", "") }()
+	if subscriptions != nil {
+		go func() { finished <- subscriptions.ListenAndServe() }()
+	}
+	var result error
+	select {
+	case result = <-finished:
+	case <-ctx.Done():
+		result = ctx.Err()
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, s := range servers {
+		if err := s.Shutdown(shutdown); err != nil {
+			_ = s.Close()
+			result = errors.Join(result, err)
+		}
+	}
+	return result
 }
 
 func resolveNodeDriver(driver control.SystemdDriver) (control.SystemdDriver, error) {
