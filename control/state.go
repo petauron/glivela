@@ -83,6 +83,9 @@ func OpenStore(path string) (*Store, error) {
 		if node.Receipt != nil && validateEntryHealth(node.Desired, node.Receipt.EntryHealth) != nil {
 			return nil, errors.New("control: invalid stored entry observation")
 		}
+		if node.Receipt != nil && validateEntryTraffic(node.Desired, node.Receipt.Traffic) != nil {
+			return nil, errors.New("control: invalid stored traffic observation")
+		}
 		for entry, check := range node.Checks {
 			if entry != check.Request.EntryID || !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
 				return nil, errors.New("control: invalid stored route check")

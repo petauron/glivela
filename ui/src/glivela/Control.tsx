@@ -38,14 +38,15 @@ export function GlivelaControl() {
     return () => controller.abort();
   }, []);
   const change = async (operation: string, body: unknown) => {
-    if (pending.current) return;
+    if (pending.current) return false;
     pending.current = true; setBusy(true); setError(""); setNotice(""); setToken("");
     try {
       const result = await manage<{ state?: string; subscriptionToken?: string }>(operation, body);
       if (result.subscriptionToken) setToken(result.subscriptionToken);
       setNotice(operation === "business" ? "状态已刷新" : "配置已保存；节点应用和真实线路验证仍须分别通过。");
       await refresh();
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "操作未确认"); }
+      return true;
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "操作未确认"); return false; }
     finally { pending.current = false; setBusy(false); }
   };
   const names = new Map(inventory?.nodes.map(node => [node.id, node.name]));
@@ -70,23 +71,38 @@ export function GlivelaControl() {
   </section>;
 }
 
-function PlanEditor({ initial, disabled, onSave }: { initial: Plan; disabled: boolean; onSave: (plan: Plan) => Promise<void> }) {
+function PlanEditor({ initial, disabled, onSave }: { initial: Plan; disabled: boolean; onSave: (plan: Plan) => Promise<boolean> }) {
   const [plan, setPlan] = useState(initial);
   return <form onSubmit={event => { event.preventDefault(); void onSave(plan); }}><FieldGroup><Field><FieldLabel>总额度（字节，0 不限）<Input required inputMode="numeric" pattern="[0-9]+" disabled={disabled} value={plan.totalBytes} onChange={event => setPlan({ ...plan, totalBytes: event.target.value })} /></FieldLabel></Field><Field><FieldLabel>到期时间（Unix 毫秒，0 不限）<Input required inputMode="numeric" pattern="[0-9]+" disabled={disabled} value={plan.expiryTime} onChange={event => setPlan({ ...plan, expiryTime: event.target.value })} /></FieldLabel></Field><Field><FieldLabel>周期天数（0 不重置）<Input type="number" min={0} max={3650} required disabled={disabled} value={plan.resetDays} onChange={event => setPlan({ ...plan, resetDays: Number(event.target.value) })} /></FieldLabel></Field><Field><FieldLabel><input type="checkbox" disabled={disabled} checked={plan.enabled} onChange={event => setPlan({ ...plan, enabled: event.target.checked })} />启用账户</FieldLabel></Field><Button type="submit" disabled={disabled}>保存账户配置</Button></FieldGroup></form>;
 }
 
-function CreateAccount({ inventory, disabled, save }: { inventory: Inventory; disabled: boolean; save: (operation: string, body: unknown) => Promise<void> }) {
+function CreateAccount({ inventory, disabled, save }: { inventory: Inventory; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean> }) {
   const id = useRef(crypto.randomUUID());
   const [name, setName] = useState("");
   const [entries, setEntries] = useState<string[]>([]);
+  useEffect(() => {
+    if (inventory.accounts.some(item => item.account.id === id.current)) {
+      id.current = crypto.randomUUID();
+      setName("");
+      setEntries([]);
+    }
+  }, [inventory.accounts]);
   return <details className="rounded-lg border p-3"><summary className="cursor-pointer">新增账户</summary><form className="mt-3" onSubmit={event => { event.preventDefault(); if (entries.length && name.trim()) void save("accounts", { id: id.current, name: name.trim(), entryIds: entries, plan: unlimited }); }}><FieldGroup><Field><FieldLabel>名称<Input required value={name} disabled={disabled} onChange={event => setName(event.target.value)} /></FieldLabel></Field>{inventory.endpoints.filter(e => !e.retired).map(endpoint => <Field key={endpoint.id}><FieldLabel><input type="checkbox" disabled={disabled} checked={entries.includes(endpoint.entryId)} onChange={event => setEntries(event.target.checked ? [...entries, endpoint.entryId] : entries.filter(id => id !== endpoint.entryId))} />{endpoint.name}</FieldLabel></Field>)}<Button type="submit" disabled={disabled || entries.length === 0}>创建（默认不限额，随后编辑）</Button></FieldGroup></form></details>;
 }
 
-function CreateRoute({ inventory, disabled, save }: { inventory: Inventory; disabled: boolean; save: (operation: string, body: unknown) => Promise<void> }) {
+function CreateRoute({ inventory, disabled, save }: { inventory: Inventory; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean> }) {
   const id = useRef(crypto.randomUUID());
   const [accountID, setAccountID] = useState("");
   const [entryID, setEntryID] = useState("");
   const [egressID, setEgressID] = useState("");
+  useEffect(() => {
+    if (inventory.routes.some(item => item.id === id.current)) {
+      id.current = crypto.randomUUID();
+      setAccountID("");
+      setEntryID("");
+      setEgressID("");
+    }
+  }, [inventory.routes]);
   const account = inventory.accounts.find(a => a.account.id === accountID);
   const entry = inventory.runtimes.find(node => node.role === "entry" && node.id === entryID);
   return <form onSubmit={event => { event.preventDefault(); if (account && entry && entry.peers.includes(egressID)) void save("routes", { id: id.current, accountId: accountID, entryId: entryID, egressId: egressID, enabled: true, hideNative: false, expectedRevision: account.account.desiredRevision }); }}><FieldGroup><Field><FieldLabel>账户<select required disabled={disabled} value={accountID} onChange={event => setAccountID(event.target.value)}><option value="">请选择</option>{inventory.accounts.map(a => <option key={a.account.id} value={a.account.id}>{a.account.displayName}</option>)}</select></FieldLabel></Field><Field><FieldLabel>入口<select required disabled={disabled} value={entryID} onChange={event => { setEntryID(event.target.value); setEgressID(""); }}><option value="">请选择</option>{inventory.runtimes.filter(n => n.role === "entry").map(n => <option key={n.id} value={n.id}>{inventory.endpoints.find(e => e.entryId === n.id)?.name ?? n.id}</option>)}</select></FieldLabel></Field><Field><FieldLabel>已授权落地<select required disabled={disabled} value={egressID} onChange={event => setEgressID(event.target.value)}><option value="">请选择</option>{entry?.peers.map(id => <option key={id} value={id}>{inventory.nodes.find(n => n.id === id)?.name ?? id}</option>)}</select></FieldLabel></Field><Button type="submit" disabled={disabled || !account || !entry || !egressID}>新增授权</Button></FieldGroup></form>;
