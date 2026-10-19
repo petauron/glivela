@@ -173,6 +173,23 @@ are tested separately. The configuration driver below now uses these primitives;
 the installed boot fence and complete entry acceptance still do not authorize
 deployment.
 
+Native entry Freedom outbounds use the pinned core's own `ForceIP` strategy
+(`ForceIPv4`/`ForceIPv6` for explicit family policy), not a socket-only strategy
+whose earlier preflight can still use host DNS. Business DNS is tagged and
+scoped to 1.1.1.1/1.0.0.1 port 53 through a separate closed resolver outbound;
+the host/control-plane resolver is not changed. Existing composite selection's
+local DoH policy remains separate. Final destination rules block reserved/
+private IPs and the disallowed literal/resolved family without an allow bypass.
+These features exist in 26.7.28; a later-version comment is not capability proof.
+
+The isolated native-core fixture deliberately gives system hosts a private
+answer while the business resolver returns the public test target. It exercises
+actual resolver queries, public-to-private rebinding and public recovery in the
+same worker, plus domain/literal family controls. This is native-core policy
+acceptance, not installed Docker/UID/firewall/boot or application UDP proof.
+Inspect the exact-head CI result rather than treating unit JSON assertions or
+macOS cross-compilation as execution of these Linux-only cases.
+
 `control.EntryContainer` adds read-only ownership checks for the new owned
 entry profile: immutable full container/image IDs, the pinned official image,
 exact command/entrypoint/environment, a single read-only private config mount,

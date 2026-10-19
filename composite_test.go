@@ -99,10 +99,10 @@ func TestCompositeArtifactIsDeterministicAndFailClosed(t *testing.T) {
 	if loops != 0 || socks != 2 {
 		t.Fatal("composite must select one outbound without redispatch or duplicate user accounting")
 	}
-	if len(config.Routing.Rules) != 7 {
+	if len(config.Routing.Rules) != 9 {
 		t.Fatal("missing composite rules")
 	}
-	rules := config.Routing.Rules[1:]
+	rules := config.Routing.Rules[3:]
 	for _, rule := range rules[:5] {
 		if rule.Type != "field" || !slices.Equal(rule.InboundTag, []string{"entry-in"}) || !slices.Equal(rule.User, []string{"routed"}) {
 			t.Fatal("route authority boundary absent")
@@ -200,7 +200,7 @@ func TestCompositePreservesNativeAndFixedRoutes(t *testing.T) {
 	}
 }
 
-func TestWithoutCompositeKeepsExistingResolverAndRouting(t *testing.T) {
+func TestWithoutCompositeUsesBusinessDNSWithoutCompositeSelection(t *testing.T) {
 	plan := compositePlanFixture()
 	plan.Grants[0].IPv4EgressID = ""
 	plan.Peers = plan.Peers[:1]
@@ -219,8 +219,15 @@ func TestWithoutCompositeKeepsExistingResolverAndRouting(t *testing.T) {
 	if err := json.Unmarshal(encoded, &config); err != nil {
 		t.Fatal(err)
 	}
-	if len(config.DNS) != 0 || config.Routing.DomainStrategy != "IPIfNonMatch" || len(config.Routing.Rules) != 4 || len(config.Outbounds) != 3 || config.Outbounds[0].Protocol != "freedom" || config.Outbounds[1].TargetStrategy != "" {
+	if len(config.DNS) == 0 || config.Routing.DomainStrategy != "IPIfNonMatch" || len(config.Routing.Rules) != 6 || len(config.Outbounds) != 4 || config.Outbounds[0].Protocol != "freedom" || config.Outbounds[2].Protocol != "socks" || config.Outbounds[2].TargetStrategy != "" {
 		t.Fatal("single-exit configuration acquired composite DNS or family selection")
+	}
+	var dns struct {
+		Tag, QueryStrategy string
+		Servers            []string
+	}
+	if json.Unmarshal(config.DNS, &dns) != nil || dns.Tag != "resolver" || !slices.Equal(dns.Servers, []string{"1.1.1.1", "1.0.0.1"}) {
+		t.Fatal("single-exit business DNS was not isolated")
 	}
 }
 

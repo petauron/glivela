@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -25,7 +26,7 @@ import (
 	glivela "github.com/petauron/glivela"
 )
 
-// Authentication-only integration: the exact rendered entry config and
+// Native-core integration: the exact rendered entry config and
 // official clients are real. The small PROXY-v1 frontend is a test fixture,
 // not a replacement for installed ingress/Docker/UID/firewall acceptance.
 // All services and apparently public IPs exist only in this unrouted netns.
@@ -41,11 +42,11 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 		t.Fatal("refusing authentication test outside isolated root network/mount namespaces")
 	}
 	// Sniffing intentionally restores example.com from the payload's SNI.
-	// Give the unchanged core a resolvable fixture hostname without changing
-	// business DNS policy, disabling sniffing or weakening TLS verification.
+	// Poison system resolution with a private answer. Only Glivela's explicit
+	// business resolver may resolve the unchanged sniffed SNI to the target.
 	// This bind mount is private to the newly created mount namespace only.
 	hosts := filepath.Join(t.TempDir(), "hosts")
-	if err := os.WriteFile(hosts, []byte("127.0.0.1 localhost\n93.184.216.34 example.com\n"), 0600); err != nil {
+	if err := os.WriteFile(hosts, []byte("127.0.0.1 localhost example.com\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := syscall.Mount(hosts, "/etc/hosts", "", syscall.MS_BIND, ""); err != nil {
@@ -66,9 +67,12 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 		}
 	}
 	ip("link", "set", "lo", "up")
-	for _, address := range []string{"100.64.0.3/32", "100.64.0.4/32", "93.184.216.34/32"} {
+	for _, address := range []string{"100.64.0.3/32", "100.64.0.4/32", "93.184.216.34/32", "1.1.1.1/32", "1.0.0.1/32"} {
 		ip("addr", "add", address, "dev", "lo")
 	}
+	dnsLog := filepath.Join(t.TempDir(), "resolver.log")
+	stopDNS := startEntryResolverFixture(t, ctx, "93.184.216.34", dnsLog)
+	defer stopDNS()
 	decoy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
 	decoy.Listener.Close()
 	decoy.Listener, err = net.Listen("tcp", "100.64.0.4:0")
@@ -184,6 +188,43 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 	t.Run("hysteria2", func(t *testing.T) {
 		exerciseHysteriaAccountAuthentication(t, ctx, driver, decoy, target, pool, &requests)
 	})
+	t.Run("native-DNS-and-target-safety", func(t *testing.T) {
+		exerciseEntryNativeTargetSafety(t, ctx, driver, currentDesired(), front, target, pool, &requests, stopDNS)
+	})
+	log, err := os.ReadFile(dnsLog)
+	if err != nil || !strings.Contains(string(log), "query[A] example.com") {
+		t.Fatal("business resolver query was not observed", err)
+	}
+}
+
+func startEntryResolverFixture(t *testing.T, ctx context.Context, answer, logPath string) func() {
+	t.Helper()
+	command := exec.CommandContext(ctx, "dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--local-ttl=1", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1", "--user=root", "--pid-file="+filepath.Join(t.TempDir(), "dns.pid"), "--log-queries", "--log-facility="+logPath, "--host-record=example.com,"+answer)
+	if err := command.Start(); err != nil {
+		t.Fatal("isolated resolver did not start", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait(); close(done) }()
+	var once sync.Once
+	stop := func() { once.Do(func() { _ = command.Process.Kill(); <-done }) }
+	t.Cleanup(stop)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		select {
+		case <-done:
+			t.Fatal("isolated resolver exited")
+		default:
+		}
+		connection, err := net.DialTimeout("tcp", "1.1.1.1:53", 100*time.Millisecond)
+		if err == nil {
+			connection.Close()
+			return stop
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("isolated resolver unavailable")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // Fixed PROXY protocol fixture required by the unchanged rendered entry

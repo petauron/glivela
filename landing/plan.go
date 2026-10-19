@@ -52,9 +52,9 @@ func (p Plan) Validate() error {
 
 const managementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3306,3389,5432,5900,6379,6443,8006,9000,9090,9100,10000"
 
-// Render targets official Xray 26.7.28. It deliberately does not rely on later
-// Freedom finalRules semantics. UID-scoped kernel filtering is mandatory for
-// post-resolution destination restrictions and address-family enforcement.
+// Render targets official Xray 26.7.28. SOCKS does not receive the core's
+// default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
+// remains mandatory for post-resolution targets and address-family limits.
 func (p Plan) Render() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err

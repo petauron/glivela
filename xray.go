@@ -241,8 +241,15 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 		})
 	}
 
-	outbounds := []any{nativeXrayOutbound(plan.NativeEgress)}
-	rules := []any{map[string]any{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"}}
+	outbounds := []any{nativeXrayOutbound(plan.NativeEgress), map[string]any{"protocol": "freedom", "tag": "resolver", "settings": map[string]any{"domainStrategy": "UseIPv4", "finalRules": []any{
+		map[string]any{"action": "allow", "ip": []string{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp"},
+		map[string]any{"action": "block", "ip": []string{"0.0.0.0/0", "::/0"}},
+	}}}}
+	rules := []any{
+		map[string]any{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
+		map[string]any{"type": "field", "inboundTag": []string{"resolver"}, "ip": []string{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp", "outboundTag": "resolver"},
+		map[string]any{"type": "field", "inboundTag": []string{"resolver"}, "outboundTag": "blocked"},
+	}
 	composite := false
 	for _, grant := range projection.grants {
 		peer := projection.peers[grant.EgressID]
@@ -284,6 +291,7 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},
 		},
 		"routing": map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
+		"dns":     map[string]any{"tag": "resolver", "queryStrategy": "UseIP", "servers": []string{"1.1.1.1", "1.0.0.1"}},
 	}
 	if composite {
 		config["routing"] = map[string]any{"domainStrategy": "IPOnDemand", "rules": rules}

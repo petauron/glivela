@@ -36,7 +36,7 @@ func TestRenderXrayConfigurationProjectsNativeAndFixedCredentials(t *testing.T) 
 			Rules []map[string]any `json:"rules"`
 		} `json:"routing"`
 	}
-	if json.Unmarshal(encoded, &config) != nil || len(config.Inbounds) != 2 || len(config.Outbounds) != 3 || len(config.Routing.Rules) != 4 {
+	if json.Unmarshal(encoded, &config) != nil || len(config.Inbounds) != 2 || len(config.Outbounds) != 4 || len(config.Routing.Rules) != 6 {
 		t.Fatalf("unexpected Xray projection: %s", encoded)
 	}
 	stream := config.Inbounds[1]["streamSettings"].(map[string]any)
@@ -52,7 +52,7 @@ func TestRenderXrayConfigurationProjectsNativeAndFixedCredentials(t *testing.T) 
 	if config.Inbounds[1]["listen"] != "100.64.0.2" || stream["security"] != "reality" || stream["method"] != "raw" || !ok || raw["acceptProxyProtocol"] != true || stream["network"] != nil || stream["tcpSettings"] != nil || stream["sockopt"] != nil {
 		t.Fatalf("REALITY host backend contract missing: %#v", config.Inbounds[1])
 	}
-	if config.Routing.Rules[2]["outboundTag"] != routeOutboundTag("grant") || config.Routing.Rules[3]["outboundTag"] != "blocked" {
+	if config.Routing.Rules[4]["outboundTag"] != routeOutboundTag("grant") || config.Routing.Rules[5]["outboundTag"] != "blocked" {
 		t.Fatalf("fixed route is not fail closed: %#v", config.Routing.Rules)
 	}
 }
@@ -171,9 +171,9 @@ func TestRenderXrayConfigurationKeepsHysteriaNativeWhenVLESSIsRouted(t *testing.
 	if hy2Inbound["protocol"] != "hysteria" || firstUser["email"] != native.User || firstUser["auth"] != "native-hy2-secret" || firstUser["level"] != float64(0) || stream["method"] != "hysteria" || transport["auth"] != nil {
 		t.Fatalf("unexpected Hysteria client projection: %#v", hy2Inbound)
 	}
-	inboundTags := config.Routing.Rules[1]["inboundTag"].([]any)
+	inboundTags := config.Routing.Rules[3]["inboundTag"].([]any)
 	if len(inboundTags) != 1 || inboundTags[0] != "meridian-entry" || len(users) != 1 {
-		t.Fatalf("route escaped the VLESS-only boundary: %#v", config.Routing.Rules[1])
+		t.Fatalf("route escaped the VLESS-only boundary: %#v", config.Routing.Rules[3])
 	}
 }
 
