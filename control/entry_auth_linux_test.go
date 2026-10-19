@@ -287,6 +287,9 @@ func startRealityClientFixture(t *testing.T, ctx context.Context, driver Systemd
 		t.Fatal(err)
 	}
 	config := map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}}, "outbounds": []any{map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": host, "port": number, "users": []any{map[string]any{"id": protocolID, "encryption": "none", "flow": "xtls-rprx-vision"}}}}}, "streamSettings": map[string]any{"method": "raw", "security": "reality", "realitySettings": map[string]any{"serverName": endpoint.ServerNames[0], "fingerprint": "chrome", "password": endpoint.PublicKey, "shortId": endpoint.ShortIDs[0]}}}}}
+	// Keep bounded anonymous client diagnostics on failure as well as server
+	// diagnostics, so a rejected REALITY handshake is not mistaken for DNS.
+	config["log"] = map[string]any{"loglevel": "info"}
 	raw, err := json.Marshal(config)
 	if err != nil {
 		t.Fatal(err)
