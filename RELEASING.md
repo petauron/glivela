@@ -64,6 +64,17 @@ removing declared files. It does not need proxy semantics or a lifecycle RPC.
 Use data-retaining uninstall: configuration, identity, history and recovery
 backups must not be purged as part of migration.
 
+First stop the Glivela node service, then run the installed Glivela binary as
+root with `retire-node -config <persistent-owned-bootstrap>`. The node directory
+lease rejects a still-running writer. Retirement verifies the owned worker,
+backs up its committed configuration and persists retirement before stopping
+Xray. Only after independent stopped-process readback does it remove the exact
+Glivela-owned firewall/gate rules. Unknown or modified rules fail closed. A
+failed command must be retried and inspected, not followed by uninstall.
+Retirement retains all node data and prevents automatic startup/reconciliation
+from reviving the worker. Then use Vastora's data-retaining uninstall. This
+two-step boundary keeps proxy cleanup in Glivela, not the platform.
+
 The offline `retire-entry` command applies only to an old Docker checkpoint,
 not a new native installation. Retained old containers are one-time migration
 recovery resources; their retirement requires independent stop/read-back and

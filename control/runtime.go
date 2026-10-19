@@ -35,6 +35,7 @@ type runtimeJournal struct {
 	Phase     string   `json:"phase"`
 	Current   *Desired `json:"current,omitempty"`
 	Candidate *Desired `json:"candidate,omitempty"`
+	Retired   bool     `json:"retired,omitempty"`
 }
 
 // NativeRuntime owns one private journal and a dedicated Xray runtime. An
@@ -96,6 +97,9 @@ func (r *NativeRuntime) journal() (runtimeJournal, error) {
 	}
 	if state.Phase != "ready" && state.Phase != "pending" || state.Phase == "ready" && state.Candidate != nil || state.Phase == "pending" && state.Candidate == nil {
 		return state, errors.New("control: invalid runtime phase")
+	}
+	if state.Retired && (state.Phase != "ready" || state.Current == nil) {
+		return state, errors.New("control: invalid retired runtime")
 	}
 	if path == intent && state.Phase != "pending" {
 		return state, errors.New("control: invalid pending commit")
@@ -208,6 +212,9 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 	}
 	if state.Phase != "ready" {
 		return errors.New("control: recovery required")
+	}
+	if state.Retired {
+		return errors.New("control: runtime retired; installation retained for uninstall")
 	}
 	if state.Current != nil && desired.Revision <= state.Current.Revision {
 		return errors.New("control: runtime revision must advance")
@@ -350,6 +357,11 @@ func (r *NativeRuntime) backup(a Desired) error {
 func (r *NativeRuntime) Recover(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Retirement must fence legacy recovery too, before it can operate services.
+	before, err := r.journal()
+	if err == nil && before.Retired {
+		return errors.New("control: runtime retired; refusing automatic startup")
+	}
 	if err := RecoverLegacyCutover(ctx, r); err != nil {
 		return err
 	}
@@ -359,6 +371,9 @@ func (r *NativeRuntime) Recover(ctx context.Context) error {
 	}
 	if err != nil {
 		return err
+	}
+	if state.Retired {
+		return errors.New("control: runtime retired; refusing automatic startup")
 	}
 	if state.Phase == "pending" {
 		return r.restore(ctx, state)
@@ -399,6 +414,9 @@ func (r *NativeRuntime) Inspect(ctx context.Context) (Observation, error) {
 	state, err := r.journal()
 	if err != nil {
 		return Observation{AppliedReceipt: glivela.AppliedReceipt{}}, err
+	}
+	if state.Retired {
+		return Observation{}, errors.New("control: runtime retired")
 	}
 	if state.Phase != "ready" {
 		return Observation{AppliedReceipt: glivela.AppliedReceipt{}}, errors.New("control: pending runtime recovery")

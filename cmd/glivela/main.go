@@ -47,6 +47,13 @@ type configuration struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "retire-node" {
+		if err := retireNodeCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela native retirement not confirmed; do not uninstall")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "activate-controller" {
 		if err := activateControllerCommand(os.Args[2:], os.Stdout); err != nil {
 			log.Print("Glivela controller activation not confirmed; existing data retained")

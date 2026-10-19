@@ -297,7 +297,7 @@ func (d SystemdDriver) Stop(ctx context.Context, desired Desired) error {
 	if desired.Landing == nil || desired.Entry != nil || desired.Validate() != nil {
 		return errors.New("control: refusing to stop a different runtime role")
 	}
-	if err := d.service(ctx, "stop"); err != nil {
+	if err := d.stopOwned(ctx); err != nil {
 		return err
 	}
 	policy, err := desired.Landing.Firewall(d.WorkerUID, d.Interface)
@@ -305,6 +305,20 @@ func (d SystemdDriver) Stop(ctx context.Context, desired Desired) error {
 		return err
 	}
 	return policy.Remove(ctx)
+}
+
+// Confirm the loaded owned unit has no process before removing its firewall.
+// A lost stop response is not failure if independent readback confirms stopped.
+func (d SystemdDriver) stopOwned(ctx context.Context) error {
+	if err := d.verifyLoadedService(ctx); err != nil {
+		return err
+	}
+	stopErr := d.service(ctx, "stop")
+	state, err := inspectNativeEntry(ctx, d)
+	if err != nil || state.Active || state.PID != 0 || state.ControlPID != 0 {
+		return errors.Join(stopErr, err, errors.New("control: native worker stop not confirmed"))
+	}
+	return nil
 }
 
 // Healthy is local runtime readiness, not end-to-end route acceptance. A local
