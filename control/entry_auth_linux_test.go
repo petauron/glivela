@@ -57,7 +57,7 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	decoy.EnableHTTP2 = true
-	decoy.TLS = &tls.Config{MinVersion: tls.VersionTLS13, CurvePreferences: []tls.CurveID{tls.X25519}}
+	decoy.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	decoy.StartTLS()
 	defer decoy.Close()
 	var requests atomic.Int64
@@ -264,6 +264,16 @@ func startAuthenticationCore(t *testing.T, parent context.Context, driver System
 		})
 	}
 	t.Cleanup(stop)
+	t.Cleanup(func() {
+		stop()
+		if t.Failed() {
+			raw := diagnostics.String()
+			if len(raw) > 8192 {
+				raw = raw[len(raw)-8192:]
+			}
+			t.Log("anonymous authentication fixture diagnostics:", raw)
+		}
+	})
 	deadline := time.Now().Add(4 * time.Second)
 	for {
 		select {
