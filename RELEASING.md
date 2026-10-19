@@ -1,5 +1,34 @@
 # Version releases
 
+## Runtime roles
+
+The controller and its management UI remain a Docker application. Only the
+host-side node executor and landing Xray use native services; there is no
+controller systemd variant or Docker-to-systemd installation-record migration.
+Entry Xray retains its existing container topology during takeover.
+
+The existing release job packages both verified architecture bundles into the
+scratch controller image at `ghcr.io/petauron/glivela`, with source provenance.
+No new Actions artifacts or container acceptance tests are introduced. The
+draft Release includes `glivela-controller-image.json` containing the immutable
+image digest; the signed catalog must use that digest, not a floating tag.
+The image contains no shell, package manager, Docker socket or systemd; packaging
+the bundled core does not grant the controller host execution permissions.
+
+Controller bootstrap and state use retained volumes; certificate files also
+use a retained private volume so offline administration can reuse the same
+paths while the controller is stopped. Generic upgrades preserve these files,
+not regenerate credentials or initialize application data. The control listener
+remains private mTLS, and subscription traffic uses its separate private origin.
+
+If image publication succeeds but a later draft-release step fails, do not
+overwrite the existing version image. First independently inspect that image's
+immutable digest, source provenance and both platforms against the exact checked
+release SHA and retained draft assets. Recover the image metadata asset and
+checksums in the still-private draft only after that verification; then resume
+the existing draft-asset verification/publication steps. A mismatched image or
+already public release must never be repaired by moving tags or replacing assets.
+
 ## Entry uninstall boundary (MVP)
 
 Uninstall is deliberately two steps, not a Vastora lifecycle RPC. First retire

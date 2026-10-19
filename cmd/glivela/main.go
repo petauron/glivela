@@ -147,6 +147,9 @@ func readConfigurationMode(path string, maintenance bool) (configuration, error)
 	if (cfg.Installation == "") != (cfg.Service == "") || cfg.Mode == "verifier" && cfg.Installation != "" {
 		return cfg, errors.New("complete local installation identity required")
 	}
+	if cfg.Mode == "controller" && cfg.Installation != "" {
+		return cfg, errors.New("controller uses its retained container bootstrap, not a native service installation")
+	}
 	if maintenance && cfg.Installation != "" {
 		source, credentials, prefix, err := control.InstalledMaintenanceFiles(cfg.Installation, cfg.Service)
 		if err != nil || source != path {
@@ -306,6 +309,16 @@ func run(ctx context.Context, path string) error {
 				log.Print("Glivela reconciliation did not complete; existing state retained")
 			}
 		})
+	}
+	cfg.Listen, err = privateControllerAddress(cfg.Listen)
+	if err != nil {
+		return err
+	}
+	if cfg.SubscriptionsListen != "" {
+		cfg.SubscriptionsListen, err = privateControllerAddress(cfg.SubscriptionsListen)
+		if err != nil {
+			return err
+		}
 	}
 	host, _, err := net.SplitHostPort(cfg.Listen)
 	if err != nil {

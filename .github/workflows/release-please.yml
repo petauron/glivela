@@ -69,6 +69,9 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      packages: write
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,6 +99,14 @@ jobs:
           sh scripts/build-native-release.sh "$RUNNER_TEMP/native-release"
           sh scripts/build-native-release.sh "$RUNNER_TEMP/native-repeat"
           diff -r "$RUNNER_TEMP/native-release" "$RUNNER_TEMP/native-repeat"
+      - name: Publish the controller image from the checked release bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          sh scripts/publish-controller-image.sh "$RUNNER_TEMP/native-release"
       - name: Stage and verify distribution files in draft release
         env:
           GH_TOKEN: ${{ github.token }}
