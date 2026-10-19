@@ -148,9 +148,11 @@ func (d SystemdDriver) service(ctx context.Context, action string) error {
 	if err := d.verifyLoadedService(ctx); err != nil {
 		return err
 	}
-	// Health polling must not rehash a multi-megabyte binary every cycle.
-	// Validate/activation verify it before use; a health poll runs systemctl.
-	if action != "is-active" {
+	// Health polling does not execute the worker binary. Stopping an owned
+	// loaded unit must also remain possible if its on-disk binary is corrupt;
+	// otherwise failure containment would be blocked by the corruption itself.
+	// Validate/start verify the pinned executable before it can be used.
+	if action != "is-active" && action != "stop" {
 		if err := verifyExecutableFile(d.Binary, d.BinarySHA256); err != nil {
 			return err
 		}
