@@ -79,7 +79,7 @@ func (m ImportMaterial) sourceSnapshot() (string, error) {
 		SnapshotID   string `json:"snapshotId"`
 		SourceSHA256 string `json:"sourceSha256"`
 	}
-	if len(m.RetainedSource) > maxImportMaterial || json.Unmarshal(m.RetainedSource, &header) != nil || header.Version != 1 || header.Schema != 113 && header.Schema != 114 || !ValidIdentifier(header.SnapshotID) || !ValidIdentity(m.SourceSHA256) || header.SourceSHA256 != m.SourceSHA256 {
+	if len(m.RetainedSource) > maxImportMaterial || json.Unmarshal(m.RetainedSource, &header) != nil || header.Version != 1 || header.Schema != 113 && header.Schema != 114 && header.Schema != 115 || !ValidIdentifier(header.SnapshotID) || !ValidIdentity(m.SourceSHA256) || header.SourceSHA256 != m.SourceSHA256 {
 		return "", errors.New("glivela: missing or changed source snapshot identity")
 	}
 	return header.SnapshotID, nil

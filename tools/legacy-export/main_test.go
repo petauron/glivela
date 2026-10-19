@@ -168,7 +168,7 @@ func TestExportPreservesRecordsWithoutChangingBackup(t *testing.T) {
 
 func TestExportRejectsUnverifiedSources(t *testing.T) {
 	for name, query := range map[string]string{
-		"schema":             "PRAGMA user_version=115",
+		"schema":             "PRAGMA user_version=116",
 		"missing table":      "DROP TABLE meridian_route_grants",
 		"new business table": "CREATE TABLE meridian_unreviewed(id TEXT)",
 		"orphan":             "UPDATE meridian_accounts SET subscription_token_secret_id='missing'",

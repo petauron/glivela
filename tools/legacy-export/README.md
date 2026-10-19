@@ -119,8 +119,9 @@ checks that the runtime dependency graph contains no `modernc.org` package.
 
 Build from this directory with `GOWORK=off go build -o /private/tool/location`.
 Use only an operator-prepared, private, standalone **frozen backup**, not the
-running Center database. The reviewed inputs are Center schemas 113 and 114;
-114 adds only the host's node-security table and does not alter proxy tables.
+running Center database. The reviewed inputs are Center schemas 113, 114 and 115;
+114 adds only the host's node-security table; 115 adds generic service forwarding
+metadata. Neither changes the retained proxy business tables or encodings.
 The original schema number is retained in the encrypted archive. Other schema
 versions fail closed; this tool never migrates or repairs its input. WAL, SHM
 and rollback journal sidecars are refused. SQLite is opened read-only and

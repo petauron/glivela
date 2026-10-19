@@ -27,9 +27,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Schema 114 only adds the host's node_security_tasks table. The reviewed
-// proxy tables and their encodings are identical to schema 113.
-func supportedSourceSchema(version int) bool { return version == 113 || version == 114 }
+// Schema 114 adds node_security_tasks; 115 adds generic service forwarding
+// metadata. Neither changes the reviewed proxy business tables or encodings.
+func supportedSourceSchema(version int) bool { return version == 113 || version == 114 || version == 115 }
 
 const maxSnapshotBytes = 128 << 20
 const archiveContext = "glivela-offline-legacy-export-v1:"
