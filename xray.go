@@ -405,17 +405,20 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	for entryID := range projection.credentials {
 		slices.SortFunc(projection.credentials[entryID], func(a, b CredentialMaterial) int { return strings.Compare(a.Credential.ID, b.Credential.ID) })
 	}
-	projection.grants = slices.Clone(plan.Grants)
-	slices.SortFunc(projection.grants, func(a, b RouteGrant) int { return strings.Compare(a.ID, b.ID) })
+	grants := slices.Clone(plan.Grants)
+	slices.SortFunc(grants, func(a, b RouteGrant) int { return strings.Compare(a.ID, b.ID) })
 	seenGrants, usedRoutes := map[string]bool{}, map[string]bool{}
-	for _, grant := range projection.grants {
+	for _, grant := range grants {
 		base, hasBase := materialByID[grant.Base.ID]
 		route, hasRoute := materialByID[grant.Route.ID]
 		peer, hasPeer := projection.peers[grant.EgressID]
-		if !grant.Deployable() || seenGrants[grant.ID] || !hasBase || !hasRoute || base.Credential != grant.Base || route.Credential != grant.Route || usedRoutes[grant.Route.ID] || !hasPeer || peer.EgressID != grant.EgressID || routeTags[grant.EntryID] != grant.InboundTag {
+		if grant.Validate() != nil || seenGrants[grant.ID] || !hasBase || !hasRoute || base.Credential != grant.Base || route.Credential != grant.Route || usedRoutes[grant.Route.ID] || !hasPeer || peer.EgressID != grant.EgressID || routeTags[grant.EntryID] != grant.InboundTag || !grant.Deployable() && route.Credential.Enabled {
 			return xrayProjection{}, errors.New("glivela: conflicting Xray route grant")
 		}
 		seenGrants[grant.ID], usedRoutes[grant.Route.ID] = true, true
+		if grant.Deployable() {
+			projection.grants = append(projection.grants, grant)
+		}
 		if grant.IPv4EgressID != "" {
 			secondary := projection.peers[grant.IPv4EgressID]
 			if err := ValidateCompositePeers(grant, peer, secondary); err != nil {

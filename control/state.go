@@ -155,6 +155,16 @@ func (s *Store) Put(node Node) error {
 	if err := validateEnrollmentRoles(next); err != nil {
 		return err
 	}
+	if s.business != nil && s.business.material.Ownership != nil {
+		if s.business.faulted {
+			return errors.New("control: owned business storage requires recovery")
+		}
+		projected, _, err := projectBusinessEntries(next, s.business.material, time.Now())
+		if err != nil {
+			return err
+		}
+		next = projected
+	}
 	return s.commit(next)
 }
 
@@ -168,6 +178,10 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 	if !ok {
 		return Desired{}, errors.New("control: not enrolled")
 	}
+	if err := s.reconcileOwnedEntriesLocked(time.Now()); err != nil {
+		return Desired{}, err
+	}
+	node = s.nodes[certificate]
 	now := time.Now().UTC()
 	old := node
 	if node.Desired.Entry != nil && receipt != nil && receipt.EntryHealth != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, receipt.AppliedReceipt) == nil && !receipt.EntryHealth.SampledAt.IsZero() && !receipt.EntryHealth.SampledAt.After(now) && !receipt.EntryHealth.SampledAt.After(node.EntryHealthBarrierAt) {

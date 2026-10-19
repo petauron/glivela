@@ -100,6 +100,9 @@ func (s *Store) subscription(ctx context.Context, token string, mihomo bool) (su
 	if err := ctx.Err(); err != nil {
 		return subscriptionContent{}, err
 	}
+	if s.business != nil && s.business.faulted {
+		return subscriptionContent{}, errSubscriptionUnverified
+	}
 	if s.business == nil || s.business.material.Ownership == nil {
 		return subscriptionContent{}, errSubscriptionMissing
 	}

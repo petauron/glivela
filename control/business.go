@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	glivela "github.com/petauron/glivela"
 )
@@ -19,6 +20,8 @@ import (
 type businessState struct {
 	snapshotID string
 	material   glivela.ImportMaterial
+	keyPath    string
+	faulted    bool
 }
 
 type BusinessAccount struct {
@@ -133,7 +136,18 @@ func (s *Store) LoadBusiness(keyPath string) error {
 	if err != nil {
 		return errors.New("control: business checkpoint unavailable or invalid")
 	}
-	s.business = &businessState{snapshotID: snapshot, material: material}
+	if material.Ownership != nil {
+		projected, changed, err := projectBusinessEntries(s.nodes, material, time.Now())
+		if err != nil {
+			return err
+		}
+		if changed {
+			if err := s.commit(projected); err != nil {
+				return err
+			}
+		}
+	}
+	s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath}
 	return nil
 }
 
@@ -182,6 +196,9 @@ func (s *Store) Business() BusinessInventory {
 	view.State, view.SnapshotID = "awaiting-handover", s.business.snapshotID
 	if m.Ownership != nil {
 		view.State = "owned-unverified"
+	}
+	if s.business.faulted {
+		view.State = "storage-unverified"
 	}
 	for id, node := range m.References.Nodes {
 		view.Nodes = append(view.Nodes, BusinessNode{ID: id, Name: node.Name})

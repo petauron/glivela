@@ -66,6 +66,34 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/admin/account-plan":
+			var request struct {
+				AccountID        string `json:"accountId"`
+				ExpectedRevision uint64 `json:"expectedRevision,string"`
+				Plan             *struct {
+					TotalBytes *int64 `json:"totalBytes,string"`
+					ExpiryTime *int64 `json:"expiryTime,string"`
+					ResetDays  *int   `json:"resetDays"`
+					Enabled    *bool  `json:"enabled"`
+				} `json:"plan"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil || request.Plan == nil || request.Plan.TotalBytes == nil || request.Plan.ExpiryTime == nil || request.Plan.ResetDays == nil || request.Plan.Enabled == nil || !glivela.ValidIdentifier(request.AccountID) || request.ExpectedRevision == 0 {
+				http.Error(w, "complete account plan required", http.StatusBadRequest)
+				return
+			}
+			plan := glivela.AccountPlan{TotalBytes: *request.Plan.TotalBytes, ExpiryTime: *request.Plan.ExpiryTime, ResetDays: *request.Plan.ResetDays, Enabled: *request.Plan.Enabled}
+			if plan.Validate() != nil {
+				http.Error(w, "invalid account plan", http.StatusBadRequest)
+				return
+			}
+			status, err := store.UpdateAccountPlan(r.Context(), request.AccountID, request.ExpectedRevision, plan)
+			if err != nil {
+				http.Error(w, "account update not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(status)
 		case "/v1/admin/entries":
 			var request struct {
 				ID            string           `json:"id"`

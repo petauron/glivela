@@ -163,7 +163,19 @@ func TestOfficialXrayEntryPlanValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, desired := range []Desired{d, routed} {
+	disabledPlan := routed.clone().Entry
+	for i := range disabledPlan.Credentials {
+		disabledPlan.Credentials[i].Credential.Enabled = false
+	}
+	disabledPlan.Grants[0].Base = disabledPlan.Credentials[0].Credential
+	disabledPlan.Grants[0].Route = disabledPlan.Credentials[1].Credential
+	disabled, err := NewEntryDesired(*disabledPlan, network)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Empty authentication inventories must at least validate with the pinned
+	// original core. This is syntax evidence, not actual authentication denial.
+	for _, desired := range []Desired{d, routed, disabled} {
 		path := filepath.Join(t.TempDir(), "entry.json")
 		if err := os.WriteFile(path, desired.Config, 0600); err != nil {
 			t.Fatal(err)

@@ -77,6 +77,35 @@ reset cycles, history or ownership. This is the Glivela-owned download path,
 not complete live business mutation/UI, external DNS/ingress acceptance,
 catalog publication, traffic collection or final installed handover evidence.
 
+An enrolled administrator can POST `/v1/admin/account-plan` with `accountId`,
+`expectedRevision` (decimal string) and a complete `plan` containing
+`totalBytes`/`expiryTime` (decimal strings), `resetDays` and `enabled`. A staged
+import cannot accept edits. Optimistic revision checks reject conflicting stale writers;
+an identical lost-response retry neither reseals data nor increments revisions
+again. This operation preserves the original subscription/protocol identities,
+ledger baselines, current reset schedule, immutable history and ownership.
+Changing reset-days does not silently restart the current imported cycle.
+
+The encrypted owned business file is the single source of account policy.
+Known enrolled entry configurations are derived from it on save, startup and
+authenticated node exchange; unknown identities are refused, not overwritten.
+Quota/expiry/enable gates affect only that account's authentication users;
+disabled grants retain their original private peer/route identity for a later
+explicit re-enable but are absent from active Xray routes. No client identity
+is regenerated. Unchanged effective configurations do not restart nodes.
+
+If saving business succeeds but persisting a derived node plan fails, the API
+returns failure, preserves the newer owned data and resumes projection on retry
+or restart. It never replays the old staged snapshot. Independent authenticated
+read-back resolves a write whose rename may have succeeded before an error;
+unknown external changes fence further business publication/reconciliation
+until explicit recovery. HTTP 202 means saved/reconciling, not successful route
+acceptance. `entry-runtime-verified` is scoped to independently reported entry
+application only; old account applied revisions and route alarms are not
+manufactured as successful by this API. Actual worker authentication denial,
+traffic collection/reset execution and the complete management UI remain
+separate acceptance requirements.
+
 On the same private mTLS listener, a separately authorized management identity
 can POST `/v1/admin/landings` with `id`, `certificateId`, `plan` and
 `routeEntries` (entry ID to `{certificateId,address}`). A configured entry
