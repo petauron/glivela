@@ -3,8 +3,11 @@ package control
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +16,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,6 +143,94 @@ func getSubscription(t *testing.T, s *Store, path, agent string) *httptest.Respo
 		}
 	}
 	return w
+}
+
+// Application half of service handover: actual HTTPS with the identical
+// retained public URL and token before/after private backup restoration.
+// The generic platform binding is verified separately; no production DNS or
+// gateway is contacted, and cached health cannot authorize the new backend.
+func TestSubscriptionHTTPSIdentitySurvivesControllerHandover(t *testing.T) {
+	s, d, certificate, _ := subscriptionFixture(t, false)
+	reportRuntime(t, s, certificate, d)
+	var current atomic.Pointer[Store]
+	current.Store(s)
+	front := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		SubscriptionHandler(current.Load()).ServeHTTP(w, r)
+	}))
+	defer front.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(front.Certificate())
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, front.Listener.Addr().String())
+	}}}
+	defer client.CloseIdleConnections()
+	_, port, err := net.SplitHostPort(front.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := "https://example.com:" + port
+	if err := s.ConfigureSubscriptionOrigin(origin); err != nil {
+		t.Fatal(err)
+	}
+	address, err := s.SubscriptionURL(context.Background(), "account-example")
+	if err != nil || address != origin+"/sub/example-token" {
+		t.Fatal("retained subscription identity unavailable", err)
+	}
+	read := func(want int) ([]byte, string) {
+		t.Helper()
+		response, err := client.Get(address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != want || response.TLS == nil || len(response.TLS.VerifiedChains) == 0 {
+			t.Fatal("subscription HTTPS continuity failed", response.StatusCode, err)
+		}
+		return body, response.Header.Get("Subscription-Userinfo")
+	}
+	before, usage := read(http.StatusOK)
+	if err := s.BackupController(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(s.path), "controller-backup-*.gcm"))
+	if err != nil || len(paths) != 1 {
+		t.Fatal("private backup missing", err)
+	}
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(parent, "restored")
+	if err := RestoreControllerBackup(paths[0], s.business.keyPath, directory); err != nil {
+		t.Fatal(err)
+	}
+	next, err := OpenStore(filepath.Join(directory, "nodes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := next.LoadBusiness(s.business.keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := next.ConfigureSubscriptionOrigin(origin); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := next.SubscriptionURL(context.Background(), "account-example"); err != nil || got != address {
+		t.Fatal("handover replaced public origin/token", err)
+	}
+	current.Store(next)
+	refused, _ := read(http.StatusServiceUnavailable)
+	if bytes.Contains(refused, []byte(d.Entry.Credentials[0].ProtocolID)) {
+		t.Fatal("unverified backend disclosed credentials")
+	}
+	reportRuntime(t, next, certificate, d)
+	after, afterUsage := read(http.StatusOK)
+	if !bytes.Equal(before, after) || usage != afterUsage {
+		t.Fatal("handover changed credentials, names, subscription bytes or traffic metadata")
+	}
 }
 
 func TestOwnedSubscriptionRetainsIdentityQuotaAndFormats(t *testing.T) {

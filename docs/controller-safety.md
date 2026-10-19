@@ -88,3 +88,28 @@ survive the reset. No online node means no remote configuration can change;
 the first authenticated poll catches up before sending the next policy.
 Account expiry disables authentication through the same desired projection,
 not through a platform task or restarting unrelated peers.
+
+## Platform API retirement map
+
+The independent controller listener requires an enrolled administrator mTLS
+certificate. The public subscription listener only accepts retained tokens.
+Neither endpoint proxies a platform cookie or a Vastora application command.
+
+| Former platform responsibility | Application-owned replacement |
+| --- | --- |
+| Account/client plans, quotas and resets | `/v1/admin/accounts`, `/v1/admin/account-plan`, `/v1/admin/account-reset`; authenticated exchange advances retained cycles |
+| Subscription generation/disclosure | `/v1/admin/account-subscription` and the separate `SubscriptionHandler`, retaining the original origin/token path |
+| Route grants and revocation | `/v1/admin/routes`, with enrolled peer identity checks and fresh acceptance |
+| Entry/landing configuration and protocol inventory | Typed `/v1/admin/entries`, `/v1/admin/landings` and offline `enroll-nodes`; existing ownership/configuration is retained, not discovered from a platform task |
+| REALITY target hardening | Fixed reviewed IP plus `verifyEntryRealityTargets` before native activation; no automatic new target selection |
+| Link verification and recovery status | Direct `NodeRunner`/`RouteRunner`, `/v1/admin/route-checks` and `/v1/admin/route-acceptance`; startup is never route proof |
+| Controller backup/restoration | `/v1/admin/backup`, hourly snapshots and `restore-controller-backup` |
+| Old Docker/3x-ui role changes and proxy removal commands | Explicit offline capture/adoption, stopped-source native handover, `retire-node`, then generic data-retaining uninstall |
+| Automatic display-name normalization | Removed; retain source node and service names verbatim |
+
+This is a migration of the retained inventory, not a second 3x-ui API or a new
+automatic node/protocol discovery feature. Keep the old writer stopped before
+final capture. Rebind the existing published subscription/backend to the new
+private service only after data adoption, node enrollment and fresh real route
+acceptance. Never remove/recreate publication identity, issue new tokens, mark
+archived tasks successful or delete their source history to make a cutover pass.
