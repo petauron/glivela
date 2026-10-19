@@ -291,8 +291,6 @@ func (s *Store) accountChangeResult(id string, now time.Time) AccountChangeResul
 		result.State = "entry-runtime-verified"
 		if len(result.PendingEntries) > 0 {
 			result.State = "reconciling"
-		} else {
-			result.AppliedRevision = result.DesiredRevision
 		}
 	}
 	return result
