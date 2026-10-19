@@ -58,7 +58,7 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 		}
 	})
 	driver := officialTestDriver(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	ip := func(args ...string) {
 		t.Helper()
@@ -122,7 +122,14 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 	probe := func(address string, want bool) {
 		t.Helper()
 		before := requests.Load()
-		err := probeAuthenticatedEntry(ctx, address, target.URL, pool)
+		timeout := 3 * time.Second
+		if want {
+			// Pinned REALITY waits in five-second intervals for its asynchronous
+			// target-record detector after TCP listen is ready. A two-second TLS
+			// deadline races this startup, not credential or DNS validation.
+			timeout = 8 * time.Second
+		}
+		err := probeAuthenticatedEntryWithin(ctx, address, target.URL, pool, timeout)
 		if want {
 			if err != nil || requests.Load() != before+1 {
 				t.Fatal("valid original credential could not reach verified TLS target", err)
@@ -362,9 +369,13 @@ func startAuthenticationCore(t *testing.T, parent context.Context, driver System
 }
 
 func probeAuthenticatedEntry(ctx context.Context, address, target string, roots *x509.CertPool) error {
-	transport := &http.Transport{Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: address}), TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "example.com", MinVersion: tls.VersionTLS12}, DisableKeepAlives: true, ResponseHeaderTimeout: 2 * time.Second, TLSHandshakeTimeout: 2 * time.Second}
+	return probeAuthenticatedEntryWithin(ctx, address, target, roots, 3*time.Second)
+}
+
+func probeAuthenticatedEntryWithin(ctx context.Context, address, target string, roots *x509.CertPool, timeout time.Duration) error {
+	transport := &http.Transport{Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: address}), TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "example.com", MinVersion: tls.VersionTLS12}, DisableKeepAlives: true, ResponseHeaderTimeout: 2 * time.Second, TLSHandshakeTimeout: timeout - time.Second}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return fmt.Errorf("redirect refused") }}
+	client := &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return fmt.Errorf("redirect refused") }}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return err

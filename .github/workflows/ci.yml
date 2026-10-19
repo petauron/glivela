@@ -51,7 +51,7 @@ jobs:
       - name: Verify actual entry account authentication in isolated namespace
         run: |
           go test -c -o "$RUNNER_TEMP/glivela-entry-auth.test" ./control
-          sudo env GLIVELA_ENTRY_AUTH_TEST=1 GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net --mount --propagation private "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestRenderedEntryAccountAuthentication$' -test.v -test.timeout 70s
+          sudo env GLIVELA_ENTRY_AUTH_TEST=1 GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net --mount --propagation private "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestRenderedEntryAccountAuthentication$' -test.v -test.timeout 100s
   selection-runtime:
     name: Reviewed target-selection runtime
     runs-on: ubuntu-24.04

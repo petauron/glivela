@@ -68,7 +68,7 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 	}
 	client := startRealityClientFixture(t, ctx, driver, desired.Entry.RealityEndpoints[0], front, desired.Entry.Credentials[0].ProtocolID)
 	stop := startWorker(t, desired)
-	if err := probeAuthenticatedEntry(ctx, client, target.URL, roots); err != nil {
+	if err := probeAuthenticatedEntryWithin(ctx, client, target.URL, roots, 8*time.Second); err != nil {
 		t.Fatal("public DNS control did not succeed", err)
 	}
 	stopOriginalDNS()
@@ -138,7 +138,7 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 			stop := startWorker(t, d)
 			defer stop()
 			before4, before6 := publicRequests.Load(), v6Requests.Load()
-			if err := probeAuthenticatedEntry(ctx, client, target.URL, roots); err != nil {
+			if err := probeAuthenticatedEntryWithin(ctx, client, target.URL, roots, 8*time.Second); err != nil {
 				t.Fatal("selected family HTTPS did not succeed", err)
 			}
 			if policy == glivela.EgressIPv4Only && (publicRequests.Load() != before4+1 || v6Requests.Load() != before6) || policy == glivela.EgressIPv6Only && (v6Requests.Load() != before6+1 || publicRequests.Load() != before4) {
