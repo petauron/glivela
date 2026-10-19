@@ -58,6 +58,18 @@ already public release must never be repaired by moving tags or replacing assets
 
 ## Native uninstall boundary (MVP)
 
+For the one-time entry migration, the installed native node must remain stopped
+while the original writer is stopped and the exact source container is verified
+stopped with restart disabled. `stage-native-entry -config <persistent-owned-bootstrap>
+-checkpoint <private-source-snapshot> -desired <private-typed-desired>` verifies
+the original application identity, source configuration snapshot and loaded
+installer-owned native unit before staging its initial revision. It never
+installs units, changes public bindings, starts Xray, or modifies source data.
+Repeated staging accepts only the same source proof and initial revision;
+pending recovery or an existing different revision cannot be reset. Keep both
+node and old writer stopped until the separate installation/ingress ownership
+handover is complete. Staging is not route acceptance or a successful upgrade.
+
 Both native services are declared installer-owned resources. The generic
 uninstaller verifies ownership and backs up/stops their running set before
 removing declared files. It does not need proxy semantics or a lifecycle RPC.
