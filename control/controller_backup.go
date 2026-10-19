@@ -200,6 +200,27 @@ func RestoreControllerBackup(source, keyPath, destination string) error {
 	if _, err := glivela.OpenImportMaterial(staged.Sealed, key, staged.SnapshotID); err != nil {
 		return err
 	}
+	// Runtime observations are caches, not restored proof of a live process.
+	// Retain original evidence in the encrypted snapshot, but require fresh
+	// authenticated node/route observations before publishing restored routes.
+	var nodes []Node
+	if json.Unmarshal(value.Files["nodes.json"], &nodes) != nil {
+		return errors.New("control: invalid restored node inventory")
+	}
+	for i := range nodes {
+		nodes[i].Receipt = nil
+		nodes[i].ReportedAt = time.Time{}
+		nodes[i].EntryHealthBarrierAt = time.Now().UTC()
+		for id, check := range nodes[i].Checks {
+			check.Result = nil
+			check.IssuedAt, check.ReceivedAt = time.Time{}, time.Time{}
+			nodes[i].Checks[id] = check
+		}
+	}
+	value.Files["nodes.json"], err = json.Marshal(nodes)
+	if err != nil {
+		return err
+	}
 	if err := os.Mkdir(destination, 0700); err != nil {
 		return err
 	}
