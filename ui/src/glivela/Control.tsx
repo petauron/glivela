@@ -67,7 +67,7 @@ export function GlivelaControl() {
         const account = inventory.accounts.find(a => a.account.id === route.accountId);
         return <TableRow key={route.id}><TableCell>{account?.account.displayName ?? route.accountId}</TableCell><TableCell>{endpointNames.get(route.entryId) ?? route.entryId} → {names.get(route.egressId) ?? route.egressId}{route.ipv4EgressId ? ` / IPv4 ${names.get(route.ipv4EgressId) ?? route.ipv4EgressId}` : ""}</TableCell><TableCell>{routeLabels[route.state] ?? "未确认"}</TableCell><TableCell><Button variant="outline" disabled={busy || !owned || !account} onClick={() => void change("routes", { ...route, state: undefined, enabled: !route.enabled, expectedRevision: account?.account.desiredRevision })}>{route.enabled ? "停用" : "启用"}</Button></TableCell></TableRow>;
       })}</TableBody></Table><CreateRoute inventory={inventory} disabled={busy || !owned} save={change} /></section>
-      <p className="text-sm text-muted-foreground">卸载：先停止入口 Glivela 节点端，执行其本地 retire-entry 并取得停止确认，再由 Vastora 卸载。不要在停止未确认时删除应用。</p>
+      <p className="text-sm text-muted-foreground">卸载：先停止线路或落地的 Glivela 节点端，使用持久配置执行本地 retire-node -config，确认 Xray 已停止且所属防火墙规则已清理，再由 Vastora 保留数据卸载。退役未确认时不要删除应用。</p>
     </>}
   </section>;
 }
