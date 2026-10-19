@@ -68,6 +68,9 @@ func (d *NativeEntryDriver) stopOwned(ctx context.Context, desired Desired) erro
 	if err := d.plan(desired); err != nil {
 		return err
 	}
+	if err := d.verifyLoadedService(ctx); err != nil {
+		return err
+	}
 	stopErr := d.service(ctx, "stop")
 	state, err := inspectNativeEntry(ctx, d.SystemdDriver)
 	if err != nil || state.Active || state.PID != 0 || state.ControlPID != 0 {
