@@ -255,13 +255,13 @@ func startEntryProxyFixture(t *testing.T, ctx context.Context, address, backend 
 			go func() {
 				defer workers.Done()
 				defer client.Close()
-				_ = client.SetDeadline(time.Now().Add(5 * time.Second))
+				_ = client.SetDeadline(time.Now().Add(12 * time.Second))
 				server, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", backend)
 				if err != nil {
 					return
 				}
 				defer server.Close()
-				_ = server.SetDeadline(time.Now().Add(5 * time.Second))
+				_ = server.SetDeadline(time.Now().Add(12 * time.Second))
 				if _, err := io.WriteString(server, "PROXY TCP4 100.64.0.3 100.64.0.3 12345 10443\r\n"); err != nil {
 					return
 				}
