@@ -34,12 +34,12 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 	}
 	ip("addr", "add", "192.168.50.2/32", "dev", "lo")
 	ip("-6", "addr", "add", "2606:4700::100/128", "dev", "lo", "nodad")
-	var privateRequests, v6Requests atomic.Int64
+	var privateRequests, privateConnections, v6Requests atomic.Int64
 	_, port, err := net.SplitHostPort(target.Listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	tlsTarget := func(address string, count *atomic.Int64) *httptest.Server {
+	tlsTarget := func(address string, count, connections *atomic.Int64) *httptest.Server {
 		t.Helper()
 		s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { count.Add(1); w.WriteHeader(204) }))
 		s.Listener.Close()
@@ -48,13 +48,16 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 		if err != nil {
 			t.Fatal(err)
 		}
+		if connections != nil {
+			s.Listener = &nativeTargetAcceptCounter{Listener: s.Listener, count: connections}
+		}
 		s.TLS = target.TLS.Clone()
 		s.StartTLS()
 		t.Cleanup(s.Close)
 		return s
 	}
-	tlsTarget(net.JoinHostPort("192.168.50.2", port), &privateRequests)
-	tlsTarget(net.JoinHostPort("2606:4700::100", port), &v6Requests)
+	tlsTarget(net.JoinHostPort("192.168.50.2", port), &privateRequests, &privateConnections)
+	tlsTarget(net.JoinHostPort("2606:4700::100", port), &v6Requests, nil)
 	startWorker := func(t *testing.T, d Desired) func() {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "entry.json")
@@ -77,7 +80,7 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 	deadline := time.Now().Add(8 * time.Second)
 	for {
 		err := probeAuthenticatedEntry(ctx, client, target.URL, roots)
-		if privateRequests.Load() != 0 {
+		if privateRequests.Load() != 0 || privateConnections.Load() != 0 {
 			t.Fatal("rebinding reached a private TLS target")
 		}
 		log, _ := os.ReadFile(privateLog)
@@ -97,7 +100,7 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 		if err == nil {
 			break
 		}
-		if privateRequests.Load() != 0 || time.Now().After(deadline) {
+		if privateRequests.Load() != 0 || privateConnections.Load() != 0 || time.Now().After(deadline) {
 			t.Fatal("same worker did not recover when public DNS returned", err)
 		}
 		time.Sleep(150 * time.Millisecond)
@@ -106,8 +109,8 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 	stopPublic()
 	stopDual := startEntryResolverFixture(t, ctx, "93.184.216.34,2606:4700::100", filepath.Join(t.TempDir(), "dual-dns.log"))
 	defer stopDual()
-	var literal4, literal6 atomic.Int64
-	plainTarget := func(address string, count *atomic.Int64) *httptest.Server {
+	var literal4, literal6, literal4Connections, literal6Connections atomic.Int64
+	plainTarget := func(address string, count, connections *atomic.Int64) *httptest.Server {
 		t.Helper()
 		s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { count.Add(1); w.WriteHeader(204) }))
 		s.Listener.Close()
@@ -116,12 +119,13 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 		if err != nil {
 			t.Fatal(err)
 		}
+		s.Listener = &nativeTargetAcceptCounter{Listener: s.Listener, count: connections}
 		s.Start()
 		t.Cleanup(s.Close)
 		return s
 	}
-	plain4 := plainTarget("93.184.216.34:0", &literal4)
-	plain6 := plainTarget("[2606:4700::100]:0", &literal6)
+	plain4 := plainTarget("93.184.216.34:0", &literal4, &literal4Connections)
+	plain6 := plainTarget("[2606:4700::100]:0", &literal6, &literal6Connections)
 	for index, policy := range []glivela.EgressPolicy{glivela.EgressIPv4Only, glivela.EgressIPv6Only} {
 		t.Run(string(policy), func(t *testing.T) {
 			plan := *desired.clone().Entry
@@ -141,21 +145,40 @@ func exerciseEntryNativeTargetSafety(t *testing.T, ctx context.Context, driver S
 				t.Fatal("native domain policy crossed address families")
 			}
 			allowed, denied, allowedCount, deniedCount := plain4.URL, plain6.URL, &literal4, &literal6
+			deniedConnections := &literal6Connections
 			if policy == glivela.EgressIPv6Only {
 				allowed, denied, allowedCount, deniedCount = plain6.URL, plain4.URL, &literal6, &literal4
+				deniedConnections = &literal4Connections
 			}
 			beforeAllowed, beforeDenied := allowedCount.Load(), deniedCount.Load()
+			beforeDeniedConnections := deniedConnections.Load()
 			if err := probeLiteralEntry(ctx, client, allowed); err != nil || allowedCount.Load() != beforeAllowed+1 {
 				t.Fatal("selected literal family did not work", err)
 			}
-			if err := probeLiteralEntry(ctx, client, denied); err == nil || deniedCount.Load() != beforeDenied {
+			if err := probeLiteralEntry(ctx, client, denied); err == nil || deniedCount.Load() != beforeDenied || deniedConnections.Load() != beforeDeniedConnections {
 				t.Fatal("opposite literal family reached the target")
 			}
 		})
 	}
-	if privateRequests.Load() != 0 {
+	if privateRequests.Load() != 0 || privateConnections.Load() != 0 {
 		t.Fatal("private target was reached")
 	}
+	if literal4Connections.Load() != 1 || literal6Connections.Load() != 1 {
+		t.Fatal("opposite family established a TCP connection")
+	}
+}
+
+type nativeTargetAcceptCounter struct {
+	net.Listener
+	count *atomic.Int64
+}
+
+func (l *nativeTargetAcceptCounter) Accept() (net.Conn, error) {
+	connection, err := l.Listener.Accept()
+	if err == nil {
+		l.count.Add(1)
+	}
+	return connection, err
 }
 
 // Intentionally plain HTTP to an IP literal: no SNI/hostname override can turn
