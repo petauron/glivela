@@ -180,6 +180,10 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 	defer stop()
 	probe(primary, true)
 	probe(other, true)
+	stop()
+	t.Run("hysteria2", func(t *testing.T) {
+		exerciseHysteriaAccountAuthentication(t, ctx, driver, decoy, target, pool, &requests)
+	})
 }
 
 // Fixed PROXY protocol fixture required by the unchanged rendered entry

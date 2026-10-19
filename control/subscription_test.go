@@ -22,11 +22,6 @@ import (
 // observations. This does not prove actual Docker or public inbound traffic.
 func subscriptionFixture(t *testing.T, routed bool, decoyTarget ...string) (*Store, Desired, string, string) {
 	t.Helper()
-	s := store(t)
-	dir := filepath.Dir(s.path)
-	if err := os.Chmod(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
 	d := entryArtifact(t, "entry-example", 1)
 	if routed {
 		d = withRoutedEntry(t, d)
@@ -77,6 +72,17 @@ func subscriptionFixture(t *testing.T, routed bool, decoyTarget ...string) (*Sto
 	if routed {
 		m.References.Nodes["landing-example"] = glivela.ImportNode{Name: "Example landing", PreviousStatus: "active"}
 	}
+	return ownedSubscriptionFixture(t, m, d, routed)
+}
+
+func ownedSubscriptionFixture(t *testing.T, m glivela.ImportMaterial, d Desired, routed bool) (*Store, Desired, string, string) {
+	t.Helper()
+	s := store(t)
+	dir := filepath.Dir(s.path)
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	var err error
 	m.Plan, err = glivela.PlanImport(m.Plan.Accounts)
 	if err != nil {
 		t.Fatal(err)
