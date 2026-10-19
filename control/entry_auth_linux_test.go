@@ -67,7 +67,7 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 		}
 	}
 	ip("link", "set", "lo", "up")
-	for _, address := range []string{"100.64.0.3/32", "100.64.0.4/32", "93.184.216.34/32", "1.1.1.1/32", "1.0.0.1/32"} {
+	for _, address := range []string{"100.64.0.3/32", "100.64.0.4/32", "93.184.216.34/32", "93.184.216.35/32", "1.1.1.1/32", "1.0.0.1/32"} {
 		ip("addr", "add", address, "dev", "lo")
 	}
 	dnsLog := filepath.Join(t.TempDir(), "resolver.log")
@@ -75,7 +75,9 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 	defer stopDNS()
 	decoy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
 	decoy.Listener.Close()
-	decoy.Listener, err = net.Listen("tcp", "100.64.0.4:0")
+	// The owned endpoint projects its reviewed IP onto port 443. Keep that
+	// metadata and the real isolated decoy listener aligned, without fallback.
+	decoy.Listener, err = net.Listen("tcp", "93.184.216.35:443")
 	if err != nil {
 		t.Fatal(err)
 	}

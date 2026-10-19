@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,6 +39,13 @@ func subscriptionFixture(t *testing.T, routed bool, decoyTarget ...string) (*Sto
 	}
 	m := dataImportFixture(t)
 	m.Endpoints[0].Reality = d.Entry.RealityEndpoints[0]
+	if len(decoyTarget) > 0 {
+		address, port, err := net.SplitHostPort(decoyTarget[0])
+		if err != nil || net.ParseIP(address) == nil || port != "443" {
+			t.Fatal("decoy fixture must match the reviewed fixed-IP target on port 443")
+		}
+		m.Endpoints[0].TargetIP = address
+	}
 	m.Endpoints[0].QuotaAppliedEnabled = true
 	m.Plan.Accounts[0].Credentials = nil
 	m.Plan.Accounts[0].Usage = nil
