@@ -20,7 +20,7 @@ import (
 
 // A real encrypted handover and controller load, with synthetic runtime
 // observations. This does not prove actual Docker or public inbound traffic.
-func subscriptionFixture(t *testing.T, routed bool) (*Store, Desired, string, string) {
+func subscriptionFixture(t *testing.T, routed bool, decoyTarget ...string) (*Store, Desired, string, string) {
 	t.Helper()
 	s := store(t)
 	dir := filepath.Dir(s.path)
@@ -30,6 +30,16 @@ func subscriptionFixture(t *testing.T, routed bool) (*Store, Desired, string, st
 	d := entryArtifact(t, "entry-example", 1)
 	if routed {
 		d = withRoutedEntry(t, d)
+	}
+	if len(decoyTarget) > 0 {
+		plan := *d.clone().Entry
+		plan.RealityEndpoints[0].Target = decoyTarget[0]
+		plan.RealityEndpoints[0].ServerNames = []string{"example.com"}
+		var err error
+		d, err = NewEntryDesired(plan, *d.EntryNetwork)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	m := dataImportFixture(t)
 	m.Endpoints[0].Reality = d.Entry.RealityEndpoints[0]
