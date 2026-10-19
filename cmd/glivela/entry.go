@@ -36,67 +36,6 @@ func retireEntryCommand(parent context.Context, args []string, output io.Writer)
 	}{Status: "entry-retired-stop-confirmed"})
 }
 
-// Provisioning is local/offline, not an administrator or node-channel command.
-// No arbitrary image, host script or container operation is accepted remotely.
-func provisionEntryCommand(parent context.Context, args []string, output io.Writer) error {
-	flags := flag.NewFlagSet("provision-entry", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	bootstrap := flags.String("config", "", "private node bootstrap")
-	desiredPath := flags.String("desired", "", "private controller-produced entry desired state")
-	checkpoint := flags.String("legacy-checkpoint", "", "optional frozen legacy entry backup for first handover")
-	if flags.Parse(args) != nil || flags.NArg() != 0 || *bootstrap == "" || *desiredPath == "" {
-		return errors.New("entry bootstrap and desired file required")
-	}
-	cfg, err := readMaintenanceConfiguration(*bootstrap)
-	if err != nil || cfg.Mode != "node" || cfg.Entry == nil || cfg.Entry.ContainerID != "" || cfg.Entry.ImageID != "" {
-		return errors.New("entry provisioning requires an uninitialized local entry bootstrap")
-	}
-	original, err := os.ReadFile(*bootstrap)
-	if err != nil {
-		return err
-	}
-	info, err := os.Lstat(*desiredPath)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 8<<20 {
-		return errors.New("private entry desired file required")
-	}
-	raw, err := os.ReadFile(*desiredPath)
-	if err != nil {
-		return err
-	}
-	var desired control.Desired
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var extra any
-	if decoder.Decode(&desired) != nil || decoder.Decode(&extra) != io.EOF || desired.Validate() != nil || desired.Entry == nil {
-		return errors.New("invalid entry desired file")
-	}
-	distribution, err := runningDistribution()
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
-	defer cancel()
-	var container control.EntryContainer
-	if *checkpoint != "" {
-		container, err = control.AdoptLegacyEntry(ctx, *checkpoint, *cfg.Entry, cfg.Directory, distribution, desired)
-	} else {
-		container, err = control.ProvisionEntry(ctx, *cfg.Entry, cfg.Directory, distribution, desired)
-	}
-	if err != nil {
-		return err
-	}
-	cfg.Entry = &container
-	if *checkpoint != "" {
-		cfg.LegacyEntryCheckpoint = *checkpoint
-	}
-	if err := savePrivateConfiguration(*bootstrap, original, cfg); err != nil {
-		return err
-	}
-	return json.NewEncoder(output).Encode(struct {
-		Status string `json:"status"`
-	}{Status: "entry-provisioned-awaiting-route-verification"})
-}
-
 // Application-owned initialization is explicit and atomic. The host's normal
 // upgrade never rewrites these post-install settings.
 func savePrivateConfiguration(path string, original []byte, cfg configuration) error {

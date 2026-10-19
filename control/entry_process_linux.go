@@ -26,11 +26,15 @@ func verifyEntryProcess(container EntryContainer, state entryContainerState, des
 	if err := verifyEntryConfigFile(filepath.Join(root, "root/etc/glivela/config.json"), desired.Config); err != nil {
 		return err
 	}
+	return verifyEntryProcessResources(root, container.UID, container.GID, desired, container.GID != 0 && len(desired.Entry.HysteriaEndpoints) > 0)
+}
+
+func verifyEntryProcessResources(root string, uid, gid uint32, desired Desired, allowBind bool) error {
 	status, err := os.Open(filepath.Join(root, "status"))
 	if err != nil {
 		return errors.New("control: cannot inspect owned entry process")
 	}
-	err = verifyEntryProcessStatus(status, container, len(desired.Entry.HysteriaEndpoints) > 0)
+	err = verifyEntryIdentity(status, uid, gid, allowBind)
 	status.Close()
 	if err != nil {
 		return err
@@ -39,8 +43,8 @@ func verifyEntryProcess(container EntryContainer, state entryContainerState, des
 	for _, endpoint := range desired.Entry.RealityEndpoints {
 		sockets = append(sockets, entrySocket{"tcp", endpoint.ListenAddress, uint16(endpoint.ListenPort)})
 	}
-	for range desired.Entry.HysteriaEndpoints {
-		sockets = append(sockets, entrySocket{"udp", "0.0.0.0", 443})
+	for _, endpoint := range desired.Entry.HysteriaEndpoints {
+		sockets = append(sockets, entrySocket{"udp", "0.0.0.0", uint16(endpoint.ListenPort)})
 	}
 	needed := map[string][]entrySocket{}
 	for _, socket := range sockets {
@@ -52,7 +56,7 @@ func verifyEntryProcess(container EntryContainer, state entryContainerState, des
 		if err != nil {
 			return errors.New("control: entry socket table unavailable")
 		}
-		found, err := entrySocketInodes(file, wanted, container.UID)
+		found, err := entrySocketInodes(file, wanted, uid)
 		file.Close()
 		if err != nil {
 			return err
@@ -95,6 +99,10 @@ func verifyEntryProcess(container EntryContainer, state entryContainerState, des
 }
 
 func verifyEntryProcessStatus(reader io.Reader, container EntryContainer, hy2 bool) error {
+	return verifyEntryIdentity(reader, container.UID, container.GID, hy2)
+}
+
+func verifyEntryIdentity(reader io.Reader, uid, gid uint32, hy2 bool) error {
 	wanted := map[string]bool{"Uid:": false, "Gid:": false, "NoNewPrivs:": false, "CapEff:": false, "CapPrm:": false, "CapBnd:": false}
 	limited := &io.LimitedReader{R: reader, N: (64 << 10) + 1}
 	scanner := bufio.NewScanner(limited)
@@ -118,7 +126,7 @@ func verifyEntryProcessStatus(reader io.Reader, container EntryContainer, hy2 bo
 			}
 			for _, value := range fields[1:] {
 				id, err := strconv.ParseUint(value, 10, 32)
-				if err != nil || fields[0] == "Uid:" && uint32(id) != container.UID || fields[0] == "Gid:" && container.GID != 0 && uint32(id) != container.GID {
+				if err != nil || fields[0] == "Uid:" && uint32(id) != uid || fields[0] == "Gid:" && gid != 0 && uint32(id) != gid {
 					return errors.New("control: entry process user/group changed")
 				}
 			}
@@ -129,7 +137,7 @@ func verifyEntryProcessStatus(reader io.Reader, container EntryContainer, hy2 bo
 		default:
 			caps, err := strconv.ParseUint(fields[1], 16, 64)
 			var allowed uint64
-			if container.GID != 0 && hy2 {
+			if gid != 0 && hy2 {
 				allowed = 1 << 10
 			} // CAP_NET_BIND_SERVICE only.
 			if len(fields) != 2 || err != nil || caps & ^allowed != 0 {

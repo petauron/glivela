@@ -2,10 +2,25 @@
 
 ## Runtime roles
 
-The controller and its management UI remain a Docker application. Only the
-host-side node executor and landing Xray use native services; there is no
-controller systemd variant or Docker-to-systemd installation-record migration.
-Entry Xray retains its existing container topology during takeover.
+The controller and its management UI remain a nonroot Docker application,
+without a Docker socket or host-network privileges. Both entry and landing
+machines install the Glivela node and official Xray as native systemd services;
+new nodes do not require Docker. There is no Docker entry runtime fallback.
+
+The signed native namespace produces `vastora-pkg-glivela-node.service` and
+`vastora-pkg-glivela-xray.service`. Application IDs, private configuration and
+state directories remain instance-scoped; readable unit names do not authorize
+adoption or overwrite. An existing foreign unit is a collision, not an alias.
+The manual nonroot worker receives only its configuration credential snapshot.
+The entry declaration grants CAP_NET_BIND_SERVICE for existing low-port HY2
+listeners, not root, NET_ADMIN or arbitrary capabilities. The root node owns
+firewall changes and direct controller communication for both roles.
+
+Existing Docker entries require an explicit backup-first native handover of
+installation ownership and private backend bindings before activation. Preserve
+public subscription identity, credentials, ports and history. Keep stopped old
+resources solely as recovery evidence; source CI or a running new service is
+not successful migration. The full installed handover remains a release gate.
 
 The existing release job packages both verified architecture bundles into the
 scratch controller image at `ghcr.io/petauron/glivela`, with source provenance.
@@ -41,24 +56,19 @@ checksums in the still-private draft only after that verification; then resume
 the existing draft-asset verification/publication steps. A mismatched image or
 already public release must never be repaired by moving tags or replacing assets.
 
-## Entry uninstall boundary (MVP)
+## Native uninstall boundary (MVP)
 
-Uninstall is deliberately two steps, not a Vastora lifecycle RPC. First retire
-the entry in Glivela: stop its installed Glivela node service, then invoke that
-installation's `glivela retire-entry -directory <private-node-journal>` locally.
-The command requires the exclusive node lease, verifies exact container
-ownership and a completed runtime journal, persists retirement intent, and
-independently reads back the stopped container before reporting
-`entry-retired-stop-confirmed`. A failed or interrupted command is not stop
-confirmation; retry retirement before uninstalling. Node startup and provisioning
-reject retired installation records.
+Both native services are declared installer-owned resources. The generic
+uninstaller verifies ownership and backs up/stops their running set before
+removing declared files. It does not need proxy semantics or a lifecycle RPC.
+Use data-retaining uninstall: configuration, identity, history and recovery
+backups must not be purged as part of migration.
 
-Only after this confirmation may Vastora uninstall the declared application
-services/files. Vastora neither discovers nor manages Glivela's containers.
-Retirement retains the stopped container, private configuration, identity,
-history and recovery records; it does not purge them or claim route success.
-Do not use a data-purge option during this two-step uninstall. Cleanup of
-retained resources is separate and must not be inferred from application removal.
+The offline `retire-entry` command applies only to an old Docker checkpoint,
+not a new native installation. Retained old containers are one-time migration
+recovery resources; their retirement requires independent stop/read-back and
+route acceptance before separately authorized cleanup. They are not discovered
+or deleted implicitly by uninstalling the new native service.
 
 Release Please v5 is pinned to 45996ed1f6d02564a971a2fa1b5860e934307cf7.
 Like Vastora, it uses only the built-in GITHUB_TOKEN; no extra release secret or

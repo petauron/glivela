@@ -317,7 +317,7 @@ func startAuthenticationCore(t *testing.T, parent context.Context, driver System
 	}
 	ctx, cancel := context.WithCancel(parent)
 	command := exec.CommandContext(ctx, driver.Binary, "run", "-config", path)
-	var diagnostics entryDockerOutput
+	var diagnostics entryCommandOutput
 	command.Stdout, command.Stderr = &diagnostics, &diagnostics
 	if err := command.Start(); err != nil {
 		cancel()

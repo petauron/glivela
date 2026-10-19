@@ -77,13 +77,6 @@ func main() {
 		}
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "provision-entry" {
-		if err := provisionEntryCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
-			log.Print("Glivela entry provisioning failed; retained resources require inspection")
-			os.Exit(1)
-		}
-		return
-	}
 	if len(os.Args) > 1 && os.Args[1] == "switch-legacy-landing" {
 		if err := switchLandingCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
 			log.Print("Glivela first cutover did not complete; inspect retained local recovery state")
@@ -213,6 +206,12 @@ func readConfigurationMode(path string, maintenance bool) (configuration, error)
 	if cfg.Mode != "controller" && cfg.PublicSubscriptionOrigin != "" {
 		return cfg, errors.New("published subscription origin belongs to the controller only")
 	}
+	if cfg.Xray.Role != "" && cfg.Xray.Role != "entry" && cfg.Xray.Role != "landing" {
+		return cfg, errors.New("unknown native Xray role")
+	}
+	if !maintenance && cfg.Mode == "node" && (cfg.Entry != nil || cfg.EntryProvision || cfg.LegacyEntryCheckpoint != "") {
+		return cfg, errors.New("Docker entry bootstrap requires explicit offline native handover; no runtime fallback is available")
+	}
 	return cfg, nil
 }
 
@@ -220,11 +219,6 @@ func run(ctx context.Context, path string) error {
 	cfg, err := readConfiguration(path)
 	if err != nil {
 		return err
-	}
-	if cfg.Mode == "node" && cfg.Entry != nil {
-		if err := control.PrepareEntryDirectories(*cfg.Entry, cfg.Directory); err != nil {
-			return err
-		}
 	}
 	unlock, err := control.LockDirectory(cfg.Directory)
 	if err != nil {
@@ -269,14 +263,13 @@ func run(ctx context.Context, path string) error {
 		// The native installer extracts both executables from the same verified
 		// application bundle. Derive its directory from this running executable,
 		// never from bootstrap data or a guessed host installation layout.
-		var nodeRuntime control.Runtime
-		var recoverRuntime func(context.Context) error
-		if cfg.Entry != nil {
-			distribution, resolveErr := runningDistribution()
-			if resolveErr != nil {
-				return resolveErr
-			}
-			entry := &control.EntryRuntime{Template: *cfg.Entry, Directory: cfg.Directory, Distribution: distribution, AllowProvision: cfg.EntryProvision, LegacyCheckpoint: cfg.LegacyEntryCheckpoint}
+		cfg.Xray, err = resolveNodeDriver(cfg.Xray)
+		if err != nil {
+			return err
+		}
+		var driver control.Driver = cfg.Xray
+		if cfg.Xray.Role == "entry" {
+			entry := &control.NativeEntryDriver{SystemdDriver: cfg.Xray, Directory: cfg.Directory}
 			defer func() {
 				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
@@ -284,28 +277,22 @@ func run(ctx context.Context, path string) error {
 					log.Print("Glivela entry gate shutdown requires investigation")
 				}
 			}()
-			nodeRuntime, recoverRuntime = entry, entry.Recover
-		} else {
-			cfg.Xray, err = resolveNodeDriver(cfg.Xray)
-			runtime := &control.NativeRuntime{Directory: cfg.Directory, Driver: cfg.Xray}
-			nodeRuntime, recoverRuntime = runtime, runtime.Recover
+			driver = entry
 		}
-		if err != nil {
-			return err
-		}
+		nodeRuntime := &control.NativeRuntime{Directory: cfg.Directory, Driver: driver}
 		client, err := control.NewClient(cfg.Controller, identity, roots)
 		if err != nil {
 			return err
 		}
 		defer client.Close()
 		recovery, cancel := context.WithTimeout(ctx, 30*time.Second)
-		err = recoverRuntime(recovery)
+		err = nodeRuntime.Recover(recovery)
 		cancel()
 		if err != nil {
 			return err
 		}
 		nodeRunner := control.NodeRunner{Client: client, Runtime: nodeRuntime}
-		if cfg.Entry != nil {
+		if cfg.Xray.Role == "entry" {
 			return runEntryReconcilers(ctx, nodeRunner, control.RouteRunner{Client: client})
 		}
 		return nodeRunner.Run(ctx, 10*time.Second, func(err error) {

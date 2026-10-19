@@ -91,9 +91,13 @@ func (d *EntryDriver) PeerStatus() map[string]landing.MonitorStatus {
 }
 
 func (d *EntryDriver) EntryHealth(desired Desired) *EntryHealthReport {
-	d.monitors.mu.Lock()
-	defer d.monitors.mu.Unlock()
-	g := d.monitors.group
+	return d.monitors.health(desired)
+}
+
+func (m *entryMonitors) health(desired Desired) *EntryHealthReport {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g := m.group
 	if desired.Entry == nil || desired.EntryNetwork == nil || g == nil || g.stopping || g.desired.Revision != desired.Revision || g.desired.ConfigSHA256 != desired.ConfigSHA256 || !reflect.DeepEqual(g.desired.EntryNetwork, desired.EntryNetwork) {
 		return nil
 	}
@@ -118,6 +122,10 @@ func (d *EntryDriver) EntryHealth(desired Desired) *EntryHealthReport {
 }
 
 func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGate) error {
+	return d.monitors.start(desired, gates, d.Container.ApplicationID, d.readyProcess, d.stopOwned, d.links)
+}
+
+func (m *entryMonitors) start(desired Desired, gates []*landing.TrafficGate, entryID string, ready, stop func(context.Context, Desired) error, links func() *landing.LinkChecker) error {
 	if len(desired.EntryNetwork.Peers) == 0 {
 		return nil
 	}
@@ -126,9 +134,9 @@ func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGat
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &entryMonitorGroup{cancel: cancel, done: make(chan struct{}), desired: desired.clone(), active: map[string]bool{}, statuses: map[string]landing.MonitorStatus{}}
-	d.monitors.mu.Lock()
-	if d.monitors.group != nil {
-		d.monitors.mu.Unlock()
+	m.mu.Lock()
+	if m.group != nil {
+		m.mu.Unlock()
 		cancel()
 		return errors.New("control: previous entry monitors still owned")
 	}
@@ -136,15 +144,15 @@ func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGat
 		g.active[peer.EgressID] = true
 		g.statuses[peer.EgressID] = landing.MonitorStatus{Revision: desired.Revision, State: "blocked", Reason: "monitor-starting"}
 	}
-	d.monitors.group = g
-	d.monitors.mu.Unlock()
+	m.group = g
+	m.mu.Unlock()
 	var workers sync.WaitGroup
 	var quarantine sync.Once
 	for index, peer := range desired.EntryNetwork.Peers {
 		checker := landing.NewLinkChecker()
-		if d.links != nil {
+		if links != nil {
 			checker.Close()
-			checker = d.links()
+			checker = links()
 		}
 		monitor := landing.Monitor{Gate: gates[index], Links: checker, TCPOnly: true, ExpectedExit: peer.ExpectedExit,
 			CheckBusiness: func(check context.Context, identity landing.PeerIdentity, revision uint64) (landing.BusinessResult, error) {
@@ -154,10 +162,10 @@ func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGat
 				if err != nil || before != *desired.EntryNetwork.Source {
 					return result, errors.New("control: entry private identity changed")
 				}
-				if err := d.readyProcess(check, desired); err != nil {
+				if err := ready(check, desired); err != nil {
 					return result, err
 				}
-				probe := RouteProbe{AttemptID: "entry-monitor", SnapshotID: desired.ConfigSHA256, EntryID: d.Container.ApplicationID, LandingID: peer.EgressID, Revision: revision, ConfigSHA256: desired.ConfigSHA256, SOCKSAddress: net.JoinHostPort(identity.Address, "1080"), Target: peer.Target, ExpectedExit: peer.ExpectedExit}
+				probe := RouteProbe{AttemptID: "entry-monitor", SnapshotID: desired.ConfigSHA256, EntryID: entryID, LandingID: peer.EgressID, Revision: revision, ConfigSHA256: desired.ConfigSHA256, SOCKSAddress: net.JoinHostPort(identity.Address, "1080"), Target: peer.Target, ExpectedExit: peer.ExpectedExit}
 				observed, err := CheckRoute(check, probe)
 				if err != nil {
 					return result, err
@@ -166,30 +174,30 @@ func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGat
 				if err != nil || after != before {
 					return result, errors.New("control: entry private identity changed during probe")
 				}
-				if err := d.readyProcess(check, desired); err != nil {
+				if err := ready(check, desired); err != nil {
 					return result, err
 				}
 				result.TCP, result.ExitIP, result.CheckedAt = observed.Passed, observed.ObservedExit, time.Now()
 				return result, nil
 			}, Report: func(status landing.MonitorStatus) {
-				d.monitors.mu.Lock()
-				if d.monitors.group == g {
+				m.mu.Lock()
+				if m.group == g {
 					g.statuses[peer.EgressID] = status
 				}
-				d.monitors.mu.Unlock()
+				m.mu.Unlock()
 			},
 		}
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
 			err := monitor.Run(ctx)
-			d.monitors.mu.Lock()
+			m.mu.Lock()
 			g.active[peer.EgressID] = false
 			if err != nil && ctx.Err() == nil {
 				g.stopping = true
 			}
 			g.statuses[peer.EgressID] = landing.MonitorStatus{Revision: desired.Revision, State: "blocked", Reason: "monitor-stopped", CheckedAt: time.Now().UTC()}
-			d.monitors.mu.Unlock()
+			m.mu.Unlock()
 			if err != nil && ctx.Err() == nil {
 				// Ordinary probe failures stay in Monitor.Run and close only
 				// their peer. A fatal loss of gate ownership is different: the
@@ -201,7 +209,7 @@ func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGat
 					for _, gate := range gates {
 						_ = gate.Block(fence)
 					}
-					_ = d.stopOwned(fence, desired)
+					_ = stop(fence, desired)
 				})
 			}
 		}()

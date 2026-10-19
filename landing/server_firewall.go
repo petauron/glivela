@@ -178,12 +178,16 @@ func (policy ServerFirewall) Verify(ctx context.Context) error {
 		return err
 	}
 	table, _ := policy.identity()
+	return verifyOwnedFirewall(ctx, table, policy.objects())
+}
+
+func verifyOwnedFirewall(ctx context.Context, table string, objects []map[string]nftObject) error {
 	data, err := runNFT(ctx, nil, "--json", "list", "ruleset")
 	var document nftDocument
 	if err != nil || len(data) > nftOutputLimit || json.Unmarshal(data, &document) != nil {
 		return errors.New("landing: cannot inspect native firewall")
 	}
-	found, err := validateNFTPolicy(document, table, policy.objects(), false)
+	found, err := validateNFTPolicy(document, table, objects, false)
 	if err != nil || !found {
 		return errors.New("landing: native firewall is missing or changed")
 	}
@@ -235,20 +239,24 @@ func (policy ServerFirewall) install(ctx context.Context, run func(context.Conte
 		return err
 	}
 	table, _ := policy.identity()
+	return installOwnedFirewall(ctx, run, table, policy.objects())
+}
+
+func installOwnedFirewall(ctx context.Context, run func(context.Context, []byte, ...string) ([]byte, error), table string, objects []map[string]nftObject) error {
 	snapshot := func() (bool, error) {
 		data, err := run(ctx, nil, "--json", "list", "ruleset")
 		var document nftDocument
 		if err != nil || len(data) > nftOutputLimit || json.Unmarshal(data, &document) != nil || document.Objects == nil {
 			return false, errors.New("landing: native firewall state is unavailable")
 		}
-		return validateNFTPolicy(document, table, policy.objects(), false)
+		return validateNFTPolicy(document, table, objects, false)
 	}
 	found, err := snapshot()
 	if err != nil || found {
 		return err
 	}
-	commands := make([]any, 0, len(policy.objects()))
-	for _, object := range policy.objects() {
+	commands := make([]any, 0, len(objects))
+	for _, object := range objects {
 		operation := "create"
 		if object["rule"] != nil {
 			operation = "add"

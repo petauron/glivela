@@ -224,11 +224,11 @@ func (c EntryContainer) verifyState(d Desired, state entryContainerState) error 
 	return nil
 }
 
-type entryDockerOutput struct{ bytes.Buffer }
+type entryCommandOutput struct{ bytes.Buffer }
 
-func (o *entryDockerOutput) Write(p []byte) (int, error) {
+func (o *entryCommandOutput) Write(p []byte) (int, error) {
 	if len(p) > (1<<20)-o.Len() {
-		return 0, errors.New("control: Docker inspection exceeds limit")
+		return 0, errors.New("control: local command output exceeds limit")
 	}
 	return o.Buffer.Write(p)
 }
@@ -246,7 +246,7 @@ func runEntryDocker(ctx context.Context, arguments ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, "/usr/bin/docker", append([]string{"--host=unix:///var/run/docker.sock"}, arguments...)...)
 	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "DOCKER_CONFIG=/var/empty/glivela-docker"}
 	command.WaitDelay = time.Second
-	var output entryDockerOutput
+	var output entryCommandOutput
 	command.Stdout = &output
 	if command.Run() != nil {
 		return nil, errors.New("control: entry Docker operation unavailable")

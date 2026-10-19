@@ -37,6 +37,8 @@ type SystemdDriver struct {
 	Unit         string `json:"-"`
 	WorkerUser   string `json:"-"`
 	WorkerUID    uint32 `json:"-"`
+	WorkerGID    uint32 `json:"-"`
+	Role         string `json:"role,omitempty"`
 	Interface    string `json:"interface"`
 }
 
@@ -92,6 +94,7 @@ func (d SystemdDriver) bindWorker(worker *user.User) (SystemdDriver, error) {
 		return SystemdDriver{}, errors.New("control: dedicated worker cannot use root identity")
 	}
 	d.WorkerUID = uint32(uid)
+	d.WorkerGID = uint32(gid)
 	return d, nil
 }
 
@@ -123,7 +126,7 @@ func verifyExecutableFile(path, expected string) error {
 }
 
 func (d SystemdDriver) Validate(ctx context.Context, desired Desired, config string) error {
-	if desired.Landing == nil || desired.Entry != nil || desired.Validate() != nil {
+	if d.Role != "" && d.Role != "landing" || desired.Landing == nil || desired.Entry != nil || desired.Validate() != nil {
 		return errors.New("control: native landing driver requires a landing plan")
 	}
 	return validateXrayFile(ctx, d.Binary, d.BinarySHA256, config)

@@ -193,7 +193,7 @@ func TestEntryInspectionParsingIsBoundedAndDoesNotLeakDiagnostics(t *testing.T) 
 			t.Fatal("unsafe inspection parsing")
 		}
 	}
-	var buffer entryDockerOutput
+	var buffer entryCommandOutput
 	if _, err := buffer.Write(make([]byte, 1<<20)); err != nil {
 		t.Fatal(err)
 	}

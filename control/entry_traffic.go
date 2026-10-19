@@ -34,16 +34,28 @@ func (d *EntryDriver) traffic(ctx context.Context, desired Desired) (*EntryTraff
 	if err != nil {
 		return nil, err
 	}
+	sample, err := parseEntryTraffic(raw, desired, before.State.StartedAt)
+	if err != nil {
+		return nil, err
+	}
+	after, err := d.inspect(ctx, desired)
+	if err != nil || !after.State.Running || after.State.Restarting || after.State.Pid != before.State.Pid || after.State.StartedAt != before.State.StartedAt {
+		return nil, errors.New("control: entry restarted during traffic sampling")
+	}
+	return sample, nil
+}
+
+func parseEntryTraffic(raw []byte, desired Desired, startedAt string) (*EntryTraffic, error) {
 	var result struct {
 		Stat []struct {
 			Name  string      `json:"name"`
 			Value json.Number `json:"value"`
 		} `json:"stat"`
 	}
-	if json.Unmarshal(raw, &result) != nil || len(result.Stat) > 32768 {
+	if desired.Entry == nil || len(raw) > 1<<20 || json.Unmarshal(raw, &result) != nil || len(result.Stat) > 32768 {
 		return nil, errors.New("control: invalid entry traffic response")
 	}
-	sample := &EntryTraffic{StartedAt: before.State.StartedAt, SampledAt: time.Now().UTC(), Counters: map[string]TrafficCounter{}}
+	sample := &EntryTraffic{StartedAt: startedAt, SampledAt: time.Now().UTC(), Counters: map[string]TrafficCounter{}}
 	users := map[string]string{}
 	for _, material := range desired.Entry.Credentials {
 		users[material.Credential.User] = material.Credential.ID
@@ -72,10 +84,6 @@ func (d *EntryDriver) traffic(ctx context.Context, desired Desired) (*EntryTraff
 			counter.Download = value
 		}
 		sample.Counters[id] = counter
-	}
-	after, err := d.inspect(ctx, desired)
-	if err != nil || !after.State.Running || after.State.Restarting || after.State.Pid != before.State.Pid || after.State.StartedAt != before.State.StartedAt {
-		return nil, errors.New("control: entry restarted during traffic sampling")
 	}
 	return sample, nil
 }
