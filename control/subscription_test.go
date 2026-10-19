@@ -114,7 +114,9 @@ func ownedSubscriptionFixture(t *testing.T, m glivela.ImportMaterial, d Desired,
 			t.Fatal(err)
 		}
 	}
-	return s, d, entryCert, landingCert
+	// Enrollment projects the retained hostname to its reviewed fixed IP.
+	// Report the actual stored revision/digest, not the pre-enrollment input.
+	return s, s.nodes[entryCert].Desired.clone(), entryCert, landingCert
 }
 
 func getSubscription(t *testing.T, s *Store, path, agent string) *httptest.ResponseRecorder {
