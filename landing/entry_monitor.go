@@ -1,0 +1,171 @@
+package landing
+
+import (
+	"context"
+	"errors"
+	"net/netip"
+	"time"
+)
+
+// BusinessResult must describe actual authenticated TCP and UDP exchanges
+// through this peer's SOCKS listener. UDPRelay must be the peer's private
+// address and nonzero association port, not an arbitrary returned endpoint.
+// Ping alone, a listening port, or successful UDP ASSOCIATE is insufficient.
+type BusinessResult struct {
+	Peer      PeerIdentity
+	Revision  uint64
+	TCP       bool
+	UDP       bool
+	UDPRelay  string
+	ExitIP    string
+	StartedAt time.Time
+	CheckedAt time.Time
+}
+
+type MonitorStatus struct {
+	Revision      uint64    `json:"revision"`
+	State         string    `json:"state"`
+	LinkState     string    `json:"linkState"`
+	Reason        string    `json:"reason"`
+	TCP           bool      `json:"tcp"`
+	UDP           bool      `json:"udp"`
+	ExitIP        string    `json:"exitIp,omitempty"`
+	CheckedAt     time.Time `json:"checkedAt"`
+	StartedAt     time.Time `json:"startedAt"`
+	DurationMS    int64     `json:"durationMs"`
+	Stage         string    `json:"stage"`
+	LastHealthyAt time.Time `json:"lastHealthyAt,omitempty"`
+	AllowedUntil  time.Time `json:"allowedUntil,omitempty"`
+}
+
+// Monitor is only for a route which has already been applied. Initial enable
+// must check before changing the old direct configuration. A configuration task
+// closes the gate and terminates old connections synchronously before Run.
+// Runtime health failure is peer-scoped: closing that peer's gate blocks both
+// existing and new traffic without restarting the shared proxy process.
+type Monitor struct {
+	Gate          *TrafficGate
+	Links         *LinkChecker
+	CheckBusiness func(context.Context, PeerIdentity, uint64) (BusinessResult, error)
+	Report        func(MonitorStatus)
+	TCPOnly       bool
+	ExpectedExit  string
+}
+
+// Run owns Links for this monitor's lifetime, including validation and setup
+// failures. A checker passed here must not be shared with another monitor.
+func (m *Monitor) Run(ctx context.Context) error {
+	defer m.Links.Close()
+	exit, err := netip.ParseAddr(m.ExpectedExit)
+	if m.Gate == nil || m.Links == nil || m.CheckBusiness == nil || err != nil || !PublicIP(exit) || exit.String() != m.ExpectedExit {
+		return errors.New("landing: incomplete runtime monitor")
+	}
+	// No permission survives process restart. A kernel boot fence is separately
+	// required: a monitor cannot retroactively close a pre-start boot window.
+	if err := m.Gate.Install(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = m.close() }()
+	ticker := time.NewTicker(CheckInterval)
+	defer ticker.Stop()
+	var lastHealthy time.Time
+	for {
+		started := time.Now()
+		status := MonitorStatus{Revision: m.Gate.revision, State: "blocked", LinkState: "unknown", Stage: "private_link_before", Reason: "check_failed", StartedAt: started.UTC(), LastHealthyAt: lastHealthy}
+		before := m.Links.Check(ctx, m.Gate.peer)
+		status.LinkState, status.Reason = before.State, before.Reason
+		var business BusinessResult
+		var after LinkResult
+		var checkErr error
+		if before.State == "direct" {
+			status.Stage = "business_check"
+			businessCtx, cancel := context.WithTimeout(ctx, businessCheckTimeout(m.TCPOnly))
+			business, checkErr = m.CheckBusiness(businessCtx, m.Gate.peer, m.Gate.revision)
+			if businessCtx.Err() != nil && checkErr == nil {
+				checkErr = businessCtx.Err()
+			}
+			if checkErr != nil {
+				status.Stage, status.Reason = "business_check", "business_check_failed"
+			}
+			cancel()
+			status.TCP, status.UDP = business.TCP, business.UDP
+			if checkErr == nil {
+				after = m.Links.Check(ctx, m.Gate.peer)
+				status.Stage, status.LinkState, status.Reason = "private_link_after", after.State, after.Reason
+			}
+		}
+		until, healthy := leaseDeadlineForTransport(m.Gate, before, business, after, time.Now(), m.TCPOnly)
+		if healthy && business.ExitIP == m.ExpectedExit && checkErr == nil && ctx.Err() == nil {
+			var confirmed time.Time
+			confirmed, checkErr = m.Gate.renew(ctx, until)
+			if checkErr == nil {
+				status.State, status.Stage, status.Reason = "healthy", "complete", "direct_and_business_ready"
+				status.TCP, status.UDP, status.ExitIP = business.TCP, business.UDP, business.ExitIP
+				status.AllowedUntil = confirmed.UTC()
+				lastHealthy = time.Now().UTC()
+				status.LastHealthyAt = lastHealthy
+			} else {
+				status.Stage, status.Reason = "gate", "renewal_failed"
+			}
+		}
+		if status.State != "healthy" {
+			// A failed renewal can have committed despite a lost response. Closing
+			// the peer-scoped gate blocks both existing and new traffic without
+			// interrupting unrelated sessions in the shared proxy process.
+			if err := m.close(); err != nil {
+				return err
+			}
+			if before.State == "direct" && checkErr == nil && after.State == "direct" {
+				status.Stage, status.Reason = "verification", "evidence_invalid_or_expired"
+			}
+		}
+		status.CheckedAt = time.Now().UTC()
+		status.DurationMS = time.Since(started).Milliseconds()
+		if m.Report != nil {
+			m.Report(status)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *Monitor) close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*nftTimeout)
+	defer cancel()
+	return m.Gate.Block(ctx)
+}
+
+func businessCheckTimeout(tcpOnly bool) time.Duration {
+	if tcpOnly {
+		return TCPCheckTimeout
+	}
+	return CheckTimeout
+}
+
+func leaseDeadlineForTransport(gate *TrafficGate, before LinkResult, business BusinessResult, after LinkResult, now time.Time, tcpOnly bool) (time.Time, bool) {
+	validLink := func(result LinkResult) bool {
+		return result.State == "direct" && result.Reason == "fresh_disco_direct_response" && !result.StartedAt.IsZero() &&
+			!result.CheckedAt.Before(result.StartedAt) && result.CheckedAt.Sub(result.StartedAt) <= CheckTimeout && !result.CheckedAt.After(now)
+	}
+	if !validLink(before) || !validLink(after) || business.Peer != gate.peer || business.Revision != gate.revision || !business.TCP ||
+		business.StartedAt.Before(before.CheckedAt) || business.CheckedAt.Before(business.StartedAt) || business.CheckedAt.Sub(business.StartedAt) > businessCheckTimeout(tcpOnly) ||
+		after.StartedAt.Before(business.CheckedAt) || (!tcpOnly && (!business.UDP || !validEntryUDPRelay(business.UDPRelay, gate.peer.Address))) {
+		return time.Time{}, false
+	}
+	address, err := netip.ParseAddr(business.ExitIP)
+	if err != nil || !PublicIP(address) {
+		return time.Time{}, false
+	}
+	deadline := before.StartedAt.Add(AllowLifetime)
+	return deadline, deadline.After(now.Add(nftTimeout + time.Second))
+}
+
+// Xray allocates a new relay port for each association. The probe must still
+// bind the returned relay to the enrolled private peer, never an arbitrary host.
+func validEntryUDPRelay(value, address string) bool {
+	endpoint, err := netip.ParseAddrPort(value)
+	return err == nil && endpoint.String() == value && endpoint.Addr().String() == address && endpoint.Port() != 0
+}

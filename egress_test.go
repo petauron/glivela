@@ -55,6 +55,56 @@ func TestNativeEgressRejectsUnknownPolicy(t *testing.T) {
 	}
 }
 
+func TestNativeBusinessDNSAndFinalDestinationPolicyAreExplicit(t *testing.T) {
+	for _, policy := range []EgressPolicy{EgressAuto, EgressIPv4Only, EgressIPv6Only} {
+		plan := egressPlanFixture()
+		plan.NativeEgress = policy
+		raw, err := RenderXrayConfiguration(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config struct {
+			DNS struct {
+				Tag, QueryStrategy string
+				Servers            []string
+			}
+			Outbounds []map[string]any
+			Routing   struct{ Rules []map[string]any }
+		}
+		if json.Unmarshal(raw, &config) != nil || config.DNS.Tag != "resolver" || !reflect.DeepEqual(config.DNS.Servers, []string{"1.1.1.1", "1.0.0.1"}) {
+			t.Fatal("business DNS inherited system/control resolution")
+		}
+		direct := config.Outbounds[0]
+		settings := direct["settings"].(map[string]any)
+		strategy := "ForceIP"
+		if policy == EgressIPv4Only {
+			strategy = "ForceIPv4"
+		}
+		if policy == EgressIPv6Only {
+			strategy = "ForceIPv6"
+		}
+		if settings["domainStrategy"] != strategy || direct["streamSettings"] != nil {
+			t.Fatal("Freedom preflight still resolves through system/socket strategy")
+		}
+		rules := settings["finalRules"].([]any)
+		if len(rules) != 1 || rules[0].(map[string]any)["action"] != "block" {
+			t.Fatal("native target checks bypassed by an allow rule")
+		}
+		blocked := rules[0].(map[string]any)["ip"].([]any)
+		if len(blocked) < len(compositeBlockedCIDRs) {
+			t.Fatal("native private/reserved targets are not guarded")
+		}
+		resolver := config.Outbounds[1]
+		if resolver["tag"] != "resolver" || config.Routing.Rules[1]["outboundTag"] != "resolver" || config.Routing.Rules[2]["outboundTag"] != "blocked" {
+			t.Fatal("resolver lacks private subsystem scope or closed fallback")
+		}
+		resolverRules := resolver["settings"].(map[string]any)["finalRules"].([]any)
+		if len(resolverRules) != 2 || resolverRules[0].(map[string]any)["port"] != "53" || resolverRules[1].(map[string]any)["action"] != "block" {
+			t.Fatal("resolver became an unrestricted alternate native exit")
+		}
+	}
+}
+
 func egressPlanFixture() XrayPlan {
 	nativeID, routeID := "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"
 	native := Credential{ID: "native", AccountID: "account", Kind: NativeCredential, User: "phone", Identity: Identity(nativeID), EntryID: "entry", Enabled: true}

@@ -14,6 +14,51 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  native-package:
+    name: Native runtime distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install reviewed management UI dependencies
+        run: npm ci --prefix ui
+      - name: Build twice and compare immutable distributions
+        run: |
+          sh scripts/build-native-release.sh "$RUNNER_TEMP/native-first"
+          sh scripts/build-native-release.sh "$RUNNER_TEMP/native-second"
+          diff -r "$RUNNER_TEMP/native-first" "$RUNNER_TEMP/native-second"
+          cd "$RUNNER_TEMP/native-first"
+          sha256sum --check SHA256SUMS
+      - name: Exercise bundled official core over verified TLS
+        run: |
+          version=$(jq -er '.["."]' .release-please-manifest.json)
+          mkdir "$RUNNER_TEMP/native-runtime"
+          tar -xzf "$RUNNER_TEMP/native-first/glivela-$version-linux-amd64.tar.gz" -C "$RUNNER_TEMP/native-runtime"
+          "$RUNNER_TEMP/native-runtime/glivela" -help
+          GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" go test ./control -run '^TestOfficialXray(ValidationAndTLS|EntryPlanValidation)$' -count=1 -v
+      - name: Exercise actual landing DNS policy in isolated namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends dnsmasq-base iproute2 nftables
+          go test -c -o "$RUNNER_TEMP/glivela-dns.test" ./landing
+          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
+          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
+          sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDP$' -test.v -test.timeout 50s
+      - name: Verify actual entry account authentication in isolated namespace
+        run: |
+          go test -c -o "$RUNNER_TEMP/glivela-entry-auth.test" ./control
+          sudo env GLIVELA_ENTRY_AUTH_TEST=1 GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net --mount --propagation private "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestRenderedEntryAccountAuthentication$' -test.v -test.timeout 100s
   selection-runtime:
     name: Reviewed target-selection runtime
     runs-on: ubuntu-24.04
@@ -49,6 +94,28 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
+      - name: Verify isolated offline migration tool
+        working-directory: tools/legacy-export
+        run: |
+          go mod verify
+          go vet ./...
+          go test ./... -count=1
+      - name: Keep SQLite out of runtime dependencies
+        run: |
+          go list -deps ./cmd/glivela > "$RUNNER_TEMP/glivela-runtime-deps"
+          if grep -q '^modernc.org/' "$RUNNER_TEMP/glivela-runtime-deps"; then
+            echo 'Offline-only dependencies leaked into the runtime'
+            exit 1
+          fi
+      - name: Verify native firewall in isolated network namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nftables iproute2
+          go test -c -o "$RUNNER_TEMP/glivela-landing.test" ./landing
+          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelFirewallLifecycle$' -test.v -test.timeout 30s
+          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelEntryGateLifecycle$' -test.v -test.timeout 45s
+          go test -c -o "$RUNNER_TEMP/glivela-entry-control.test" ./control
+          sudo env GLIVELA_ENTRY_RUNTIME_KERNEL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-entry-control.test" -test.run '^TestKernelEntryDriverBlockedPeerAndNodeResume$' -test.v -test.timeout 45s
       - name: Run complete tests with version-based race policy
         run: |
           version=$(jq -er '.["."] | select(type == "string")' .release-please-manifest.json)

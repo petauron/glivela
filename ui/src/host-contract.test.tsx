@@ -8,7 +8,7 @@ import type { AppWorkspaceProps } from "./app-workspaces/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren(); });
-it("mounts real pages, accepts host updates and releases its stream on unmount", async () => {
+it("mounts the installation launcher, accepts host updates and opens no host business stream", async () => {
   const close = vi.fn();
   vi.stubGlobal("EventSource", class { close = close; onmessage = null; });
   vi.spyOn(api, "landing").mockResolvedValue({ revision: 1, latencies: [], nodeIds: [], status: "ready", eligibleEntries: 0, readyCombinations: 0, failedCombinations: 0, withheldCombinations: 0, servers: [], candidates: [], proxies: [] });
@@ -21,10 +21,18 @@ it("mounts real pages, accepts host updates and releases its stream on unmount",
   try {
     expect(apiVersion).toBe(1);
     await act(async () => { handle = mount(element, props); });
-    expect(element.textContent).toContain("线路测速");
-    await act(async () => handle!.update({ ...props, language: "en" }));
-    expect(element.textContent).toContain("Link tests");
+    expect(element.textContent).toContain("Glivela 控制端尚不可用");
+    const application = { id: "controller-example", name: "Glivela", nodeId: "node-example", siteId: "site-example", appKey: "vastora-official/meridian", image: "example-image", status: "running", runtime: "docker", updateAvailable: false, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+    const service = { id: "service-example", applicationId: application.id, siteId: application.siteId, name: "controller", protocol: "https" as const, containerPort: 7443, hostPort: 7443, endpoint: "192.0.2.20:7443", source: "catalog" as const, management: true, status: "ready", createdAt: application.createdAt, updatedAt: application.updatedAt };
+    await act(async () => handle!.update({ ...props, language: "en", data: { ...data, services: [service] }, group: { ...props.group, controller: { application, siteName: "example", services: [service], publications: [], realityServices: [], realityPublications: [], locked: false } } }));
+    const link = element.querySelector("a");
+    expect(link?.textContent).toContain("Open Glivela (new window)");
+    expect(link?.href).toBe("https://192.0.2.20:7443/");
+    expect(link?.rel).toBe("noopener noreferrer");
   } finally { if (handle) await act(async () => handle!.unmount()); }
   expect(element.childElementCount).toBe(0);
-  expect(close).toHaveBeenCalledTimes(1);
+  expect(close).not.toHaveBeenCalled();
+  expect(api.landing).not.toHaveBeenCalled();
+  expect(api.ipQuality).not.toHaveBeenCalled();
+  expect(api.nodeDiagnostics).not.toHaveBeenCalled();
 });
