@@ -38,6 +38,9 @@ func referenceFixture(t *testing.T) (*sql.DB, archive) {
 	exec("INSERT INTO agent_private_peer_capabilities VALUES('entry-host-example',?)", []byte(`{"id":"peer-example","address":"100.64.0.2"}`))
 	exec("INSERT INTO services VALUES('service-example','entry-example','entry','Saved entry','US','tcp','meridian/entry',10443,443,'100.64.0.2:10443','ready')")
 	exec("INSERT INTO services VALUES('unrelated-service','unrelated-app','subscription','do-not-export-service-name','','http','',8080,8080,'127.0.0.1:8080','ready')")
+	exec("CREATE TABLE sites(id TEXT PRIMARY KEY,timezone TEXT NOT NULL)")
+	exec("INSERT INTO sites VALUES('site-example','Asia/Shanghai')")
+	exec("ALTER TABLE services ADD COLUMN site_id TEXT NOT NULL DEFAULT 'site-example'")
 	exec(`INSERT INTO publications VALUES('publication-example','service-example','entry-host-example','public_shared_443','application_node','entry.example.test','www.example.com','cloudflare','dns-record-example','access-example',1,7,6,'failed','synthetic error',1,1,2,'2026-10-20T00:00:00Z','2026-09-19T00:00:00Z','2026-10-19T02:03:04Z')`)
 	exec(`INSERT INTO publications VALUES('unrelated-publication','unrelated-service','unrelated-node','public_direct','application_node','unrelated.example.test','','manual','','',0,1,1,'ready','',0,0,0,'','2026-09-19T00:00:00Z','2026-10-19T02:03:04Z')`)
 	exec(`INSERT INTO settings VALUES('meridian_landing_selection','{"nodeIds":["landing-example"],"landingRegionCodes":{"landing-example":"TW"},"landingNameSuffixes":{"landing-example":"Saved"},"revision":9}')`)
@@ -84,6 +87,9 @@ func TestReferenceExportPreservesOriginalGraphAndExcludesPlatformCredentials(t *
 	}
 	if len(r.Nodes) != 3 || len(r.Applications) != 2 || len(r.Services) != 1 || len(r.Publications) != 1 || r.Applications["entry-example"].NodeID != "entry-host-example" || r.Nodes["landing-example"].PreviousStatus != "disabled" || r.Nodes["entry-host-example"].PrivateAddress != "100.64.0.2" {
 		t.Fatal("node/application graph changed")
+	}
+	if r.Services["service-example"].Timezone != "Asia/Shanghai" {
+		t.Fatal("source reset timezone was not retained")
 	}
 	if r.Services["service-example"].DisplayName != "Saved entry" || r.Publications["publication-example"].DNSRecordID != "dns-record-example" || !r.Publications["publication-example"].CleanupPending || r.Publications["publication-example"].AppliedRevision != 6 || r.LandingSelection.Revision != 9 || r.LandingSelection.LandingNameSuffixes["landing-example"] != "Saved" {
 		t.Fatal("service/publication/selection configuration changed")
