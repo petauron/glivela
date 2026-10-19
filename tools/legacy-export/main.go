@@ -29,7 +29,9 @@ import (
 
 // Schema 114 adds node_security_tasks; 115 adds generic service forwarding
 // metadata. Neither changes the reviewed proxy business tables or encodings.
-func supportedSourceSchema(version int) bool { return version == 113 || version == 114 || version == 115 }
+func supportedSourceSchema(version int) bool {
+	return version == 113 || version == 114 || version == 115
+}
 
 const maxSnapshotBytes = 128 << 20
 const archiveContext = "glivela-offline-legacy-export-v1:"
