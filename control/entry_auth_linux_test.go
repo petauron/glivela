@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -34,9 +35,27 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 	}
 	current, err := os.Readlink("/proc/self/ns/net")
 	initial, initialErr := os.Readlink("/proc/1/ns/net")
-	if err != nil || initialErr != nil || current == initial || os.Geteuid() != 0 {
-		t.Fatal("refusing authentication test outside isolated root netns")
+	mountNamespace, mountErr := os.Readlink("/proc/self/ns/mnt")
+	initialMount, initialMountErr := os.Readlink("/proc/1/ns/mnt")
+	if err != nil || initialErr != nil || current == initial || os.Geteuid() != 0 || mountErr != nil || initialMountErr != nil || mountNamespace == initialMount {
+		t.Fatal("refusing authentication test outside isolated root network/mount namespaces")
 	}
+	// Sniffing intentionally restores example.com from the payload's SNI.
+	// Give the unchanged core a resolvable fixture hostname without changing
+	// business DNS policy, disabling sniffing or weakening TLS verification.
+	// This bind mount is private to the newly created mount namespace only.
+	hosts := filepath.Join(t.TempDir(), "hosts")
+	if err := os.WriteFile(hosts, []byte("127.0.0.1 localhost\n93.184.216.34 example.com\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mount(hosts, "/etc/hosts", "", syscall.MS_BIND, ""); err != nil {
+		t.Fatal("private fixture hosts mount failed", err)
+	}
+	t.Cleanup(func() {
+		if err := syscall.Unmount("/etc/hosts", 0); err != nil {
+			t.Error("private fixture hosts unmount failed", err)
+		}
+	})
 	driver := officialTestDriver(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
