@@ -714,7 +714,32 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Center owns shared components and theme tokens; Glivela owns its layout. */
+/* The standalone control page cannot inherit tokens from the Center DOM. */
+.glivela-control {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.2 0 0);
+    --card: var(--background);
+    --card-foreground: var(--foreground);
+    --primary: oklch(0.25 0 0);
+    --primary-foreground: oklch(1 0 0);
+    --muted: oklch(0.96 0 0);
+    --muted-foreground: oklch(0.45 0 0);
+    --secondary: var(--muted);
+    --secondary-foreground: var(--foreground);
+    --border: oklch(0.85 0 0);
+    --input: var(--border);
+    --ring: oklch(0.5 0 0);
+    --destructive: oklch(0.5 0.18 25);
+    --radius: 0.625rem;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: system-ui, sans-serif;
+    line-height: 1.5;
+    max-width: 80rem;
+    margin-inline: auto;
+}
+
+/* Glivela owns its layout; embedded views inherit the host theme. */
 [data-app-workspace="vastora-official/meridian"] .glivela-node-list {
     overflow: hidden;
     border: 1px solid color-mix(in oklab, var(--foreground) 22%, var(--card));

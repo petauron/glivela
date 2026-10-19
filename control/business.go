@@ -82,6 +82,28 @@ type BusinessInventory struct {
 	Accounts   []BusinessAccount  `json:"accounts"`
 	Nodes      []BusinessNode     `json:"nodes"`
 	Endpoints  []BusinessEndpoint `json:"endpoints"`
+	Routes     []BusinessRoute    `json:"routes"`
+	Runtimes   []BusinessRuntime  `json:"runtimes"`
+}
+
+type BusinessRoute struct {
+	ID           string `json:"id"`
+	AccountID    string `json:"accountId"`
+	EntryID      string `json:"entryId"`
+	EgressID     string `json:"egressId"`
+	IPv4EgressID string `json:"ipv4EgressId,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	HideNative   bool   `json:"hideNative"`
+	State        string `json:"state"`
+}
+
+type BusinessRuntime struct {
+	ID           string    `json:"id"`
+	Role         string    `json:"role"`
+	Revision     uint64    `json:"revision,string"`
+	RuntimeReady bool      `json:"runtimeReady"`
+	ReportedAt   time.Time `json:"reportedAt"`
+	Peers        []string  `json:"peers"`
 }
 
 type BusinessNode struct {
@@ -96,6 +118,7 @@ type BusinessEndpoint struct {
 	ServiceID  string `json:"serviceId"`
 	Name       string `json:"name"`
 	RegionCode string `json:"regionCode"`
+	Retired    bool   `json:"retired"`
 }
 
 // LoadBusiness must run before serving requests and under the same directory
@@ -188,7 +211,7 @@ func readBusinessKey(path string) ([]byte, error) {
 func (s *Store) Business() BusinessInventory {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	view := BusinessInventory{State: "empty", Accounts: []BusinessAccount{}, Nodes: []BusinessNode{}, Endpoints: []BusinessEndpoint{}}
+	view := BusinessInventory{State: "empty", Accounts: []BusinessAccount{}, Nodes: []BusinessNode{}, Endpoints: []BusinessEndpoint{}, Routes: []BusinessRoute{}, Runtimes: []BusinessRuntime{}}
 	if s.business == nil {
 		return view
 	}
@@ -207,15 +230,51 @@ func (s *Store) Business() BusinessInventory {
 	for _, endpoint := range m.Endpoints {
 		service := m.References.Services[endpoint.ServiceID]
 		app := m.References.Applications[service.ApplicationID]
-		view.Endpoints = append(view.Endpoints, BusinessEndpoint{ID: endpoint.Reality.ID, EntryID: endpoint.Reality.EntryID, NodeID: app.NodeID, ServiceID: endpoint.ServiceID, Name: app.Name, RegionCode: service.RegionCode})
+		view.Endpoints = append(view.Endpoints, BusinessEndpoint{ID: endpoint.Reality.ID, EntryID: endpoint.Reality.EntryID, NodeID: app.NodeID, ServiceID: endpoint.ServiceID, Name: app.Name, RegionCode: service.RegionCode, Retired: endpoint.Retired})
 	}
 	slices.SortFunc(view.Endpoints, func(a, b BusinessEndpoint) int { return strings.Compare(a.ID, b.ID) })
+	now := time.Now().UTC()
+	credentials, grants, projectionErr := effectiveBusinessCredentials(m, now)
 	for _, item := range m.Plan.Accounts {
 		account := BusinessAccount{Account: item.Account, Schedule: m.ResetSchedules[item.Account.ID], Usage: append([]glivela.UsageMember{}, item.Usage...), Traffic: map[string]glivela.ImportTrafficCounters{}}
 		for _, credential := range item.Credentials {
 			account.Traffic[credential.ID] = m.TrafficCounters[credential.ID]
 		}
 		view.Accounts = append(view.Accounts, account)
+		for _, grant := range item.Grants {
+			state := "unverified"
+			if !grant.Enabled {
+				state = "disabled"
+			} else if m.Ownership != nil && !s.business.faulted {
+				effective := grants[grant.ID]
+				if projectionErr == nil && !effective.Deployable() {
+					state = "policy-disabled"
+				}
+				for _, entry := range s.nodes {
+					if projectionErr != nil || entry.ID != grant.EntryID || entry.Desired.Entry == nil || !effective.Deployable() || !runtimeFresh(entry, now) {
+						continue
+					}
+					if slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Base.ID]) && slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Route.ID]) && slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, effective) }) && s.subscriptionPeerReady(entry, grant.EgressID, now) && (grant.IPv4EgressID == "" || s.subscriptionPeerReady(entry, grant.IPv4EgressID, now)) {
+						state = "verified"
+					}
+				}
+			}
+			view.Routes = append(view.Routes, BusinessRoute{ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
+		}
 	}
+	for _, node := range s.nodes {
+		role := "landing"
+		peers := []string{}
+		if node.Desired.Entry != nil {
+			role = "entry"
+			for _, peer := range node.Desired.EntryNetwork.Peers {
+				peers = append(peers, peer.EgressID)
+			}
+		}
+		slices.Sort(peers)
+		view.Runtimes = append(view.Runtimes, BusinessRuntime{ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: runtimeFresh(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+	}
+	slices.SortFunc(view.Runtimes, func(a, b BusinessRuntime) int { return strings.Compare(a.ID, b.ID) })
+	slices.SortFunc(view.Routes, func(a, b BusinessRoute) int { return strings.Compare(a.ID, b.ID) })
 	return view
 }

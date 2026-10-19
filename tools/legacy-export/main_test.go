@@ -58,6 +58,19 @@ func fixture(t *testing.T) (string, []byte, *sql.DB) {
 		}
 		exec(`CREATE TABLE "` + name + `"(` + columns + `)`)
 	}
+	// Existing schema-113 fixture: retain empty historical tables now consumed
+	// by the exporter. No additional scenario or test environment is introduced.
+	for _, statement := range []string{
+		"CREATE TABLE application_commands(id TEXT PRIMARY KEY,application_id TEXT,kind TEXT,result_secret_id TEXT)",
+		"CREATE TABLE deployments(id TEXT PRIMARY KEY,application_id TEXT,secret_id TEXT)",
+		"CREATE TABLE node_diagnostic_checks(id TEXT PRIMARY KEY,agent_id TEXT,kind TEXT)",
+		"CREATE TABLE ip_quality_checks(id TEXT PRIMARY KEY,agent_id TEXT)",
+		"CREATE TABLE task_events(id TEXT PRIMARY KEY,task_id TEXT,agent_id TEXT,kind TEXT)",
+		"CREATE TABLE task_executions(id TEXT PRIMARY KEY,task_id TEXT,agent_id TEXT,kind TEXT,sealed_task BLOB,sealed_result BLOB)",
+		"CREATE TABLE execution_events(id INTEGER PRIMARY KEY,execution_id TEXT)",
+	} {
+		exec(statement)
+	}
 	key := bytes.Repeat([]byte{7}, 32)
 	exec("INSERT INTO storage_key_binding VALUES(1,?)", sealLegacy(t, key, []byte("vastora-database-key-binding-v1"), "database-key-binding:center:v1"))
 	exec("INSERT INTO secrets VALUES(?,?)", "token-example", sealLegacy(t, key, []byte("test-token-only"), "meridian-account:account-example"))
@@ -131,7 +144,7 @@ func TestExportPreservesRecordsWithoutChangingBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(before)
-	if a.Version != 1 || a.Schema != 113 || a.SourceSHA256 != hex.EncodeToString(sum[:]) || len(a.Tables) != len(businessTables) {
+	if a.Version != 1 || a.Schema != 113 || a.SourceSHA256 != hex.EncodeToString(sum[:]) || len(a.Tables) != len(archiveTables) {
 		t.Fatal("archive inventory differs")
 	}
 	row := a.Tables["meridian_accounts"].Rows[0]
@@ -155,7 +168,7 @@ func TestExportPreservesRecordsWithoutChangingBackup(t *testing.T) {
 
 func TestExportRejectsUnverifiedSources(t *testing.T) {
 	for name, query := range map[string]string{
-		"schema":             "PRAGMA user_version=114",
+		"schema":             "PRAGMA user_version=115",
 		"missing table":      "DROP TABLE meridian_route_grants",
 		"new business table": "CREATE TABLE meridian_unreviewed(id TEXT)",
 		"orphan":             "UPDATE meridian_accounts SET subscription_token_secret_id='missing'",

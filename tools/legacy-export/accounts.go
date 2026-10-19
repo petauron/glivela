@@ -47,6 +47,9 @@ func stageImportCommand(args []string) error {
 		for _, secret := range a.Secrets {
 			clear(secret.Value)
 		}
+		for _, payload := range a.HistoryPayloads {
+			clear(payload.Value)
+		}
 	}()
 	material, err := importMaterial(a)
 	if err != nil {
@@ -80,10 +83,10 @@ func openArchive(sealed, key []byte, snapshot string) (archive, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var extra any
-	if decoder.Decode(&a) != nil || decoder.Decode(&extra) != io.EOF || a.Version != 1 || a.Schema != supportedSchema || a.SnapshotID != snapshot || !glivela.ValidIdentity(a.SourceSHA256) || len(a.Tables) != len(businessTables) {
+	if decoder.Decode(&a) != nil || decoder.Decode(&extra) != io.EOF || a.Version != 1 || !supportedSourceSchema(a.Schema) || a.SnapshotID != snapshot || !glivela.ValidIdentity(a.SourceSHA256) || len(a.Tables) != len(archiveTables) {
 		return archive{}, errors.New("invalid archive")
 	}
-	for _, name := range businessTables {
+	for _, name := range archiveTables {
 		if _, ok := a.Tables[name]; !ok {
 			return archive{}, errors.New("incomplete archive")
 		}

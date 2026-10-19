@@ -175,7 +175,11 @@ func TestOwnedSubscriptionRetainsIdentityQuotaAndFormats(t *testing.T) {
 		t.Fatal("HEAD did not preserve metadata without body")
 	}
 	after, err := os.ReadFile(filepath.Join(filepath.Dir(s.path), "business.json"))
-	if err != nil || !bytes.Equal(disk, after) || !reflect.DeepEqual(before, s.Business()) {
+	current := s.Business()
+	// The explicit node report above changes runtime observations, not business
+	// data. Keep the ledger/cycle/source comparison independent of that report.
+	before.Runtimes = current.Runtimes
+	if err != nil || !bytes.Equal(disk, after) || !reflect.DeepEqual(before, current) {
 		t.Fatal("download mutated ledger, cycle or encrypted source", err)
 	}
 	for _, secret := range []string{"privateKey", d.Entry.RealityEndpoints[0].PrivateKey, "example-token", "synthetic-event"} {
@@ -230,7 +234,7 @@ func TestOwnedSubscriptionRejectsUnauthorizedUnappliedAndRevoked(t *testing.T) {
 				s.business.material.Endpoints[0].TotalBytes = 100
 				s.business.material.Endpoints[0].UsedBytes = 100
 			case "retired":
-				s.business.material.Endpoints[0].LegacyRetired = true
+				s.business.material.Endpoints[0].Retired = true
 			case "credential-missing":
 				node := s.nodes[cert]
 				node.Desired = node.Desired.clone()

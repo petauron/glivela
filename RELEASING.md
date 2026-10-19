@@ -1,5 +1,24 @@
 # Version releases
 
+## Entry uninstall boundary (MVP)
+
+Uninstall is deliberately two steps, not a Vastora lifecycle RPC. First retire
+the entry in Glivela: stop its installed Glivela node service, then invoke that
+installation's `glivela retire-entry -directory <private-node-journal>` locally.
+The command requires the exclusive node lease, verifies exact container
+ownership and a completed runtime journal, persists retirement intent, and
+independently reads back the stopped container before reporting
+`entry-retired-stop-confirmed`. A failed or interrupted command is not stop
+confirmation; retry retirement before uninstalling. Node startup and provisioning
+reject retired installation records.
+
+Only after this confirmation may Vastora uninstall the declared application
+services/files. Vastora neither discovers nor manages Glivela's containers.
+Retirement retains the stopped container, private configuration, identity,
+history and recovery records; it does not purge them or claim route success.
+Do not use a data-purge option during this two-step uninstall. Cleanup of
+retained resources is separate and must not be inferred from application removal.
+
 Release Please v5 is pinned to 45996ed1f6d02564a971a2fa1b5860e934307cf7.
 Like Vastora, it uses only the built-in GITHUB_TOKEN; no extra release secret or
 personal token is needed. Repository settings must allow Actions to create pull
@@ -24,15 +43,29 @@ require review of those pins. No build downloads or executes an unpinned core.
 CI builds twice, compares the outputs and tests bundled amd64 Xray with a local
 TLS fixture. It retains no downloadable Actions artifacts.
 
-Publication builds twice, uploads only the two distribution archives and
+Publication builds twice, uploads only the two runtime distribution archives,
+the two separate offline migration-tool archives, and
 `SHA256SUMS` directly to the draft Release, downloads and compares every asset,
 then publishes the draft. On a failed upload retry, existing draft assets must
 match exactly; they are never overwritten. A mismatch requires investigation,
 not moving a tag or replacing a published asset. Source publication does not
 change signed catalog pins or install/upgrade any running instance.
 
-Glivela source releases do not automatically package or deploy the UI in the
-production catalog. That remains a separately reviewed catalog operation.
+The offline archives contain the already-approved isolated legacy export module,
+source/schema metadata and dependency license notices. They are not installed in
+controller/node runtime bundles. SQLite remains absent from both runtime roles;
+the one-time export reads only a frozen backup, never a live Center database.
+Its separately invoked local capture/adoption commands require explicit stopped-
+writer evidence; archived tasks are never re-enqueued.
+
+Runtime distributions also include the reviewed UI bundle and CSS, whose
+digests are recorded in runtime.json. A controller configured with
+managementUI=true serves them on its existing private mTLS listener. Only
+enrolled administrator certificates can open the UI/API; node certificates and
+the public subscription listener cannot. Browser use requires the same trusted
+client certificate/CA, not a Vastora session or credentials stored in JavaScript.
+Publishing source/runtime assets still does not update the signed catalog or
+upgrade production; those remain separately reviewed operations.
 
 Local workflow edits alone do not activate releases. Push/review the changes,
 then verify the first version PR CI and release run before calling the migration

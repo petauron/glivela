@@ -37,13 +37,13 @@ func entryContainerFixture(t *testing.T, host bool) (EntryContainer, Desired, en
 		c.GID = 12346
 		state.Config.User = "0:12346"
 		state.Host.NetworkMode, state.Host.UsernsMode = "host", "host"
-		state.Networks = map[string]struct{ NetworkID string }{"host": {}}
+		state.Networks = map[string]entryContainerNetwork{"host": {}}
 	} else {
 		c.UID, c.NetworkID, c.NetworkName, c.Bridge = 65532, strings.Repeat("c", 64), "glivela-entry-example", "br-fixture"
 		state.Config.User = "65532"
 		state.Host.NetworkMode = c.NetworkName
 		state.Host.Sysctls = map[string]json.RawMessage{"net.ipv4.ip_unprivileged_port_start": json.RawMessage(`"0"`)}
-		state.Networks = map[string]struct{ NetworkID string }{c.NetworkName: {NetworkID: c.NetworkID}}
+		state.Networks = map[string]entryContainerNetwork{c.NetworkName: {NetworkID: c.NetworkID}}
 	}
 	return c, d, state
 }
@@ -119,13 +119,13 @@ func TestEntryContainerReadbackRejectsOwnershipAndSecurityDrift(t *testing.T) {
 				case "userns":
 					state.Host.UsernsMode = "container:other"
 				case "extra-network":
-					state.Networks["other"] = struct{ NetworkID string }{}
+					state.Networks["other"] = entryContainerNetwork{}
 				case "network-id":
 					if host {
 						delete(state.Networks, "host")
-						state.Networks["other"] = struct{ NetworkID string }{}
+						state.Networks["other"] = entryContainerNetwork{}
 					} else {
-						state.Networks[c.NetworkName] = struct{ NetworkID string }{strings.Repeat("d", 64)}
+						state.Networks[c.NetworkName] = entryContainerNetwork{NetworkID: strings.Repeat("d", 64)}
 					}
 				}
 				err := c.verifyState(d, state)

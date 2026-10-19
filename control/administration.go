@@ -3,12 +3,28 @@ package control
 import (
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
 	"strings"
 
 	glivela "github.com/petauron/glivela"
 	"github.com/petauron/glivela/landing"
 )
+
+type accountPlanInput struct {
+	TotalBytes *int64 `json:"totalBytes,string"`
+	ExpiryTime *int64 `json:"expiryTime,string"`
+	ResetDays  *int   `json:"resetDays"`
+	Enabled    *bool  `json:"enabled"`
+}
+
+func (p *accountPlanInput) value() (glivela.AccountPlan, error) {
+	if p == nil || p.TotalBytes == nil || p.ExpiryTime == nil || p.ResetDays == nil || p.Enabled == nil {
+		return glivela.AccountPlan{}, errors.New("control: complete account plan required")
+	}
+	plan := glivela.AccountPlan{TotalBytes: *p.TotalBytes, ExpiryTime: *p.ExpiryTime, ResetDays: *p.ResetDays, Enabled: *p.Enabled}
+	return plan, plan.Validate()
+}
 
 // controllerHandler separates locally enrolled management certificates from
 // node certificates on the same authenticated Glivela listener. Neither a
@@ -49,6 +65,10 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		admin := admins[CertificateID(r.TLS.PeerCertificates[0])]
+		if admin && store.managementUI != nil && (r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/ui/")) {
+			store.managementUI.ServeHTTP(w, r)
+			return
+		}
 		if !strings.HasPrefix(r.URL.Path, "/v1/admin/") {
 			if admin {
 				http.Error(w, "management identity cannot report node state", http.StatusForbidden)
@@ -65,17 +85,72 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			http.Error(w, "unsupported management request", http.StatusNotFound)
 			return
 		}
+		contentType, _, contentErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if contentErr != nil || contentType != "application/json" || r.Header.Get("Origin") != "" && r.Header.Get("Origin") != "https://"+r.Host || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+			http.Error(w, "same-origin JSON management request required", http.StatusForbidden)
+			return
+		}
 		switch r.URL.Path {
-		case "/v1/admin/account-plan":
+		case "/v1/admin/routes":
+			var request RouteChange
+			if decode(http.MaxBytesReader(w, r.Body, 8192), &request) != nil {
+				http.Error(w, "invalid route request", http.StatusBadRequest)
+				return
+			}
+			status, err := store.ChangeRoute(r.Context(), request)
+			if err != nil {
+				http.Error(w, "route change not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(status)
+		case "/v1/admin/accounts":
+			var request struct {
+				ID       string            `json:"id"`
+				Name     string            `json:"name"`
+				EntryIDs []string          `json:"entryIds"`
+				Plan     *accountPlanInput `json:"plan"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 256<<10), &request) != nil {
+				http.Error(w, "invalid account creation request", http.StatusBadRequest)
+				return
+			}
+			plan, err := request.Plan.value()
+			if err != nil {
+				http.Error(w, "complete account plan required", http.StatusBadRequest)
+				return
+			}
+			created, err := store.CreateAccount(r.Context(), request.ID, request.Name, plan, request.EntryIDs)
+			if err != nil {
+				http.Error(w, "account creation not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(created)
+		case "/v1/admin/account-reset":
 			var request struct {
 				AccountID        string `json:"accountId"`
 				ExpectedRevision uint64 `json:"expectedRevision,string"`
-				Plan             *struct {
-					TotalBytes *int64 `json:"totalBytes,string"`
-					ExpiryTime *int64 `json:"expiryTime,string"`
-					ResetDays  *int   `json:"resetDays"`
-					Enabled    *bool  `json:"enabled"`
-				} `json:"plan"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil {
+				http.Error(w, "invalid account reset request", http.StatusBadRequest)
+				return
+			}
+			status, err := store.ResetAccountUsage(r.Context(), request.AccountID, request.ExpectedRevision)
+			if err != nil {
+				http.Error(w, "account reset not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(status)
+		case "/v1/admin/account-plan":
+			var request struct {
+				AccountID        string            `json:"accountId"`
+				ExpectedRevision uint64            `json:"expectedRevision,string"`
+				Plan             *accountPlanInput `json:"plan"`
 			}
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil || request.Plan == nil || request.Plan.TotalBytes == nil || request.Plan.ExpiryTime == nil || request.Plan.ResetDays == nil || request.Plan.Enabled == nil || !glivela.ValidIdentifier(request.AccountID) || request.ExpectedRevision == 0 {
 				http.Error(w, "complete account plan required", http.StatusBadRequest)

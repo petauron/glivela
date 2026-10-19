@@ -71,6 +71,7 @@ func endpointMaterial(a archive) ([]glivela.ImportEndpoint, error) {
 			ResetSchedule:   glivela.ImportResetSchedule{NextResetAt: r.text("next_reset_at"), LastResetAt: r.text("last_reset_at")},
 			DesiredRevision: uint64(r.integer("desired_revision")), AppliedRevision: uint64(r.integer("applied_revision")), HistoricalHealthy: r.boolean("runtime_healthy"),
 			PreviousStatus: r.text("status"), PreviousError: r.text("last_error"), LegacyRetired: r.boolean("legacy_retired"), SourcePeerJSON: r.jsonBytes("source_peer_json"),
+			Retired:             r.text("status") == "retired",
 			CertificateNotAfter: r.text("hy2_certificate_not_after"), CreatedAt: r.text("created_at"), UpdatedAt: r.text("updated_at"),
 		}
 		hy2Tag := r.text("hy2_inbound_tag")

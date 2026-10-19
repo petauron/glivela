@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,10 +33,11 @@ type Node struct {
 // is private (0600) and must never be logged or published. Imported business
 // data is separately authenticated/encrypted; node desired plans are projections.
 type Store struct {
-	mu       sync.Mutex
-	path     string
-	nodes    map[string]Node
-	business *businessState
+	mu           sync.Mutex
+	path         string
+	nodes        map[string]Node
+	business     *businessState
+	managementUI http.Handler
 }
 
 func OpenStore(path string) (*Store, error) {
@@ -69,7 +71,7 @@ func OpenStore(path string) (*Store, error) {
 	}
 	seen := map[string]bool{}
 	for _, node := range nodes {
-		if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || seen[node.ID] || validateNodeRole(node) != nil {
+		if !glivela.ValidIdentifier(node.ID) || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || seen[node.ID] || validateNodeRole(node) != nil {
 			return nil, errors.New("control: invalid node")
 		}
 		if _, ok := s.nodes[node.CertificateID]; ok {
@@ -107,7 +109,7 @@ func OpenStore(path string) (*Store, error) {
 func (s *Store) Put(node Node) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if node.ID == "" || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || len(node.Checks) != 0 || validateNodeRole(node) != nil {
+	if !glivela.ValidIdentifier(node.ID) || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || len(node.Checks) != 0 || validateNodeRole(node) != nil {
 		return errors.New("control: invalid enrollment")
 	}
 	next := s.copy()
@@ -178,6 +180,9 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 	if !ok {
 		return Desired{}, errors.New("control: not enrolled")
 	}
+	if err := s.observeBusinessTrafficLocked(node, receipt, time.Now().UTC()); err != nil {
+		return Desired{}, err
+	}
 	if err := s.reconcileOwnedEntriesLocked(time.Now()); err != nil {
 		return Desired{}, err
 	}
@@ -201,6 +206,9 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 			if validateEntryHealth(node.Desired, copyReceipt.EntryHealth) != nil || copyReceipt.EntryHealth != nil && copyReceipt.EntryHealth.SampledAt.After(now) {
 				copyReceipt.EntryHealth = nil
 			}
+			if validateEntryTraffic(node.Desired, copyReceipt.Traffic) != nil || copyReceipt.Traffic != nil && copyReceipt.Traffic.SampledAt.After(now) {
+				copyReceipt.Traffic = nil
+			}
 			node.Receipt = &copyReceipt
 		}
 	}
@@ -218,6 +226,9 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 		if err := invalidateChangedEntryProofs(next, old, node, now); err != nil {
 			return Desired{}, err
 		}
+	}
+	if err := reconcileOwnedRouteChecks(next, s.business, now); err != nil {
+		return Desired{}, err
 	}
 	if err := s.commit(next); err != nil {
 		return Desired{}, err

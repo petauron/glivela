@@ -8,6 +8,14 @@ import { GlivelaWorkspace } from "./glivela/Workspace";
 import { GlivelaManagerSheet } from "./glivela/Manager";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 import "./style.css";
+import { GlivelaControl } from "./glivela/Control";
+
+// Served by Glivela itself behind its existing management mTLS listener.
+export function mountControl(element: HTMLElement) {
+  const root = createRoot(element);
+  root.render(<AppErrorBoundary language="zh-CN"><GlivelaControl /></AppErrorBoundary>);
+  return { unmount: () => root.unmount() };
+}
 
 export const apiVersion = 1;
 

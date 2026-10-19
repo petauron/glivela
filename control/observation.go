@@ -16,6 +16,7 @@ import (
 type Observation struct {
 	glivela.AppliedReceipt
 	EntryHealth *EntryHealthReport `json:"entryHealth,omitempty"`
+	Traffic     *EntryTraffic      `json:"traffic,omitempty"`
 }
 
 type EntryHealthReport struct {
@@ -30,6 +31,7 @@ type EntryPeerObservation struct {
 }
 
 func (o Observation) clone() Observation {
+	o.Traffic = o.Traffic.clone()
 	if o.EntryHealth != nil {
 		h := *o.EntryHealth
 		h.Peers = maps.Clone(h.Peers)

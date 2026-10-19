@@ -63,25 +63,45 @@ func (s *Store) UpdateAccountPlan(ctx context.Context, id string, expected uint6
 	if err != nil {
 		return AccountChangeResult{}, err
 	}
+	if err := s.saveOwnedBusinessLocked(next); err != nil {
+		return AccountChangeResult{}, err
+	}
+	if changed {
+		if err := s.commit(projected); err != nil {
+			return AccountChangeResult{}, err
+		}
+	}
+	return s.accountChangeResult(id, time.Now()), nil
+}
+
+// Account edits and traffic observations share the same authenticated source
+// commit. Projections can be rebuilt after a partial write; no second ledger
+// or cross-file transaction is introduced.
+func (s *Store) saveOwnedBusinessLocked(next glivela.ImportMaterial) error {
+	business := s.business
+	invalid := errors.New("control: owned business write refused")
+	if business == nil || business.faulted || next.Ownership == nil {
+		return invalid
+	}
 	key, err := readBusinessKey(business.keyPath)
 	if err != nil {
-		return AccountChangeResult{}, invalid
+		return invalid
 	}
 	defer clear(key)
 	directory := filepath.Dir(s.path)
 	disk, snapshot, err := readOwnedBusiness(directory, key)
 	if err != nil || snapshot != business.snapshotID || !reflect.DeepEqual(disk, business.material) {
 		business.faulted = true
-		return AccountChangeResult{}, errors.New("control: owned business storage changed; explicit recovery required")
+		return errors.New("control: owned business storage changed; explicit recovery required")
 	}
-	if !same {
+	if !reflect.DeepEqual(next, business.material) {
 		sealed, err := glivela.SealImportMaterial(next, key, business.snapshotID)
 		if err != nil {
-			return AccountChangeResult{}, invalid
+			return invalid
 		}
 		raw, err := json.Marshal(stagedImport{Version: 1, SnapshotID: business.snapshotID, Sealed: sealed})
 		if err != nil {
-			return AccountChangeResult{}, invalid
+			return invalid
 		}
 		writeErr := replacePrivate(directory, "business.json", raw)
 		// A rename may have succeeded before directory sync failed. Follow
@@ -93,21 +113,13 @@ func (s *Store) UpdateAccountPlan(ctx context.Context, id string, expected uint6
 			business.faulted = true
 		}
 		if writeErr != nil {
-			return AccountChangeResult{}, writeErr
+			return writeErr
 		}
 		if business.faulted || !reflect.DeepEqual(business.material, next) {
-			return AccountChangeResult{}, errors.New("control: owned business write was not confirmed")
+			return errors.New("control: owned business write was not confirmed")
 		}
 	}
-	if err := syncBusinessDirectory(directory); err != nil {
-		return AccountChangeResult{}, err
-	}
-	if changed {
-		if err := s.commit(projected); err != nil {
-			return AccountChangeResult{}, err
-		}
-	}
-	return s.accountChangeResult(id, time.Now()), nil
+	return syncBusinessDirectory(directory)
 }
 
 func effectiveBusinessCredentials(m glivela.ImportMaterial, now time.Time) (map[string]glivela.CredentialMaterial, map[string]glivela.RouteGrant, error) {
@@ -115,7 +127,7 @@ func effectiveBusinessCredentials(m glivela.ImportMaterial, now time.Time) (map[
 	grants := map[string]glivela.RouteGrant{}
 	endpoints := map[string]bool{}
 	for _, e := range m.Endpoints {
-		endpoints[e.Reality.EntryID] = !e.LegacyRetired && e.QuotaAppliedEnabled && (e.TotalBytes == 0 || e.UsedBytes < e.TotalBytes)
+		endpoints[e.Reality.EntryID] = !e.Retired && e.QuotaAppliedEnabled && (e.TotalBytes == 0 || e.UsedBytes < e.TotalBytes)
 	}
 	for _, a := range m.Plan.Accounts {
 		if len(a.Credentials) == 0 {

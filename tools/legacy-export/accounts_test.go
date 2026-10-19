@@ -56,7 +56,7 @@ func accountRowsFixture() archive {
 		"route-secret":  {Context: "meridian-credential:route-example", Value: []byte(routed)},
 		"hy2-secret":    {Context: "meridian-credential-hy2:native-example", Value: []byte("example-hy2")},
 	}}
-	for _, name := range businessTables {
+	for _, name := range archiveTables {
 		a.Tables[name] = tableFixture()
 	}
 	a.Tables["meridian_endpoints"] = tableFixture(map[string]any{"id": "endpoint-example", "application_id": "entry-example", "inbound_tag": "inbound-example"})

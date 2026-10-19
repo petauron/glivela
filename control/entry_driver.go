@@ -18,8 +18,8 @@ import (
 // EntryDriver applies configuration to one already-owned Docker entry. It is
 // not an adopter, container creator, image updater or remote command API. Use
 // it only behind NativeRuntime's durable intent/backup/recovery transaction.
-// The node bootstrap intentionally does not expose it until installed takeover
-// and boot fencing have passed acceptance.
+// Node bootstrap may select this driver only with its explicit local ownership
+// record. A name, remote desired plan or matching legacy label cannot adopt it.
 type EntryDriver struct {
 	Container            EntryContainer
 	Directory            string // private node journal; never mounted into the worker
@@ -54,9 +54,10 @@ func (d *EntryDriver) Binding() string {
 	// and container IDs. Replacing those later still requires an owned,
 	// separately journaled resource transition, not a new application identity.
 	raw, _ := json.Marshal(struct {
-		App, Journal, Configuration, Network, NetworkName, Bridge string
-		UID, GID                                                  uint32
-	}{d.Container.ApplicationID, d.Directory, d.Container.ConfigurationDirectory, d.Container.NetworkID, d.Container.NetworkName, d.Container.Bridge, d.Container.UID, d.Container.GID})
+		App, Journal, Configuration, Network, NetworkName, Bridge, NetworkAddress string
+		Aliases                                                                   []string
+		UID, GID                                                                  uint32
+	}{d.Container.ApplicationID, d.Directory, d.Container.ConfigurationDirectory, d.Container.NetworkID, d.Container.NetworkName, d.Container.Bridge, d.Container.NetworkAddress, d.Container.Aliases, d.Container.UID, d.Container.GID})
 	h := sha256.Sum256(raw)
 	return "glivela-entry-runtime-v1:" + hex.EncodeToString(h[:])
 }

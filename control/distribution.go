@@ -12,10 +12,11 @@ import (
 )
 
 type distributionMetadata struct {
-	Version      string `json:"version"`
-	Commit       string `json:"commit"`
-	OS           string `json:"os"`
-	Architecture string `json:"architecture"`
+	Version      string            `json:"version"`
+	Commit       string            `json:"commit"`
+	OS           string            `json:"os"`
+	Architecture string            `json:"architecture"`
+	UI           map[string]string `json:"ui,omitempty"`
 	Xray         struct {
 		Version             string `json:"version"`
 		SHA256              string `json:"sha256"`

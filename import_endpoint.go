@@ -28,10 +28,13 @@ type ImportEndpoint struct {
 	PreviousStatus      string              `json:"previousStatus"`
 	PreviousError       string              `json:"previousError"`
 	LegacyRetired       bool                `json:"legacyRetired"`
-	SourcePeerJSON      json.RawMessage     `json:"sourcePeer"`
-	CertificateNotAfter string              `json:"certificateNotAfter"`
-	CreatedAt           string              `json:"createdAt"`
-	UpdatedAt           string              `json:"updatedAt"`
+	// Retired is the current endpoint policy. LegacyRetired above only
+	// records retirement of the old implementation, not this endpoint.
+	Retired             bool            `json:"retired"`
+	SourcePeerJSON      json.RawMessage `json:"sourcePeer"`
+	CertificateNotAfter string          `json:"certificateNotAfter"`
+	CreatedAt           string          `json:"createdAt"`
+	UpdatedAt           string          `json:"updatedAt"`
 }
 
 func (e ImportEndpoint) Validate() error {

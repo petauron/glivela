@@ -157,7 +157,7 @@ func (s *Store) subscription(ctx context.Context, token string, mihomo bool) (su
 			continue
 		}
 		for _, endpoint := range m.Endpoints {
-			if endpoint.Reality.EntryID != credential.EntryID || endpoint.LegacyRetired || !endpoint.QuotaAppliedEnabled || endpoint.TotalBytes > 0 && endpoint.UsedBytes >= endpoint.TotalBytes {
+			if endpoint.Reality.EntryID != credential.EntryID || endpoint.Retired || !endpoint.QuotaAppliedEnabled || endpoint.TotalBytes > 0 && endpoint.UsedBytes >= endpoint.TotalBytes {
 				continue
 			}
 			service := m.References.Services[endpoint.ServiceID]

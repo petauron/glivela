@@ -27,7 +27,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const supportedSchema = 113
+// Schema 114 only adds the host's node_security_tasks table. The reviewed
+// proxy tables and their encodings are identical to schema 113.
+func supportedSourceSchema(version int) bool { return version == 113 || version == 114 }
+
 const maxSnapshotBytes = 128 << 20
 const archiveContext = "glivela-offline-legacy-export-v1:"
 
@@ -39,6 +42,8 @@ var businessTables = []string{
 	"landing_server_states", "landing_proxy_states", "landing_proxy_retirements",
 	"landing_client_grants", "landing_client_blocks", "node_egress_policies",
 }
+
+var archiveTables = append(slices.Clone(businessTables), historyTables...)
 
 // Storage classes and decimal integer strings avoid rounding counters >2^53.
 type cell struct {
@@ -55,13 +60,14 @@ type secretValue struct {
 	Value   []byte `json:"value"`
 }
 type archive struct {
-	Version      int                      `json:"version"`
-	Schema       int                      `json:"sourceSchema"`
-	SnapshotID   string                   `json:"snapshotId"`
-	SourceSHA256 string                   `json:"sourceSha256"`
-	Tables       map[string]table         `json:"tables"`
-	Secrets      map[string]secretValue   `json:"secrets"`
-	References   glivela.ImportReferences `json:"references"`
+	Version         int                      `json:"version"`
+	Schema          int                      `json:"sourceSchema"`
+	SnapshotID      string                   `json:"snapshotId"`
+	SourceSHA256    string                   `json:"sourceSha256"`
+	Tables          map[string]table         `json:"tables"`
+	Secrets         map[string]secretValue   `json:"secrets"`
+	HistoryPayloads map[string]secretValue   `json:"historyPayloads,omitempty"`
+	References      glivela.ImportReferences `json:"references"`
 }
 
 func main() {
@@ -176,6 +182,9 @@ func export(ctx context.Context, path, sourceKeyPath, transferKeyPath, snapshot,
 		for _, secret := range a.Secrets {
 			clear(secret.Value)
 		}
+		for _, payload := range a.HistoryPayloads {
+			clear(payload.Value)
+		}
 	}()
 	if err != nil {
 		return err
@@ -211,7 +220,7 @@ func export(ctx context.Context, path, sourceKeyPath, transferKeyPath, snapshot,
 
 func readArchive(ctx context.Context, db *sql.DB, key []byte) (archive, error) {
 	a := archive{Tables: map[string]table{}, Secrets: map[string]secretValue{}}
-	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&a.Schema); err != nil || a.Schema != supportedSchema {
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&a.Schema); err != nil || !supportedSourceSchema(a.Schema) {
 		return a, errors.New("unsupported schema")
 	}
 	var integrity string
@@ -296,7 +305,13 @@ func readArchive(ctx context.Context, db *sql.DB, key []byte) (archive, error) {
 		}
 	}
 	a.References, err = readReferences(ctx, db, a)
-	return a, err
+	if err != nil {
+		return a, err
+	}
+	if err := readSelectedHistory(ctx, db, key, &a); err != nil {
+		return a, err
+	}
+	return a, nil
 }
 
 func readTable(ctx context.Context, db *sql.DB, name string) (table, error) {
@@ -307,6 +322,10 @@ func readTable(ctx context.Context, db *sql.DB, name string) (table, error) {
 	if err != nil {
 		return table{}, err
 	}
+	return decodeTableRows(rows)
+}
+
+func decodeTableRows(rows *sql.Rows) (table, error) {
 	defer rows.Close()
 	columns, err := rows.Columns()
 	if err != nil {

@@ -24,20 +24,55 @@ import (
 )
 
 type configuration struct {
-	Mode                string                `json:"mode"`
-	Directory           string                `json:"directory"`
-	Certificate         string                `json:"certificate"`
-	Key                 string                `json:"key"`
-	CA                  string                `json:"ca"`
-	Listen              string                `json:"listen,omitempty"`
-	SubscriptionsListen string                `json:"subscriptionsListen,omitempty"`
-	Controller          string                `json:"controller,omitempty"`
-	Administrators      []string              `json:"administrators,omitempty"`
-	BusinessKey         string                `json:"businessKey,omitempty"`
-	Xray                control.SystemdDriver `json:"xray,omitempty"`
+	Mode                  string                  `json:"mode"`
+	Directory             string                  `json:"directory"`
+	Certificate           string                  `json:"certificate"`
+	Key                   string                  `json:"key"`
+	CA                    string                  `json:"ca"`
+	Listen                string                  `json:"listen,omitempty"`
+	SubscriptionsListen   string                  `json:"subscriptionsListen,omitempty"`
+	Controller            string                  `json:"controller,omitempty"`
+	Administrators        []string                `json:"administrators,omitempty"`
+	BusinessKey           string                  `json:"businessKey,omitempty"`
+	ManagementUI          bool                    `json:"managementUI,omitempty"`
+	Xray                  control.SystemdDriver   `json:"xray,omitempty"`
+	Entry                 *control.EntryContainer `json:"-"`
+	EntryScope            string                  `json:"entryScope,omitempty"`
+	EntryProvision        bool                    `json:"entryProvision,omitempty"`
+	LegacyEntryCheckpoint string                  `json:"legacyEntryCheckpoint,omitempty"`
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "enroll-nodes" {
+		if err := enrollNodesCommand(os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela enrollment not confirmed; retained state requires inspection")
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "retire-entry" {
+		if err := retireEntryCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela entry retirement not confirmed; do not uninstall")
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backup-legacy-entry" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := backupEntryCommand(ctx, os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela entry backup failed; source state unchanged")
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "provision-entry" {
+		if err := provisionEntryCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela entry provisioning failed; retained resources require inspection")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "switch-legacy-landing" {
 		if err := switchLandingCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
 			log.Print("Glivela first cutover did not complete; inspect retained local recovery state")
@@ -88,8 +123,44 @@ func readConfiguration(path string) (configuration, error) {
 	if decoder.Decode(&extra) != io.EOF || cfg.Mode != "controller" && cfg.Mode != "node" && cfg.Mode != "verifier" {
 		return cfg, errors.New("invalid bootstrap mode")
 	}
+	if cfg.EntryScope != "" {
+		if cfg.Mode != "node" || !filepath.IsAbs(cfg.EntryScope) || filepath.Clean(cfg.EntryScope) != cfg.EntryScope {
+			return cfg, errors.New("entry scope requires a private local node credential")
+		}
+		info, err := os.Lstat(cfg.EntryScope)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 128<<10 {
+			return cfg, errors.New("invalid private entry scope")
+		}
+		raw, err := os.ReadFile(cfg.EntryScope)
+		if err != nil {
+			return cfg, err
+		}
+		entry := &control.EntryContainer{}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(entry) != nil || decoder.Decode(&extra) != io.EOF {
+			return cfg, errors.New("invalid entry scope contents")
+		}
+		if entry.ContainerID != "" || entry.ImageID != "" || entry.ConfigurationDirectory != "" {
+			return cfg, errors.New("entry scope cannot select container IDs or host mounts")
+		}
+		entry.ConfigurationDirectory = filepath.Join(filepath.Dir(cfg.Directory), "entry-config")
+		cfg.Entry = entry
+	}
 	if cfg.Mode != "controller" && cfg.BusinessKey != "" {
 		return cfg, errors.New("only controller may load business data")
+	}
+	if cfg.Mode != "controller" && cfg.ManagementUI {
+		return cfg, errors.New("only the controller may serve the management UI")
+	}
+	if cfg.Entry != nil && (cfg.Mode != "node" || cfg.Xray != (control.SystemdDriver{})) {
+		return cfg, errors.New("entry bootstrap requires one local entry driver only")
+	}
+	if (cfg.EntryProvision || cfg.LegacyEntryCheckpoint != "") && (cfg.Mode != "node" || cfg.Entry == nil) {
+		return cfg, errors.New("entry provisioning requires explicit node role")
+	}
+	if cfg.LegacyEntryCheckpoint != "" && (!filepath.IsAbs(cfg.LegacyEntryCheckpoint) || filepath.Clean(cfg.LegacyEntryCheckpoint) != cfg.LegacyEntryCheckpoint || filepath.Base(cfg.LegacyEntryCheckpoint) != "snapshot.json") {
+		return cfg, errors.New("invalid legacy entry checkpoint path")
 	}
 	if cfg.SubscriptionsListen != "" && (cfg.Mode != "controller" || cfg.BusinessKey == "" || cfg.SubscriptionsListen == cfg.Listen) {
 		return cfg, errors.New("only a controller with business storage may publish a separate private subscription origin")
@@ -101,6 +172,11 @@ func run(ctx context.Context, path string) error {
 	cfg, err := readConfiguration(path)
 	if err != nil {
 		return err
+	}
+	if cfg.Mode == "node" && cfg.Entry != nil {
+		if err := control.PrepareEntryDirectories(*cfg.Entry, cfg.Directory); err != nil {
+			return err
+		}
 	}
 	unlock, err := control.LockDirectory(cfg.Directory)
 	if err != nil {
@@ -145,7 +221,27 @@ func run(ctx context.Context, path string) error {
 		// The native installer extracts both executables from the same verified
 		// application bundle. Derive its directory from this running executable,
 		// never from bootstrap data or a guessed host installation layout.
-		cfg.Xray, err = resolveNodeDriver(cfg.Xray)
+		var nodeRuntime control.Runtime
+		var recoverRuntime func(context.Context) error
+		if cfg.Entry != nil {
+			distribution, resolveErr := runningDistribution()
+			if resolveErr != nil {
+				return resolveErr
+			}
+			entry := &control.EntryRuntime{Template: *cfg.Entry, Directory: cfg.Directory, Distribution: distribution, AllowProvision: cfg.EntryProvision, LegacyCheckpoint: cfg.LegacyEntryCheckpoint}
+			defer func() {
+				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				if entry.Close(cleanup) != nil {
+					log.Print("Glivela entry gate shutdown requires investigation")
+				}
+			}()
+			nodeRuntime, recoverRuntime = entry, entry.Recover
+		} else {
+			cfg.Xray, err = resolveNodeDriver(cfg.Xray)
+			runtime := &control.NativeRuntime{Directory: cfg.Directory, Driver: cfg.Xray}
+			nodeRuntime, recoverRuntime = runtime, runtime.Recover
+		}
 		if err != nil {
 			return err
 		}
@@ -154,14 +250,17 @@ func run(ctx context.Context, path string) error {
 			return err
 		}
 		defer client.Close()
-		runtime := &control.NativeRuntime{Directory: cfg.Directory, Driver: cfg.Xray}
 		recovery, cancel := context.WithTimeout(ctx, 30*time.Second)
-		err = runtime.Recover(recovery)
+		err = recoverRuntime(recovery)
 		cancel()
 		if err != nil {
 			return err
 		}
-		return (control.NodeRunner{Client: client, Runtime: runtime}).Run(ctx, 10*time.Second, func(err error) {
+		nodeRunner := control.NodeRunner{Client: client, Runtime: nodeRuntime}
+		if cfg.Entry != nil {
+			return runEntryReconcilers(ctx, nodeRunner, control.RouteRunner{Client: client})
+		}
+		return nodeRunner.Run(ctx, 10*time.Second, func(err error) {
 			if err != nil {
 				log.Print("Glivela reconciliation did not complete; existing state retained")
 			}
@@ -182,6 +281,15 @@ func run(ctx context.Context, path string) error {
 	if err := store.LoadBusiness(cfg.BusinessKey); err != nil {
 		return err
 	}
+	if cfg.ManagementUI {
+		distribution, err := runningDistribution()
+		if err != nil {
+			return err
+		}
+		if err := store.LoadManagementUI(distribution); err != nil {
+			return err
+		}
+	}
 	server, err := control.NewServer(cfg.Listen, store, identity, roots, cfg.Administrators)
 	if err != nil {
 		return err
@@ -194,6 +302,25 @@ func run(ctx context.Context, path string) error {
 		}
 	}
 	return serveController(ctx, server, subscriptions)
+}
+
+// Entry-owned configuration and end-to-end checks use the same authenticated
+// identity but independent bounded loops. Neither calls a Vastora task API.
+func runEntryReconcilers(parent context.Context, node control.NodeRunner, routes control.RouteRunner) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	finished := make(chan error, 2)
+	report := func(err error) {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Print("Glivela entry reconciliation unverified; existing policy retained")
+		}
+	}
+	go func() { finished <- node.Run(ctx, 10*time.Second, report) }()
+	go func() { finished <- routes.Run(ctx, 10*time.Second, report) }()
+	err := <-finished
+	cancel()
+	<-finished
+	return err
 }
 
 func serveController(ctx context.Context, server, subscriptions *http.Server) error {
@@ -227,14 +354,22 @@ func serveController(ctx context.Context, server, subscriptions *http.Server) er
 }
 
 func resolveNodeDriver(driver control.SystemdDriver) (control.SystemdDriver, error) {
-	executable, err := os.Executable()
+	distribution, err := runningDistribution()
 	if err != nil {
 		return control.SystemdDriver{}, err
+	}
+	driver.Distribution = distribution
+	return driver.ResolveInstallation()
+}
+
+func runningDistribution() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
 	}
 	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
-		return control.SystemdDriver{}, err
+		return "", err
 	}
-	driver.Distribution = filepath.Dir(executable)
-	return driver.ResolveInstallation()
+	return filepath.Dir(executable), nil
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -55,6 +56,9 @@ func entryDriverFixture(t *testing.T) (*NativeRuntime, *EntryDriver, *entryDocke
 	f.state.State.Running = false
 	f.state.State.Pid = 0
 	d.docker = func(_ context.Context, args ...string) ([]byte, error) {
+		if slices.Equal(args, []string{"container", "exec", c.ContainerID, "/usr/local/bin/xray", "api", "statsquery", "--server=127.0.0.1:10085"}) {
+			return []byte(`{"stat":[]}`), nil
+		}
 		if len(args) == 5 && args[1] == "inspect" && args[2] == "--format" {
 			if args[0] == "container" && args[3] == entryInspectTemplate && args[4] == c.ContainerID {
 				return json.Marshal(f.state)

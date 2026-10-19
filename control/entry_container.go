@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,12 +33,21 @@ type EntryContainer struct {
 	ConfigurationDirectory string `json:"configurationDirectory"`
 	// Host sockets retain the dedicated immutable GID. A retained bridge has
 	// GID zero and instead binds the exact network ID, interface and worker UID.
-	GID         uint32   `json:"gid"`
-	UID         uint32   `json:"uid"`
-	NetworkID   string   `json:"networkId,omitempty"`
-	NetworkName string   `json:"networkName,omitempty"`
-	Bridge      string   `json:"bridge,omitempty"`
-	Environment []string `json:"environment"`
+	GID            uint32   `json:"gid"`
+	UID            uint32   `json:"uid"`
+	NetworkID      string   `json:"networkId,omitempty"`
+	NetworkName    string   `json:"networkName,omitempty"`
+	Bridge         string   `json:"bridge,omitempty"`
+	NetworkAddress string   `json:"networkAddress,omitempty"`
+	Aliases        []string `json:"aliases,omitempty"`
+	Environment    []string `json:"environment"`
+}
+
+type entryContainerNetwork struct {
+	NetworkID  string
+	Aliases    []string
+	IPAddress  string
+	IPAMConfig *struct{ IPv4Address string }
 }
 
 type entryContainerState struct {
@@ -65,7 +75,7 @@ type entryContainerState struct {
 		Type, Source, Destination, Propagation string
 		RW                                     bool
 	}
-	Networks map[string]struct{ NetworkID string }
+	Networks map[string]entryContainerNetwork
 }
 
 // Keep the projection explicit: never request all inspect data, labels, logs,
@@ -84,16 +94,30 @@ func (c EntryContainer) validate() error {
 		return errors.New("control: invalid entry container ownership record")
 	}
 	if c.GID != 0 {
-		if c.UID != 0 || c.GID == 65534 || c.GID == uint32(os.Getegid()) || c.NetworkID != "" || c.NetworkName != "" || c.Bridge != "" {
+		if c.UID != 0 || c.GID == 65534 || c.GID == uint32(os.Getegid()) || c.NetworkID != "" || c.NetworkName != "" || c.Bridge != "" || c.NetworkAddress != "" {
 			return errors.New("control: dedicated entry host identity required")
 		}
 	} else if c.UID == 0 || c.UID == 65534 || !exactDockerID(c.NetworkID) || !glivela.ValidIdentifier(c.NetworkName) || !validBridgeName(c.Bridge) {
 		return errors.New("control: exact retained entry bridge identity required")
 	}
+	if c.NetworkAddress != "" {
+		address, err := netip.ParseAddr(c.NetworkAddress)
+		if err != nil || !address.Is4() || !address.IsPrivate() || address.String() != c.NetworkAddress {
+			return errors.New("control: invalid retained entry bridge address")
+		}
+	}
 	for _, value := range c.Environment {
 		key, _, found := strings.Cut(value, "=")
 		if !found || key == "" || len(value) > 4096 || strings.ContainsAny(value, "\x00\r\n") {
 			return errors.New("control: invalid installed entry environment")
+		}
+	}
+	if len(c.Aliases) > 16 || c.GID != 0 && len(c.Aliases) != 0 {
+		return errors.New("control: invalid entry network aliases")
+	}
+	for i, alias := range c.Aliases {
+		if !glivela.ValidIdentifier(alias) || slices.Contains(c.Aliases[:i], alias) {
+			return errors.New("control: invalid entry network alias")
 		}
 	}
 	return nil
@@ -171,6 +195,17 @@ func (c EntryContainer) verifyState(d Desired, state entryContainerState) error 
 		if state.Config.User != strconv.FormatUint(uint64(c.UID), 10) || h.NetworkMode != c.NetworkName || h.UsernsMode != "" || state.Networks[c.NetworkName].NetworkID != c.NetworkID {
 			return invalid
 		}
+		for _, alias := range c.Aliases {
+			if !slices.Contains(state.Networks[c.NetworkName].Aliases, alias) {
+				return invalid
+			}
+		}
+		if c.NetworkAddress != "" {
+			network := state.Networks[c.NetworkName]
+			if network.IPAMConfig == nil || network.IPAMConfig.IPv4Address != c.NetworkAddress || state.State.Running && network.IPAddress != c.NetworkAddress {
+				return invalid
+			}
+		}
 		// Retained non-root bridge workers already use this namespaced setting.
 		// Do not alter a host sysctl or add bind capabilities to make HY2 work.
 		var firstPort string
@@ -202,7 +237,11 @@ func (o *entryDockerOutput) Write(p []byte) (int, error) {
 // DOCKER_CONTEXT, plugin paths and environment proxy settings cannot redirect
 // privileged inspection to another daemon. No stderr or inspect output leaks.
 func runEntryDocker(ctx context.Context, arguments ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	timeout := 5 * time.Second
+	if len(arguments) == 3 && arguments[0] == "image" && arguments[1] == "pull" && arguments[2] == entryImageReference {
+		timeout = 2 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "/usr/bin/docker", append([]string{"--host=unix:///var/run/docker.sock"}, arguments...)...)
 	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "DOCKER_CONFIG=/var/empty/glivela-docker"}
@@ -213,6 +252,25 @@ func runEntryDocker(ctx context.Context, arguments ...string) ([]byte, error) {
 		return nil, errors.New("control: entry Docker operation unavailable")
 	}
 	return output.Bytes(), nil
+}
+
+// An omitted local environment means the immutable image's own defaults, not
+// the node process environment. Explicit retained environments are unchanged.
+func resolveEntryEnvironment(ctx context.Context, template EntryContainer) (EntryContainer, error) {
+	if template.Environment != nil {
+		return template, nil
+	}
+	raw, err := runEntryDocker(ctx, "image", "inspect", "--format", "{{json .Config.Env}}", entryImageReference)
+	if err != nil {
+		if _, err := runEntryDocker(ctx, "image", "pull", entryImageReference); err != nil {
+			return EntryContainer{}, errors.New("control: pinned entry image unavailable")
+		}
+		raw, err = runEntryDocker(ctx, "image", "inspect", "--format", "{{json .Config.Env}}", entryImageReference)
+	}
+	if err != nil || json.Unmarshal(raw, &template.Environment) != nil {
+		return EntryContainer{}, errors.New("control: pinned entry environment unavailable")
+	}
+	return template, nil
 }
 
 func decodeEntryContainer(raw []byte) (entryContainerState, error) {
