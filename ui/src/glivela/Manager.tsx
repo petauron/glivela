@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowRightLeftIcon, CheckCircle2Icon, KeyRoundIcon, PencilIcon, PlusIcon, RadioTowerIcon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react";
-import { api } from "@/api";
+import { api, APIError } from "@/api";
 import type { AppData, Mutate } from "@/host-contract";
-import type { MeridianAccount, MeridianAccountCreated } from "@/meridian-types";
+import type { MeridianAccount, MeridianAccountCreated, MeridianAccountInput } from "@/meridian-types";
 import type { Application, ApplicationCommand } from "@/types";
 import type { Language } from "@/translations";
 import { useApplicationCommandExecutor } from "@/hooks/use-application-command-executor";
@@ -21,16 +21,19 @@ import { CopyButton, StateBadge, TechnicalError, copy, userError } from "@/views
 import { RegionCombobox, regionBaseName } from "@/views/RegionCombobox";
 import { GlivelaRoutes } from "./Routes";
 import { SourceRecovery } from "./SourceRecovery";
+import { SubscriptionPreview } from "./SubscriptionPreview";
 
 const gibibyte = 1024 ** 3;
+type SaveAccount = (id: string, input: Required<MeridianAccountInput>) => Promise<void>;
 
 export function GlivelaManagerSheet({ application, data, language, mutate, onClose }: { application: Application | null; data: AppData; language: Language; mutate: Mutate; onClose: () => void }) {
   const [tab, setTab] = useState("overview");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [created, setCreated] = useState<MeridianAccountCreated | null>(null);
+  const [inspectedEndpointId, setInspectedEndpointId] = useState("");
   const inventory = data.meridian;
-  const endpoint = inventory.endpoints.find((value) => value.applicationId === application?.id);
+  const endpoint = inventory.endpoints.find((value) => inspectedEndpointId ? value.id === inspectedEndpointId : value.applicationId === application?.id);
   const endpointPublication = endpoint ? data.publications.find((value) => value.serviceId === endpoint.serviceId && value.kind === "public_shared_443" && value.status !== "stopped") : undefined;
   const managementReady = inventory.cutover.subscriptionAuthority === "meridian" && (inventory.cutover.state === "not_required" || inventory.cutover.state === "complete");
 
@@ -39,6 +42,7 @@ export function GlivelaManagerSheet({ application, data, language, mutate, onClo
     setBusy("");
     setError("");
     setCreated(null);
+    setInspectedEndpointId("");
   }, [application?.id, inventory.cutover.subscriptionAuthority, inventory.cutover.state]);
 
   const run = async (key: string, operation: () => Promise<unknown>, success: string) => {
@@ -48,6 +52,25 @@ export function GlivelaManagerSheet({ application, data, language, mutate, onClo
       await mutate(operation, success);
     } catch (caught) {
       setError(userError(language, caught));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // Editing owns its failure next to the draft. The shared runner intentionally
+  // consumes errors for other screens, so it cannot acknowledge a saved form.
+  const saveAccount: SaveAccount = async (id, input) => {
+    setBusy(`edit-${id}`);
+    setError("");
+    let saved = false;
+    try {
+      await mutate(async () => {
+        await api.updateMeridianAccount(id, input);
+        saved = true;
+      }, copy(language, "账号套餐已更新。", "Account plan updated."), { reportError: false });
+      // A host can consume an authentication failure while opening its login
+      // screen. Only an actually completed operation acknowledges this draft.
+      if (!saved) throw new Error("Account save was not acknowledged");
     } finally {
       setBusy("");
     }
@@ -68,7 +91,7 @@ export function GlivelaManagerSheet({ application, data, language, mutate, onClo
         <div className="mt-4 max-h-[calc(100vh-12rem)] overflow-y-auto pb-6">
           {inventory.cutover.lastError ? <Alert className="mb-4" variant="destructive"><ShieldAlertIcon /><AlertTitle>{copy(language, "迁移需要处理", "Migration needs attention")}</AlertTitle><AlertDescription>{inventory.cutover.lastError}</AlertDescription></Alert> : null}
           <TabsContent value="overview"><div className="flex flex-col gap-4">{inventory.cutover.state === "complete" ? <details><summary className="cursor-pointer text-sm text-muted-foreground">{copy(language, "迁移记录", "Migration history")}</summary><CutoverPanel cutover={inventory.cutover} language={language} busy={busy} error={error} onRun={run} /></details> : <CutoverPanel cutover={inventory.cutover} language={language} busy={busy} error={error} onRun={run} />}{managementReady || endpoint?.status === "failed" ? <EndpointPanel application={application} endpoint={endpoint} publication={endpointPublication} language={language} busy={busy} error={error} onRun={run} /> : null}</div></TabsContent>
-          <TabsContent value="accounts"><AccountsPanel created={created} data={data} language={language} busy={busy} error={error} onCreated={setCreated} onRun={run} /></TabsContent>
+          <TabsContent value="accounts"><AccountsPanel onSaveAccount={saveAccount} onInspectEndpoint={(id) => { setInspectedEndpointId(id); setTab("overview"); }} created={created} data={data} language={language} busy={busy} error={error} onCreated={setCreated} onRun={run} /></TabsContent>
           <TabsContent value="routes"><GlivelaRoutes key={endpoint?.id ?? "all"} data={data} endpointId={endpoint?.id} language={language} mutate={mutate} /></TabsContent>
         </div>
       </Tabs>
@@ -194,7 +217,7 @@ function EndpointPanel({ application, endpoint, publication, language, busy, err
   </FieldGroup></form>;
 }
 
-function AccountsPanel({ created, data, language, busy, error, onCreated, onRun }: { created: MeridianAccountCreated | null; data: AppData; language: Language; busy: string; error: string; onCreated: (value: MeridianAccountCreated | null) => void; onRun: (key: string, operation: () => Promise<unknown>, success: string) => Promise<void> }) {
+function AccountsPanel({ onSaveAccount, onInspectEndpoint, created, data, language, busy, error, onCreated, onRun }: { onSaveAccount: SaveAccount; onInspectEndpoint: (id: string) => void; created: MeridianAccountCreated | null; data: AppData; language: Language; busy: string; error: string; onCreated: (value: MeridianAccountCreated | null) => void; onRun: (key: string, operation: () => Promise<unknown>, success: string) => Promise<void> }) {
   const [name, setName] = useState("");
   const [quota, setQuota] = useState("0");
   const [resetDays, setResetDays] = useState("0");
@@ -218,36 +241,55 @@ function AccountsPanel({ created, data, language, busy, error, onCreated, onRun 
       <Field orientation="horizontal"><div className="flex flex-1 flex-col gap-1"><FieldLabel htmlFor="meridian-account-enabled">{copy(language, "立即启用", "Enable now")}</FieldLabel><FieldDescription>{copy(language, "应用完成前订阅不会提前发布。", "The subscription is not published before all runtime receipts complete.")}</FieldDescription></div><Switch id="meridian-account-enabled" checked={enabled} onCheckedChange={setEnabled} /></Field>
       </details>{error ? <FieldError>{error}</FieldError> : null}<Button disabled={busy === "account" || !name.trim()} type="submit">{busy === "account" ? <Spinner data-icon="inline-start" /> : <PlusIcon data-icon="inline-start" />}{copy(language, "创建账号", "Create account")}</Button>
     </FieldGroup></form></details>
-    <div className="flex flex-col gap-3">{data.meridian.accounts.map((account) => <AccountCard account={account} busy={busy} key={account.id} language={language} onRun={onRun} />)}</div>
+    <div className="flex flex-col gap-3">{data.meridian.accounts.map((account) => <AccountCard onSaveAccount={onSaveAccount} onInspectEndpoint={onInspectEndpoint} account={account} busy={busy} key={account.id} language={language} onRun={onRun} />)}</div>
   </div>;
 }
 
-function AccountCard({ account, busy, language, onRun }: { account: MeridianAccount; busy: string; language: Language; onRun: (key: string, operation: () => Promise<unknown>, success: string) => Promise<void> }) {
+function AccountCard({ onSaveAccount, onInspectEndpoint, account, busy, language, onRun }: { onSaveAccount: SaveAccount; onInspectEndpoint: (id: string) => void; account: MeridianAccount; busy: string; language: Language; onRun: (key: string, operation: () => Promise<unknown>, success: string) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(account.displayName);
   const [quota, setQuota] = useState(String(account.totalBytes / gibibyte));
   const [resetDays, setResetDays] = useState(String(account.resetDays));
   const [expiry, setExpiry] = useState(account.expiryTime ? localDateTimeValue(account.expiryTime) : "");
+  const [saveError, setSaveError] = useState("");
+  const saving = useRef(false);
   const operation = `edit-${account.id}`;
+  const errorId = `meridian-account-save-error-${account.id}`;
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    await onRun(operation, () => api.updateMeridianAccount(account.id, {
-      displayName: name.trim(),
-      totalBytes: Math.round(Math.max(0, Number(quota)) * gibibyte),
-      expiryTime: expiry ? new Date(expiry).getTime() : 0,
-      resetDays: Math.max(0, Number(resetDays)),
-      enabled: account.enabled,
-    }), copy(language, "账号套餐已更新。", "Account plan updated."));
-    setEditing(false);
+    if (saving.current || busy) return;
+    saving.current = true;
+    setSaveError("");
+    try {
+      await onSaveAccount(account.id, {
+        displayName: name.trim(),
+        totalBytes: Math.round(Math.max(0, Number(quota)) * gibibyte),
+        expiryTime: expiry ? new Date(expiry).getTime() : 0,
+        resetDays: Math.max(0, Number(resetDays)),
+        enabled: account.enabled,
+      });
+      setEditing(false);
+    } catch (caught) {
+      const message = caught instanceof APIError && caught.status === 409
+        ? copy(language, "账号配置有冲突，请核对当前状态后重试。", "Account configuration conflicts with the current state. Review it and retry.")
+        : caught instanceof APIError && caught.status >= 500
+          ? copy(language, "服务暂时无法保存，请稍后重试。", "The service could not save these changes. Retry shortly.")
+          : userError(language, caught);
+      setSaveError(`${message} ${copy(language, "输入已保留。", "Your input is preserved.")}`);
+    } finally {
+      saving.current = false;
+    }
   };
   return <div className="rounded-xl border p-4">
     <div className="flex items-start justify-between gap-3"><div><p className="font-medium">{account.displayName}</p><p className="mt-1 text-xs text-muted-foreground">{formatBytes(account.usedBytes)} / {account.totalBytes ? formatBytes(account.totalBytes) : copy(language, "不限", "Unlimited")} · {account.routeCount} {copy(language, "个落地", "egress route(s)")}</p>{account.expiryTime ? <p className="mt-1 text-xs text-muted-foreground">{copy(language, "到期", "Expires")} · {new Date(account.expiryTime).toLocaleString()}</p> : null}</div><StateBadge language={language} value={account.status} /></div>
     {account.lastError ? <div className="mt-3"><TechnicalError error={account.lastError} language={language} /></div> : null}
-    {editing ? <form className="mt-4" onSubmit={(event) => void save(event)}><FieldGroup>
+    {editing ? <form className="mt-4" aria-label={copy(language, `编辑 ${account.displayName} 的套餐`, `Edit ${account.displayName} plan`)} aria-describedby={saveError ? errorId : undefined} aria-busy={busy === operation} onSubmit={(event) => void save(event)}><fieldset className="min-w-0 border-0 p-0" disabled={busy === operation}><FieldGroup>
       <Field><FieldLabel htmlFor={`meridian-account-name-${account.id}`}>{copy(language, "账号名称", "Account name")}</FieldLabel><Input id={`meridian-account-name-${account.id}`} onChange={(event) => setName(event.target.value)} required value={name} /></Field>
       <div className="grid gap-4 sm:grid-cols-3"><Field><FieldLabel htmlFor={`meridian-account-quota-${account.id}`}>{copy(language, "共享流量（GiB）", "Shared quota (GiB)")}</FieldLabel><Input id={`meridian-account-quota-${account.id}`} min="0" onChange={(event) => setQuota(event.target.value)} step="0.1" type="number" value={quota} /></Field><Field><FieldLabel htmlFor={`meridian-account-reset-${account.id}`}>{copy(language, "重置周期（天）", "Reset interval (days)")}</FieldLabel><Input id={`meridian-account-reset-${account.id}`} max="3650" min="0" onChange={(event) => setResetDays(event.target.value)} type="number" value={resetDays} /></Field><Field><FieldLabel htmlFor={`meridian-account-expiry-${account.id}`}>{copy(language, "到期时间", "Expiry time")}</FieldLabel><Input id={`meridian-account-expiry-${account.id}`} min={localDateTimeValue(Date.now())} onChange={(event) => setExpiry(event.target.value)} type="datetime-local" value={expiry} /></Field></div>
-      <div className="flex flex-wrap gap-2"><Button disabled={busy === operation || !name.trim()} size="sm" type="submit">{busy === operation ? <Spinner data-icon="inline-start" /> : null}{copy(language, "保存套餐", "Save plan")}</Button><Button disabled={busy === operation} onClick={() => setEditing(false)} size="sm" type="button" variant="ghost">{copy(language, "取消", "Cancel")}</Button></div>
-    </FieldGroup></form> : <div className="mt-3 flex flex-wrap gap-2"><Button disabled={Boolean(busy)} onClick={() => setEditing(true)} size="sm" variant="outline"><PencilIcon data-icon="inline-start" />{copy(language, "编辑套餐", "Edit plan")}</Button><Button disabled={Boolean(busy)} size="sm" variant="outline" onClick={() => void onRun(`toggle-${account.id}`, () => api.updateMeridianAccount(account.id, { displayName: account.displayName, totalBytes: account.totalBytes, expiryTime: account.expiryTime, resetDays: account.resetDays, enabled: !account.enabled }), account.enabled ? copy(language, "账号已停用。", "Account disabled.") : copy(language, "账号已启用。", "Account enabled."))}>{busy === `toggle-${account.id}` ? <Spinner data-icon="inline-start" /> : null}{account.enabled ? copy(language, "停用", "Disable") : copy(language, "启用", "Enable")}</Button></div>}
+      {saveError ? <FieldError id={errorId}>{saveError}</FieldError> : null}
+      <div className="flex flex-wrap gap-2"><Button disabled={Boolean(busy) || !name.trim()} size="sm" type="submit">{busy === operation ? <Spinner data-icon="inline-start" /> : null}{copy(language, "保存套餐", "Save plan")}</Button><Button disabled={Boolean(busy)} onClick={() => { setSaveError(""); setEditing(false); }} size="sm" type="button" variant="ghost">{copy(language, "取消", "Cancel")}</Button></div>
+    </FieldGroup></fieldset></form> : <div className="mt-3 flex flex-wrap gap-2"><Button disabled={Boolean(busy)} onClick={() => { setSaveError(""); setEditing(true); }} size="sm" variant="outline"><PencilIcon data-icon="inline-start" />{copy(language, "编辑套餐", "Edit plan")}</Button><Button disabled={Boolean(busy)} size="sm" variant="outline" onClick={() => void onRun(`toggle-${account.id}`, () => api.updateMeridianAccount(account.id, { displayName: account.displayName, totalBytes: account.totalBytes, expiryTime: account.expiryTime, resetDays: account.resetDays, enabled: !account.enabled }), account.enabled ? copy(language, "账号已停用。", "Account disabled.") : copy(language, "账号已启用。", "Account enabled."))}>{busy === `toggle-${account.id}` ? <Spinner data-icon="inline-start" /> : null}{account.enabled ? copy(language, "停用", "Disable") : copy(language, "启用", "Enable")}</Button></div>}
+    <SubscriptionPreview accountId={account.id} language={language} onInspectEndpoint={onInspectEndpoint} />
   </div>;
 }
 

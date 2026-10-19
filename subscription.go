@@ -3,7 +3,6 @@ package glivela
 import (
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,42 +31,96 @@ type NativeEntry struct {
 	Link     string             `json:"link"`
 }
 
-func RenderLinks(entries []NativeEntry, accountID string, mode PublishingMode, routes []PublishedRoute, encoded bool) ([]byte, error) {
-	plain, err := nativeSubscriptionLines(entries, accountID)
+// subscriptionItem describes an actual output entry without its credential.
+type subscriptionItem struct {
+	Name     string       `json:"name"`
+	Protocol ProtocolKind `json:"protocol"`
+}
+
+type resolvedSubscriptionEntry struct {
+	subscriptionItem
+	link   string
+	routed bool
+}
+
+// resolveSubscription is the only final inventory path for both encodings and
+// administrator previews through the rendered output.
+func resolveSubscription(entries []NativeEntry, accountID string, mode PublishingMode, routes []PublishedRoute) ([]resolvedSubscriptionEntry, error) {
+	native, err := nativeSubscriptionLines(entries, accountID)
 	if err != nil {
 		return nil, err
 	}
-	if encoded {
-		plain = []byte(base64.StdEncoding.EncodeToString(plain))
+	output, err := composeLinks(native, accountID, mode, routes, false)
+	if err != nil {
+		return nil, err
 	}
-	return composeLinks(plain, accountID, mode, routes, encoded)
+	result := make([]resolvedSubscriptionEntry, 0, len(entries)+len(routes))
+	names := map[string]bool{"DIRECT": true, "REJECT": true, "节点选择": true}
+	if strings.TrimSpace(string(output)) == "" {
+		return result, nil
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		protocol := VLESSReality
+		if !strings.HasPrefix(line, "vless://") {
+			protocol = Hysteria2
+		}
+		parsed, err := parseProtocolLink(line, protocol)
+		if err != nil || names[parsed.Fragment] {
+			return nil, errors.New("glivela: ambiguous subscription output")
+		}
+		names[parsed.Fragment] = true
+		routed := slices.ContainsFunc(routes, func(item PublishedRoute) bool {
+			return item.Grant.Publishable() && sameProtocolLinkIdentity(line, item.RouteLink, protocol)
+		})
+		result = append(result, resolvedSubscriptionEntry{subscriptionItem: subscriptionItem{Name: parsed.Fragment, Protocol: protocol}, link: line, routed: routed})
+	}
+	return result, nil
+}
+
+func RenderLinks(entries []NativeEntry, accountID string, mode PublishingMode, routes []PublishedRoute, encoded bool) ([]byte, error) {
+	resolved, err := resolveSubscription(entries, accountID, mode, routes)
+	if err != nil {
+		return nil, err
+	}
+	lines := make([]string, 0, len(resolved))
+	for _, entry := range resolved {
+		lines = append(lines, entry.link)
+	}
+	result := []byte(strings.Join(lines, "\n") + "\n")
+	if encoded {
+		result = []byte(base64.StdEncoding.EncodeToString(result))
+	}
+	return result, nil
 }
 
 func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, routes []PublishedRoute) ([]byte, error) {
-	if _, err := nativeSubscriptionLines(entries, accountID); err != nil {
+	resolved, err := resolveSubscription(entries, accountID, mode, routes)
+	if err != nil {
 		return nil, err
 	}
-	proxies := make([]any, 0, len(entries))
-	names := make([]any, 0, len(entries)+1)
-	for _, entry := range entries {
-		proxy, name, err := mihomoProxy(entry)
+	proxies := make([]any, 0, len(resolved))
+	names := make([]any, 0, len(resolved)+1)
+	for _, entry := range resolved {
+		proxy, name, err := mihomoProxy(NativeEntry{Protocol: entry.Protocol, Link: entry.link})
 		if err != nil {
 			return nil, err
+		}
+		if entry.routed {
+			proxy["udp"] = false
 		}
 		proxies = append(proxies, proxy)
 		names = append(names, name)
 	}
 	names = append(names, "DIRECT")
-	config := map[string]any{
+	output, err := yaml.Marshal(map[string]any{
 		"proxies":      proxies,
 		"proxy-groups": []any{map[string]any{"name": "节点选择", "type": "select", "proxies": names}},
 		"rules":        []any{"MATCH,节点选择"},
-	}
-	native, err := yaml.Marshal(config)
+	})
 	if err != nil {
 		return nil, errors.New("glivela: cannot encode Mihomo subscription")
 	}
-	return composeMihomo(native, accountID, mode, routes)
+	return output, nil
 }
 
 func nativeSubscriptionLines(entries []NativeEntry, accountID string) ([]byte, error) {
@@ -216,159 +269,6 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 		result = []byte(base64.StdEncoding.EncodeToString(result))
 	}
 	return result, nil
-}
-
-func composeMihomo(native []byte, accountID string, mode PublishingMode, routes []PublishedRoute) ([]byte, error) {
-	if len(native) > maxSubscriptionBytes || !ValidIdentifier(accountID) || !mode.Valid() {
-		return nil, errors.New("glivela: invalid subscription input")
-	}
-	var config map[string]any
-	if yaml.Unmarshal(native, &config) != nil || config == nil {
-		return nil, errors.New("glivela: invalid native Mihomo configuration")
-	}
-	proxies, ok := config["proxies"].([]any)
-	if !ok {
-		return nil, errors.New("glivela: native subscription has no proxy inventory")
-	}
-	groups, ok := config["proxy-groups"].([]any)
-	if !ok && config["proxy-groups"] != nil {
-		return nil, errors.New("glivela: invalid native proxy groups")
-	}
-	names := map[string]bool{"DIRECT": true, "REJECT": true}
-	for _, values := range [][]any{proxies, groups} {
-		for _, value := range values {
-			entry, ok := value.(map[string]any)
-			if !ok {
-				return nil, errors.New("glivela: invalid native subscription entry")
-			}
-			name, _ := entry["name"].(string)
-			if name == "" || names[name] {
-				return nil, errors.New("glivela: ambiguous native subscription names")
-			}
-			names[name] = true
-		}
-	}
-	reserve := func(name string) error {
-		if names[name] {
-			return errors.New("glivela: managed subscription name conflicts with native configuration")
-		}
-		names[name] = true
-		return nil
-	}
-	baseProxies := slices.Clone(proxies)
-	routeLabels := compositeRouteLabels(routes)
-	routeNames := []any{}
-	replacements := map[string][]any{}
-	for _, item := range routes {
-		if err := validatePublishedRouteScope(item, accountID); err != nil {
-			return nil, err
-		}
-		if !item.Grant.Publishable() {
-			continue
-		}
-		if err := validatePublishedRouteLinks(item); err != nil {
-			return nil, err
-		}
-		base, err := parseVLESSLink(item.BaseLink)
-		if err != nil {
-			return nil, err
-		}
-		proxyType, credentialField := "vless", "uuid"
-		var proxy map[string]any
-		for _, value := range baseProxies {
-			candidate := value.(map[string]any)
-			if candidate["type"] == proxyType && candidate[credentialField] == base.User.Username() && candidate["server"] == base.Hostname() && fmt.Sprint(candidate["port"]) == base.Port() {
-				if proxy != nil {
-					return nil, errors.New("glivela: ambiguous native entry identity")
-				}
-				proxy = candidate
-			}
-		}
-		if proxy == nil || proxy["dialer-proxy"] != nil || !sameMihomoRealityTransport(proxy, base) {
-			return nil, errors.New("glivela: native entry does not match this account")
-		}
-		routed, err := parseVLESSLink(item.RouteLink)
-		if err != nil || !sameProtocolTransport(routed, base, VLESSReality) || routed.User.Username() == base.User.Username() {
-			return nil, errors.New("glivela: invalid routed subscription identity")
-		}
-		for _, value := range proxies {
-			candidate := value.(map[string]any)
-			if candidate["type"] == proxyType && candidate[credentialField] == routed.User.Username() {
-				return nil, errors.New("glivela: duplicated routed subscription identity")
-			}
-		}
-		name := routeName(item)
-		if label := routeLabels[item.Grant.ID]; label != "" {
-			name = label
-		}
-		if err := reserve(name); err != nil {
-			return nil, err
-		}
-		clone := make(map[string]any, len(proxy))
-		for key, value := range proxy {
-			clone[key] = value
-		}
-		clone["name"], clone[credentialField], clone["udp"] = name, routed.User.Username(), false
-		proxies = append(proxies, clone)
-		routeNames = append(routeNames, name)
-		if item.Grant.HideNative {
-			original := proxy["name"].(string)
-			replacements[original] = append(replacements[original], name)
-		}
-	}
-	for _, value := range groups {
-		group := value.(map[string]any)
-		if members, ok := group["proxies"].([]any); ok {
-			updated := make([]any, 0, len(members))
-			for _, member := range members {
-				name, ok := member.(string)
-				if !ok {
-					return nil, errors.New("glivela: invalid native group member")
-				}
-				if replacement := replacements[name]; len(replacement) > 0 {
-					updated = append(updated, replacement...)
-				} else {
-					updated = append(updated, member)
-				}
-			}
-			group["proxies"] = updated
-		}
-		if group["type"] == "select" {
-			if members, ok := group["proxies"].([]any); ok {
-				for _, name := range routeNames {
-					if !slices.Contains(members, name) {
-						members = append(members, name)
-					}
-				}
-				group["proxies"] = members
-			}
-		}
-	}
-	proxies = slices.DeleteFunc(proxies, func(value any) bool {
-		name, _ := value.(map[string]any)["name"].(string)
-		return len(replacements[name]) > 0
-	})
-	if rules, ok := config["rules"].([]any); ok {
-		for index, value := range rules {
-			if rule, ok := value.(string); ok {
-				parts := strings.Split(rule, ",")
-				target := len(parts) - 1
-				if parts[target] == "no-resolve" && target > 0 {
-					target--
-				}
-				if replacement := replacements[parts[target]]; len(replacement) > 0 {
-					parts[target] = replacement[0].(string)
-					rules[index] = strings.Join(parts, ",")
-				}
-			}
-		}
-	}
-	config["proxies"], config["proxy-groups"] = proxies, groups
-	output, err := yaml.Marshal(config)
-	if err != nil {
-		return nil, errors.New("glivela: cannot encode Mihomo subscription")
-	}
-	return output, nil
 }
 
 func validatePublishedRouteScope(item PublishedRoute, accountID string) error {

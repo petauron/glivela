@@ -100,16 +100,3 @@ func sameRealityTransport(left, right *url.URL) bool {
 	}
 	return true
 }
-
-func sameMihomoRealityTransport(proxy map[string]any, link *url.URL) bool {
-	query := link.Query()
-	reality, _ := proxy["reality-opts"].(map[string]any)
-	return proxy["network"] == query.Get("type") && proxy["servername"] == query.Get("sni") &&
-		proxy["flow"] == query.Get("flow") && reality["public-key"] == query.Get("pbk") &&
-		strings.TrimSpace(query.Get("sid")) == strings.TrimSpace(stringValue(reality["short-id"]))
-}
-
-func stringValue(value any) string {
-	text, _ := value.(string)
-	return text
-}
