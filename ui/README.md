@@ -19,6 +19,20 @@ retains its dependency audit and bundle size/style checks.
 
 ## Runtime boundary
 
+The new application-owned controller entrypoint is `mountControl`, served on
+Glivela's private mTLS listener when `managementUI=true`. It uses only
+`/v1/admin/*` on that same Glivela origin, never Vastora cookies or task APIs.
+Its assets are included in the native distribution and bound by runtime.json
+digests. Administrator client certificates must be enrolled; a node certificate
+cannot access the page. Configuration-save feedback is distinct from applied
+runtime and current route verification. The public subscription origin is
+separate and cannot serve management pages.
+
+The old host-mounted surface below has not yet been removed from this draft;
+its transition and removal of the host business writer are required before #54
+is complete. Do not treat a built standalone page as completed production
+migration.
+
 `src/index.tsx` exports `apiVersion = 1`, `mount` and `mountManager`. Each mount
 returns `update` and `unmount`. Glivela owns the React tree and its cleanup.
 The host passes data and management callbacks described by
