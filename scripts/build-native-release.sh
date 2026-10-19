@@ -91,7 +91,7 @@ for arch in amd64 arm64; do
   cat "$go_root/LICENSE" >> "$offline/THIRD-PARTY-LICENSES"
   test -s "$offline/THIRD-PARTY-LICENSES"
   jq -n --arg version "$version" --arg commit "$commit" --arg arch "$arch" \
-    '{version:$version,commit:$commit,os:"linux",architecture:$arch,sourceSchemas:[113,114],mode:"offline-read-only"}' > "$offline/migration.json"
+    '{version:$version,commit:$commit,os:"linux",architecture:$arch,sourceSchemas:[113,114,115,116],mode:"offline-read-only"}' > "$offline/migration.json"
   chmod 0755 "$offline/glivela-legacy-export"
   chmod 0644 "$offline/LICENSE.glivela" "$offline/THIRD-PARTY-LICENSES" "$offline/migration.json"
   tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
