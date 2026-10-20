@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.26](https://github.com/petauron/glivela/compare/v0.1.0-alpha.25...v0.1.0-alpha.26) (2026-10-20)
+
+
+### Bug Fixes
+
+* **migration:** separate database snapshot and archive size bounds ([#59](https://github.com/petauron/glivela/issues/59)) ([850ce4d](https://github.com/petauron/glivela/commit/850ce4d8194fd3137dc2e7bd99c17eb9ef5089c7))
+
 ## [0.1.0-alpha.25](https://github.com/petauron/glivela/compare/v0.1.0-alpha.24...v0.1.0-alpha.25) (2026-10-19)
 
 
