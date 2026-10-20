@@ -1,5 +1,13 @@
 # One-time offline legacy export
 
+Frozen database files are bounded to 1 GiB during capture, export and adoption.
+The selected encrypted archive retains its separate 128 MiB bound; controller
+import limits are unchanged. No source rows are removed to satisfy these bounds.
+Run this offline tool on a maintenance host with several GiB of available RAM,
+not on a small proxy node: capture compares two in-memory database copies.
+Private reads remain bounded even if a file grows after its metadata was read;
+source hash, integrity, key-binding and stopped-writer checks remain mandatory.
+
 ## MVP final snapshot, not a lossless traffic ledger
 
 The maintainer accepted small traffic undercounts across restart/sampling gaps

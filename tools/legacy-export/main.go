@@ -35,6 +35,10 @@ func supportedSourceSchema(version int) bool {
 }
 
 const maxSnapshotBytes = 128 << 20
+
+// The platform database includes unrelated application data and may be much
+// larger than the selected proxy archive. Do not remove history to fit it.
+const maxDatabaseSnapshotBytes = 1 << 30
 const archiveContext = "glivela-offline-legacy-export-v1:"
 
 var businessTables = []string{
@@ -135,7 +139,17 @@ func privateFile(path string, limit int64) ([]byte, error) {
 	if err != nil || !i.Mode().IsRegular() || i.Mode().Perm()&0077 != 0 || i.Size() > limit {
 		return nil, errors.New("unsafe file")
 	}
-	return os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		clear(data)
+		return nil, errors.New("private file exceeds limit or cannot be read")
+	}
+	return data, nil
 }
 
 func standalone(path string) error {
@@ -166,7 +180,7 @@ func export(ctx context.Context, path, sourceKeyPath, transferKeyPath, snapshot,
 	if err := standalone(path); err != nil {
 		return err
 	}
-	before, err := privateFile(path, maxSnapshotBytes)
+	before, err := privateFile(path, maxDatabaseSnapshotBytes)
 	if err != nil {
 		return err
 	}
@@ -193,7 +207,7 @@ func export(ctx context.Context, path, sourceKeyPath, transferKeyPath, snapshot,
 		return err
 	}
 	a.Version, a.SnapshotID, a.SourceSHA256 = 1, snapshot, hex.EncodeToString(sum[:])
-	after, err := privateFile(path, maxSnapshotBytes)
+	after, err := privateFile(path, maxDatabaseSnapshotBytes)
 	if err != nil {
 		return err
 	}
