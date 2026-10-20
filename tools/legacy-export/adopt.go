@@ -73,7 +73,7 @@ func adoptFinal(ctx context.Context, data, backup, directory, snapshot string, k
 			if err := standalone(path); err != nil {
 				return err
 			}
-			database, err := privateFile(path, maxSnapshotBytes)
+			database, err := privateFile(path, maxDatabaseSnapshotBytes)
 			if err != nil {
 				return err
 			}

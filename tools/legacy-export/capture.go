@@ -165,7 +165,7 @@ func captureFinal(ctx context.Context, data, backup, id string, inspect func(con
 	if err := standalone(dbPath); err != nil {
 		return err
 	}
-	database, err := privateFile(dbPath, maxSnapshotBytes)
+	database, err := privateFile(dbPath, maxDatabaseSnapshotBytes)
 	if err != nil || len(database) == 0 {
 		return errors.New("nonempty original Center database required")
 	}
@@ -209,7 +209,7 @@ func captureFinal(ctx context.Context, data, backup, id string, inspect func(con
 	if err := standalone(dbPath); err != nil {
 		return err
 	}
-	again, err := privateFile(dbPath, maxSnapshotBytes)
+	again, err := privateFile(dbPath, maxDatabaseSnapshotBytes)
 	defer clear(again)
 	if err != nil || !bytes.Equal(database, again) {
 		return errors.New("old database changed during final capture")
