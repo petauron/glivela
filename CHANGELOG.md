@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.27](https://github.com/petauron/glivela/compare/v0.1.0-alpha.26...v0.1.0-alpha.27) (2026-10-21)
+
+
+### Bug Fixes
+
+* report native entry health within its lease window ([6c72943](https://github.com/petauron/glivela/commit/6c729431defa5001be1c463407de7d0362a8911d))
+
 ## [0.1.0-alpha.26](https://github.com/petauron/glivela/compare/v0.1.0-alpha.25...v0.1.0-alpha.26) (2026-10-20)
 
 
