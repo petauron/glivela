@@ -391,7 +391,10 @@ func runEntryReconcilers(parent context.Context, node control.NodeRunner, routes
 			log.Print("Glivela entry reconciliation unverified; existing policy retained")
 		}
 	}
-	go func() { finished <- node.Run(ctx, 10*time.Second, report) }()
+	// Entry health leases are short-lived. Report independently of the slower
+	// route verification loop so valid evidence reaches subscription readers
+	// before its original deadline; never extend the runtime's lease here.
+	go func() { finished <- node.Run(ctx, 2*time.Second, report) }()
 	go func() { finished <- routes.Run(ctx, 10*time.Second, report) }()
 	err := <-finished
 	cancel()
