@@ -113,3 +113,24 @@ final capture. Rebind the existing published subscription/backend to the new
 private service only after data adoption, node enrollment and fresh real route
 acceptance. Never remove/recreate publication identity, issue new tokens, mark
 archived tasks successful or delete their source history to make a cutover pass.
+
+## Runtime availability thresholds
+
+The node monitor requires two consecutive successes to open a peer gate and
+three consecutive network probe failures to close it. An intervening success
+clears the failure streak. The first two failures retain a `degraded` receipt,
+not a fabricated successful probe. Certificate, identity, configuration, exit
+mismatch, unavailable security evidence and gate ownership errors fail closed
+immediately. Direct-only transport verification is not relaxed.
+
+Each renewal requires fresh security checks and is capped at 30 seconds; retained
+business success is capped at 45 seconds. The third failure actively closes the
+gate even before either deadline. Process loss cannot renew a kernel timeout.
+The existing nftables set definition stays unchanged (15-second default); each
+renewal supplies an explicit bounded element timeout. No service restart,
+configuration deletion or cross-peer change is triggered by a normal failure.
+
+Upgrade receipt consumers and the scoped node together: the new receipt carries
+`securityCheckedAt`, failure/success streaks and the last actual business success.
+Do not mark old or missing receipts healthy during a rolling update. Preserve
+configuration, enrollment, subscription tokens and traffic watermarks.

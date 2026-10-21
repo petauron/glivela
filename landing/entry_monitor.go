@@ -23,19 +23,22 @@ type BusinessResult struct {
 }
 
 type MonitorStatus struct {
-	Revision      uint64    `json:"revision"`
-	State         string    `json:"state"`
-	LinkState     string    `json:"linkState"`
-	Reason        string    `json:"reason"`
-	TCP           bool      `json:"tcp"`
-	UDP           bool      `json:"udp"`
-	ExitIP        string    `json:"exitIp,omitempty"`
-	CheckedAt     time.Time `json:"checkedAt"`
-	StartedAt     time.Time `json:"startedAt"`
-	DurationMS    int64     `json:"durationMs"`
-	Stage         string    `json:"stage"`
-	LastHealthyAt time.Time `json:"lastHealthyAt,omitempty"`
-	AllowedUntil  time.Time `json:"allowedUntil,omitempty"`
+	Revision             uint64    `json:"revision"`
+	State                string    `json:"state"`
+	LinkState            string    `json:"linkState"`
+	Reason               string    `json:"reason"`
+	TCP                  bool      `json:"tcp"`
+	UDP                  bool      `json:"udp"`
+	ExitIP               string    `json:"exitIp,omitempty"`
+	CheckedAt            time.Time `json:"checkedAt"`
+	StartedAt            time.Time `json:"startedAt"`
+	DurationMS           int64     `json:"durationMs"`
+	Stage                string    `json:"stage"`
+	LastHealthyAt        time.Time `json:"lastHealthyAt,omitempty"`
+	AllowedUntil         time.Time `json:"allowedUntil,omitempty"`
+	SecurityCheckedAt    time.Time `json:"securityCheckedAt,omitempty"`
+	ConsecutiveFailures  int       `json:"consecutiveFailures,omitempty"`
+	ConsecutiveSuccesses int       `json:"consecutiveSuccesses,omitempty"`
 }
 
 // Monitor is only for a route which has already been applied. Initial enable
@@ -69,6 +72,8 @@ func (m *Monitor) Run(ctx context.Context) error {
 	ticker := time.NewTicker(CheckInterval)
 	defer ticker.Stop()
 	var lastHealthy time.Time
+	var lastBusiness BusinessResult
+	var tracker availability
 	for {
 		started := time.Now()
 		status := MonitorStatus{Revision: m.Gate.revision, State: "blocked", LinkState: "unknown", Stage: "private_link_before", Reason: "check_failed", StartedAt: started.UTC(), LastHealthyAt: lastHealthy}
@@ -89,37 +94,68 @@ func (m *Monitor) Run(ctx context.Context) error {
 			}
 			cancel()
 			status.TCP, status.UDP = business.TCP, business.UDP
-			if checkErr == nil {
+			var network *NetworkFailure
+			if checkErr == nil || errors.As(checkErr, &network) {
 				after = m.Links.Check(ctx, m.Gate.peer)
 				status.Stage, status.LinkState, status.Reason = "private_link_after", after.State, after.Reason
 			}
 		}
-		until, healthy := leaseDeadlineForTransport(m.Gate, before, business, after, time.Now(), m.TCPOnly)
-		if healthy && business.ExitIP == m.ExpectedExit && checkErr == nil && ctx.Err() == nil {
+		_, healthy := leaseDeadlineForTransport(m.Gate, before, business, after, time.Now(), m.TCPOnly)
+		healthy = healthy && business.ExitIP == m.ExpectedExit && checkErr == nil && ctx.Err() == nil
+		var network *NetworkFailure
+		transient := errors.As(checkErr, &network) && validDirectLink(before, time.Now()) && validDirectLink(after, time.Now()) &&
+			!after.StartedAt.Before(before.CheckedAt) && ctx.Err() == nil
+		if transient {
+			status.Stage, status.Reason = network.Stage, "network_failure"
+		} else if checkErr != nil {
+			status.Reason = "security_or_runtime_check_failed"
+		}
+		if healthy {
+			lastHealthy, lastBusiness = time.Now().UTC(), business
+		}
+		allowed := tracker.observe(healthy, transient)
+		if allowed && !lastHealthy.IsZero() && time.Since(lastHealthy) < BusinessLifetime {
+			// Only fresh security evidence renews the short kernel lease. The
+			// separate business deadline caps grace even if the monitor stalls.
+			until := after.StartedAt.Add(AllowLifetime)
+			if limit := lastHealthy.Add(BusinessLifetime); until.After(limit) {
+				until = limit
+			}
 			var confirmed time.Time
 			confirmed, checkErr = m.Gate.renew(ctx, until)
 			if checkErr == nil {
 				status.State, status.Stage, status.Reason = "healthy", "complete", "direct_and_business_ready"
-				status.TCP, status.UDP, status.ExitIP = business.TCP, business.UDP, business.ExitIP
+				status.TCP, status.UDP, status.ExitIP = lastBusiness.TCP, lastBusiness.UDP, lastBusiness.ExitIP
 				status.AllowedUntil = confirmed.UTC()
-				lastHealthy = time.Now().UTC()
+				status.SecurityCheckedAt = after.StartedAt.UTC()
+				if transient {
+					status.State, status.Stage, status.Reason = "degraded", network.Stage, "network_failure_grace"
+				}
 				status.LastHealthyAt = lastHealthy
 			} else {
 				status.Stage, status.Reason = "gate", "renewal_failed"
+				tracker = availability{}
 			}
 		}
-		if status.State != "healthy" {
+		if status.State != "healthy" && status.State != "degraded" {
 			// A failed renewal can have committed despite a lost response. Closing
 			// the peer-scoped gate blocks both existing and new traffic without
 			// interrupting unrelated sessions in the shared proxy process.
 			if err := m.close(); err != nil {
 				return err
 			}
-			if before.State == "direct" && checkErr == nil && after.State == "direct" {
+			if !healthy {
+				tracker.up = false
+			}
+			if healthy && checkErr == nil {
+				status.Stage, status.Reason = "recovery", "awaiting_second_success"
+			}
+			if !healthy && before.State == "direct" && checkErr == nil && after.State == "direct" {
 				status.Stage, status.Reason = "verification", "evidence_invalid_or_expired"
 			}
 		}
 		status.CheckedAt = time.Now().UTC()
+		status.ConsecutiveFailures, status.ConsecutiveSuccesses = tracker.failures, tracker.successes
 		status.DurationMS = time.Since(started).Milliseconds()
 		if m.Report != nil {
 			m.Report(status)
@@ -146,11 +182,7 @@ func businessCheckTimeout(tcpOnly bool) time.Duration {
 }
 
 func leaseDeadlineForTransport(gate *TrafficGate, before LinkResult, business BusinessResult, after LinkResult, now time.Time, tcpOnly bool) (time.Time, bool) {
-	validLink := func(result LinkResult) bool {
-		return result.State == "direct" && result.Reason == "fresh_disco_direct_response" && !result.StartedAt.IsZero() &&
-			!result.CheckedAt.Before(result.StartedAt) && result.CheckedAt.Sub(result.StartedAt) <= CheckTimeout && !result.CheckedAt.After(now)
-	}
-	if !validLink(before) || !validLink(after) || business.Peer != gate.peer || business.Revision != gate.revision || !business.TCP ||
+	if !validDirectLink(before, now) || !validDirectLink(after, now) || business.Peer != gate.peer || business.Revision != gate.revision || !business.TCP ||
 		business.StartedAt.Before(before.CheckedAt) || business.CheckedAt.Before(business.StartedAt) || business.CheckedAt.Sub(business.StartedAt) > businessCheckTimeout(tcpOnly) ||
 		after.StartedAt.Before(business.CheckedAt) || (!tcpOnly && (!business.UDP || !validEntryUDPRelay(business.UDPRelay, gate.peer.Address))) {
 		return time.Time{}, false
@@ -161,6 +193,11 @@ func leaseDeadlineForTransport(gate *TrafficGate, before LinkResult, business Bu
 	}
 	deadline := before.StartedAt.Add(AllowLifetime)
 	return deadline, deadline.After(now.Add(nftTimeout + time.Second))
+}
+
+func validDirectLink(result LinkResult, now time.Time) bool {
+	return result.State == "direct" && result.Reason == "fresh_disco_direct_response" && !result.StartedAt.IsZero() &&
+		!result.CheckedAt.Before(result.StartedAt) && result.CheckedAt.Sub(result.StartedAt) <= CheckTimeout && !result.CheckedAt.After(now) && now.Sub(result.CheckedAt) <= AllowLifetime
 }
 
 // Xray allocates a new relay port for each association. The probe must still

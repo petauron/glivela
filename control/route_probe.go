@@ -15,6 +15,7 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 // RouteProbe is an entry-side check of one exact migration/configuration.
@@ -109,16 +110,28 @@ func checkRoute(ctx context.Context, p RouteProbe, roots *x509.CertPool) (result
 		// An EOF alone does not identify who closed the connection. Preserve a
 		// bounded category, not raw error text containing request/host details.
 		result.Failure = "connect-or-tls"
-		return result, errors.New("control: route connection or TLS failed")
+		var certificate *tls.CertificateVerificationError
+		if errors.As(err, &certificate) {
+			result.Failure = "certificate-verification"
+			return result, errors.New("control: route certificate verification failed")
+		}
+		return result, &landing.NetworkFailure{Stage: "route_connect_or_tls"}
 	}
 	defer response.Body.Close()
 	result.TLSVerified = response.TLS != nil && len(response.TLS.VerifiedChains) != 0
 	result.HTTPStatus = response.StatusCode
 	if !result.TLSVerified || response.StatusCode != http.StatusOK {
 		result.Failure = "http-status"
+		if result.TLSVerified && (response.StatusCode == 429 || response.StatusCode >= 500) {
+			return result, &landing.NetworkFailure{Stage: "route_http_status"}
+		}
 		return result, errors.New("control: controlled target did not confirm exit")
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 65))
+	if err != nil {
+		result.Failure = "exit-response"
+		return result, &landing.NetworkFailure{Stage: "route_response_read"}
+	}
 	if err != nil || len(raw) > 64 {
 		result.Failure = "exit-response"
 		return result, errors.New("control: invalid exit response")

@@ -11,7 +11,7 @@ import (
 )
 
 func TestEntryMonitorFreshEvidenceAndPeerScopedClosure(t *testing.T) {
-	for _, mode := range []string{"healthy", "wrong-exit", "wrong-peer", "wrong-revision", "wrong-relay", "missing-udp", "tcp-only", "business-error", "relay-path"} {
+	for _, mode := range []string{"healthy", "wrong-exit", "wrong-peer", "wrong-revision", "wrong-relay", "missing-udp", "tcp-only", "business-error", "relay-path", "hysteresis"} {
 		t.Run(mode, func(t *testing.T) {
 			gate := fixtureGate(t)
 			document := fixtureNFT(t, gate)
@@ -62,6 +62,7 @@ func TestEntryMonitorFreshEvidenceAndPeerScopedClosure(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var status MonitorStatus
+			reports := 0
 			monitor := Monitor{Gate: gate, Links: checker, ExpectedExit: "8.8.8.8", TCPOnly: mode == "tcp-only",
 				CheckBusiness: func(_ context.Context, peer PeerIdentity, revision uint64) (BusinessResult, error) {
 					if mode == "relay-path" {
@@ -69,6 +70,13 @@ func TestEntryMonitorFreshEvidenceAndPeerScopedClosure(t *testing.T) {
 					}
 					result := BusinessResult{Peer: peer, Revision: revision, TCP: true, UDP: true, UDPRelay: peer.Address + ":49152", ExitIP: "8.8.8.8", StartedAt: time.Now(), CheckedAt: time.Now()}
 					switch mode {
+					case "hysteresis":
+						if reports >= 2 && reports <= 4 {
+							return result, &NetworkFailure{Stage: "route_connect_or_tls"}
+						}
+						if reports == 7 {
+							return result, errors.New("security failure")
+						}
 					case "wrong-exit":
 						result.ExitIP = "1.1.1.1"
 					case "wrong-peer":
@@ -84,12 +92,31 @@ func TestEntryMonitorFreshEvidenceAndPeerScopedClosure(t *testing.T) {
 						return result, errors.New("anonymous probe failure")
 					}
 					return result, nil
-				}, Report: func(result MonitorStatus) { status = result; cancel() }}
+				}, Report: func(result MonitorStatus) {
+					status = result
+					reports++
+					if mode == "hysteresis" {
+						want := []string{"blocked", "healthy", "degraded", "degraded", "blocked", "blocked", "healthy", "blocked"}
+						if status.State != want[reports-1] {
+							t.Errorf("round %d: %s, expected %s", reports, status.State, want[reports-1])
+						}
+						if status.State == "degraded" && (status.LastHealthyAt.IsZero() || status.SecurityCheckedAt.IsZero() || !status.AllowedUntil.After(status.CheckedAt)) {
+							t.Error("grace lacks bounded security/business evidence")
+						}
+						if reports == len(want) {
+							cancel()
+						}
+						return
+					}
+					if (mode != "healthy" && mode != "tcp-only") || reports == 2 {
+						cancel()
+					}
+				}}
 			if err := monitor.Run(ctx); !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
 			wantHealthy := mode == "healthy" || mode == "tcp-only"
-			if (status.State == "healthy") != wantHealthy || (renewals == 1) != wantHealthy || writes < 2 {
+			if (status.State == "healthy") != wantHealthy || (mode != "hysteresis" && (renewals == 1) != wantHealthy) || writes < 2 {
 				t.Fatalf("state=%s renewals=%d writes=%d", status.State, renewals, writes)
 			}
 			if len(gate.elements(document)) != 0 {

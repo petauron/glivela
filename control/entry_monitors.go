@@ -167,18 +167,24 @@ func (m *entryMonitors) start(desired Desired, gates []*landing.TrafficGate, ent
 				}
 				probe := RouteProbe{AttemptID: "entry-monitor", SnapshotID: desired.ConfigSHA256, EntryID: entryID, LandingID: peer.EgressID, Revision: revision, ConfigSHA256: desired.ConfigSHA256, SOCKSAddress: net.JoinHostPort(identity.Address, "1080"), Target: peer.Target, ExpectedExit: peer.ExpectedExit}
 				observed, err := CheckRoute(check, probe)
-				if err != nil {
+				probeErr := err
+				var network *landing.NetworkFailure
+				if err != nil && !errors.As(err, &network) {
 					return result, err
 				}
-				after, err := checker.SelfIdentity(check, desired.EntryNetwork.Source.Address)
+				// A probe timeout must not prevent the independent post-probe
+				// security checks, nor turn their failure into network grace.
+				securityCtx, securityCancel := context.WithTimeout(ctx, landing.CheckTimeout)
+				defer securityCancel()
+				after, err := checker.SelfIdentity(securityCtx, desired.EntryNetwork.Source.Address)
 				if err != nil || after != before {
 					return result, errors.New("control: entry private identity changed during probe")
 				}
-				if err := ready(check, desired); err != nil {
+				if err := ready(securityCtx, desired); err != nil {
 					return result, err
 				}
 				result.TCP, result.ExitIP, result.CheckedAt = observed.Passed, observed.ObservedExit, time.Now()
-				return result, nil
+				return result, probeErr
 			}, Report: func(status landing.MonitorStatus) {
 				m.mu.Lock()
 				if m.group == g {

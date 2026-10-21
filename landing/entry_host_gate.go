@@ -58,7 +58,7 @@ func (g *TrafficGate) validOwnership(name, marker string) bool {
 func (g *TrafficGate) hostObjects() []map[string]nftObject {
 	objects := []map[string]nftObject{
 		{"table": {"family": "inet", "name": g.table, "comment": g.marker}},
-		{"set": {"family": "inet", "table": g.table, "name": "allowed", "type": "ipv4_addr", "flags": []string{"timeout"}, "timeout": int(AllowLifetime.Seconds()), "size": 1}},
+		{"set": {"family": "inet", "table": g.table, "name": "allowed", "type": "ipv4_addr", "flags": []string{"timeout"}, "timeout": int(gateDefaultLifetime.Seconds()), "size": 1}},
 		{"chain": {"family": "inet", "table": g.table, "name": "output", "type": "filter", "hook": "output", "prio": 10, "policy": "accept"}},
 		{"chain": {"family": "inet", "table": g.table, "name": "input", "type": "filter", "hook": "input", "prio": -10, "policy": "accept"}},
 		{"chain": {"family": "inet", "table": g.table, "name": "outbound"}},
