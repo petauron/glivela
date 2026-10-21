@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.30](https://github.com/petauron/glivela/compare/v0.1.0-alpha.29...v0.1.0-alpha.30) (2026-10-21)
+
+
+### Bug Fixes
+
+* enforce retained entry quotas during staged handover ([aad7c56](https://github.com/petauron/glivela/commit/aad7c5625c449fa351766f34b5e6d4794367d41a))
+
 ## [0.1.0-alpha.29](https://github.com/petauron/glivela/compare/v0.1.0-alpha.28...v0.1.0-alpha.29) (2026-10-21)
 
 
