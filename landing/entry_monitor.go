@@ -104,7 +104,9 @@ func (m *Monitor) Run(ctx context.Context) error {
 		healthy = healthy && business.ExitIP == m.ExpectedExit && checkErr == nil && ctx.Err() == nil
 		var network *NetworkFailure
 		transient := errors.As(checkErr, &network) && validDirectLink(before, time.Now()) && validDirectLink(after, time.Now()) &&
-			!after.StartedAt.Before(before.CheckedAt) && ctx.Err() == nil
+			business.Peer == m.Gate.peer && business.Revision == m.Gate.revision &&
+			!business.StartedAt.Before(before.CheckedAt) && !business.CheckedAt.Before(business.StartedAt) &&
+			!after.StartedAt.Before(business.CheckedAt) && ctx.Err() == nil
 		if transient {
 			status.Stage, status.Reason = network.Stage, "network_failure"
 		} else if checkErr != nil {
