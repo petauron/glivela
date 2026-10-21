@@ -17,6 +17,7 @@ import (
 )
 
 type Node struct {
+	EntryQuota           *EntryQuota           `json:"entryQuota,omitempty"`
 	RouteEntries         map[string]RouteEntry `json:"routeEntries,omitempty"`
 	Checks               map[string]RouteCheck `json:"checks,omitempty"`
 	ID                   string                `json:"id"`
@@ -72,6 +73,9 @@ func OpenStore(path string) (*Store, error) {
 	}
 	seen := map[string]bool{}
 	for _, node := range nodes {
+		if node.EntryQuota != nil && (node.EntryQuota.validate() != nil || node.EntryQuota.validateDesired(node.Desired) != nil) {
+			return nil, errors.New("control: invalid stored entry quota")
+		}
 		if !glivela.ValidIdentifier(node.ID) || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || seen[node.ID] || validateNodeRole(node) != nil {
 			return nil, errors.New("control: invalid node")
 		}
@@ -113,6 +117,16 @@ func OpenStore(path string) (*Store, error) {
 func (s *Store) Put(node Node) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if node.EntryQuota != nil {
+		if s.business != nil || node.EntryQuota.validate() != nil || node.EntryQuota.validateDesired(node.Desired) != nil || node.EntryQuota.Raw != nil {
+			return errors.New("control: invalid initial staged quota")
+		}
+		for _, counter := range node.EntryQuota.Forwarded.Counters {
+			if counter.Upload != 0 || counter.Download != 0 {
+				return errors.New("control: initial forwarded counters must be empty")
+			}
+		}
+	}
 	if !glivela.ValidIdentifier(node.ID) || !glivela.ValidIdentity(node.CertificateID) || node.Desired.Validate() != nil || len(node.Checks) != 0 || validateNodeRole(node) != nil {
 		return errors.New("control: invalid enrollment")
 	}
@@ -123,6 +137,9 @@ func (s *Store) Put(node Node) error {
 	for key, old := range next {
 		if old.ID != node.ID {
 			continue
+		}
+		if old.EntryQuota != nil {
+			return errors.New("control: staged quota enrollment cannot replace retained counters or policy")
 		}
 		if (old.Desired.Entry == nil) != (node.Desired.Entry == nil) {
 			return errors.New("control: changing node role requires explicit handover")
@@ -153,6 +170,7 @@ func (s *Store) Put(node Node) error {
 	node.EntryHealthBarrierAt = time.Time{}
 	node.ReportedAt = time.Time{}
 	node.Desired = node.Desired.clone()
+	node.EntryQuota = node.EntryQuota.clone()
 	node.RouteEntries = maps.Clone(node.RouteEntries)
 	next[node.CertificateID] = node
 	if node.Desired.Entry != nil {
@@ -193,7 +211,17 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 	node = s.nodes[certificate]
 	now := time.Now().UTC()
 	old := node
-	if node.Desired.Entry != nil && receipt != nil && receipt.EntryHealth != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, receipt.AppliedReceipt) == nil && !receipt.EntryHealth.SampledAt.IsZero() && !receipt.EntryHealth.SampledAt.After(now) && !receipt.EntryHealth.SampledAt.After(node.EntryHealthBarrierAt) {
+	if node.EntryQuota != nil {
+		if s.business != nil {
+			return Desired{}, errors.New("control: staged quota and owned ledger cannot both write")
+		}
+		quota, desired, err := advanceEntryQuota(node.EntryQuota, node.Desired, receipt, now)
+		if err != nil {
+			return Desired{}, err
+		}
+		node.EntryQuota, node.Desired = quota, desired
+	}
+	if reflect.DeepEqual(node.EntryQuota, old.EntryQuota) && node.Desired.Entry != nil && receipt != nil && receipt.EntryHealth != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, receipt.AppliedReceipt) == nil && !receipt.EntryHealth.SampledAt.IsZero() && !receipt.EntryHealth.SampledAt.After(now) && !receipt.EntryHealth.SampledAt.After(node.EntryHealthBarrierAt) {
 		// Delayed/replayed old success must not overwrite a newer blocked
 		// observation or extend freshness. It still receives current policy.
 		return node.Desired.clone(), nil
