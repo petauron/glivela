@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.33](https://github.com/petauron/glivela/compare/v0.1.0-alpha.32...v0.1.0-alpha.33) (2026-10-21)
+
+
+### Bug Fixes
+
+* canonicalize legacy entry mount order during handover ([16ae665](https://github.com/petauron/glivela/commit/16ae665d3c87372dc2fb1194096375af0b77be50))
+
 ## [0.1.0-alpha.32](https://github.com/petauron/glivela/compare/v0.1.0-alpha.31...v0.1.0-alpha.32) (2026-10-21)
 
 
