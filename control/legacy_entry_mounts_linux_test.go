@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,31 @@ func TestLegacyEntryRetainsOnlyPinnedImageVolumes(t *testing.T) {
 			after, _ := json.Marshal(state)
 			if string(before) != string(after) {
 				t.Fatal("validation changed retained mount evidence")
+			}
+			canonical := state
+			canonicalizeLegacyEntryMounts(&canonical)
+			for shift := range state.Mounts {
+				permuted := state
+				permuted.Mounts = append(append(state.Mounts[:0:0], state.Mounts[shift:]...), state.Mounts[:shift]...)
+				original, _ := json.Marshal(permuted)
+				canonicalizeLegacyEntryMounts(&permuted)
+				if legacyEntryMountsValid(permuted) != want {
+					t.Fatal("mount order changed ownership verdict")
+				}
+				if want && !reflect.DeepEqual(permuted, canonical) {
+					t.Fatal("mount projection is not deterministic")
+				}
+				var saved legacyEntrySnapshot
+				if err := json.Unmarshal(original, &saved.Container); err != nil {
+					t.Fatal(err)
+				}
+				current := saved
+				current.Container = permuted
+				saved.Container.Host.Restart = "no"
+				current.Container.Host.Restart = "no"
+				if !sameStoppedLegacyEntry(saved, current) {
+					t.Fatal("retained snapshot rejected only because of mount order")
+				}
 			}
 		})
 	}

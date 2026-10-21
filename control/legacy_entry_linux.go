@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sort"
 	"strconv"
 
 	glivela "github.com/petauron/glivela"
@@ -42,6 +43,7 @@ func readLegacyEntry(ctx context.Context, id, application string) (legacyEntrySn
 		return legacyEntrySnapshot{}, err
 	}
 	state, err := decodeEntryContainer(raw)
+	canonicalizeLegacyEntryMounts(&state)
 	if err != nil || state.ID != id || state.Config.Image != entryImageReference || !slices.Equal(state.Config.Entrypoint, []string{"/usr/local/bin/xray"}) || !slices.Equal(state.Config.Cmd, []string{"run", "-c", "/etc/vastora/config.json"}) || state.Host.Privileged || !state.Host.ReadonlyRootfs || state.Host.AutoRemove || state.State.Restarting || state.State.Paused || state.State.Dead || !legacyEntryMountsValid(state) {
 		return legacyEntrySnapshot{}, invalid
 	}
@@ -95,6 +97,15 @@ func legacyEntryMountsValid(state entryContainerState) bool {
 		seen[mount.Destination] = true
 	}
 	return true
+}
+
+// Docker does not promise inspect mount ordering. Preserve every mount field,
+// but compare a private, deterministic projection rather than list position.
+func canonicalizeLegacyEntryMounts(state *entryContainerState) {
+	state.Mounts = slices.Clone(state.Mounts)
+	sort.SliceStable(state.Mounts, func(i, j int) bool {
+		return state.Mounts[i].Destination < state.Mounts[j].Destination
+	})
 }
 
 func BackupLegacyEntry(ctx context.Context, directory, container, application string) (string, error) {
@@ -323,6 +334,8 @@ func recoverLegacyEntry(ctx context.Context, checkpoint string, saved legacyEntr
 }
 
 func sameStoppedLegacyEntry(saved, current legacyEntrySnapshot) bool {
+	canonicalizeLegacyEntryMounts(&saved.Container)
+	canonicalizeLegacyEntryMounts(&current.Container)
 	if current.Container.State.Running || current.Container.State.Restarting || current.Container.State.Pid != 0 || current.Container.Host.Restart != "no" {
 		return false
 	}
