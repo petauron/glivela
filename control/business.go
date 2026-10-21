@@ -131,6 +131,11 @@ func (s *Store) LoadBusiness(keyPath string) error {
 	if s.business != nil {
 		return errors.New("control: business state already loaded")
 	}
+	for _, node := range s.nodes {
+		if node.EntryQuota != nil && keyPath != "" {
+			return errors.New("control: staged quota cannot load a second business owner")
+		}
+	}
 	directory := filepath.Dir(s.path)
 	owned, err := businessAdoptionStarted(directory)
 	if err != nil {

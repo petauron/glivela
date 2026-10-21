@@ -207,6 +207,7 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				CertificateID string           `json:"certificateId"`
 				Plan          glivela.XrayPlan `json:"plan"`
 				Network       *EntryNetwork    `json:"network"`
+				Quota         *EntryQuotaSeed  `json:"quota,omitempty"`
 			}
 			if decode(http.MaxBytesReader(w, r.Body, maxMessage), &request) != nil || request.Network == nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
 				http.Error(w, "invalid entry identity or plan", http.StatusBadRequest)
@@ -217,7 +218,15 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				http.Error(w, "invalid entry policy", http.StatusBadRequest)
 				return
 			}
-			if err := store.Put(Node{ID: request.ID, CertificateID: request.CertificateID, Desired: desired}); err != nil {
+			var quota *EntryQuota
+			if request.Quota != nil {
+				quota, desired, err = newEntryQuota(*request.Quota, desired)
+				if err != nil {
+					http.Error(w, "invalid entry quota handover", http.StatusBadRequest)
+					return
+				}
+			}
+			if err := store.Put(Node{ID: request.ID, CertificateID: request.CertificateID, Desired: desired, EntryQuota: quota}); err != nil {
 				http.Error(w, "entry update refused", http.StatusConflict)
 				return
 			}

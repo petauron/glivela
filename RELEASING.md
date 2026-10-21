@@ -58,6 +58,32 @@ already public release must never be repaired by moving tags or replacing assets
 
 ## Native uninstall boundary (MVP)
 
+### Staged entry quotas
+
+For sequential handover with the existing subscription/ledger owner retained,
+the authenticated entry enrollment accepts a `quota` seed: exact total bytes,
+current period usage, reset day/timezone, last/next reset timestamps and final
+drained sample time. Back up and stop the old writer first. Do not replace the
+seed with zero usage or unlimited policy. The controller persists enforcement
+and sampled cumulative forwarding counters atomically with desired policy;
+period resets never reset these cumulative forwarding counters. The original
+account ledger remains authoritative, and must consume the staged receipt
+projection with its matching transition adapter before migration is accepted.
+
+Quota exhaustion removes native and routed credentials through the existing
+Xray configuration application; the next calendar cycle restores the retained
+authorization flags. This is sampled enforcement, not an exact per-byte cutoff.
+Samples spanning a reset are conservatively charged to the new period; lifetime
+sampled bytes are retained. A staged entry cannot be overwritten through ordinary
+enrollment or loaded alongside a second owned-business ledger. Existing entries
+without a quota projection are unchanged. Do not seed an already exhausted old
+projection: its disabled credentials do not prove the original enabled inventory.
+
+Local official-core acceptance checks authentication denial/recovery using
+anonymous loopback VLESS and verified HTTPS. It is not proof of deployed REALITY,
+systemd/firewall enforcement or full subscription/double-hop acceptance; verify
+those on each separately authorized entry before moving to the next.
+
 For the one-time entry migration, the installed native node must remain stopped
 while the original writer is stopped and the exact source container is verified
 stopped with restart disabled. `stage-native-entry -config <persistent-owned-bootstrap>
