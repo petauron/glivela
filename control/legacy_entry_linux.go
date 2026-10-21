@@ -42,7 +42,7 @@ func readLegacyEntry(ctx context.Context, id, application string) (legacyEntrySn
 		return legacyEntrySnapshot{}, err
 	}
 	state, err := decodeEntryContainer(raw)
-	if err != nil || state.ID != id || state.Config.Image != entryImageReference || !slices.Equal(state.Config.Entrypoint, []string{"/usr/local/bin/xray"}) || !slices.Equal(state.Config.Cmd, []string{"run", "-c", "/etc/vastora/config.json"}) || state.Host.Privileged || !state.Host.ReadonlyRootfs || state.Host.AutoRemove || state.State.Restarting || state.State.Paused || state.State.Dead || len(state.Mounts) != 1 {
+	if err != nil || state.ID != id || state.Config.Image != entryImageReference || !slices.Equal(state.Config.Entrypoint, []string{"/usr/local/bin/xray"}) || !slices.Equal(state.Config.Cmd, []string{"run", "-c", "/etc/vastora/config.json"}) || state.Host.Privileged || !state.Host.ReadonlyRootfs || state.Host.AutoRemove || state.State.Restarting || state.State.Paused || state.State.Dead || !legacyEntryMountsValid(state) {
 		return legacyEntrySnapshot{}, invalid
 	}
 	switch state.Host.Restart {
@@ -70,6 +70,31 @@ func readLegacyEntry(ctx context.Context, id, application string) (legacyEntrySn
 		return legacyEntrySnapshot{}, err
 	}
 	return legacyEntrySnapshot{Version: 1, ApplicationID: application, Container: state, Configuration: config}, nil
+}
+
+// Docker creates these two anonymous volumes from the pinned image's VOLUME
+// declarations. Retain them verbatim in the checkpoint and stopped container;
+// they are not configuration sources and are never copied or deleted here.
+func legacyEntryMountsValid(state entryContainerState) bool {
+	if len(state.Mounts) != 1 && len(state.Mounts) != 3 {
+		return false
+	}
+	config := state.Mounts[0]
+	if config.Type != "bind" || config.Destination != "/etc/vastora" || config.RW {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, mount := range state.Mounts[1:] {
+		if mount.Type != "volume" || !mount.RW || mount.Propagation != "" || seen[mount.Destination] || (mount.Destination != "/var/log/xray" && mount.Destination != "/usr/local/etc/xray") {
+			return false
+		}
+		name := filepath.Base(filepath.Dir(mount.Source))
+		if !exactDockerID(name) || mount.Source != filepath.Join("/var/lib/docker/volumes", name, "_data") {
+			return false
+		}
+		seen[mount.Destination] = true
+	}
+	return true
 }
 
 func BackupLegacyEntry(ctx context.Context, directory, container, application string) (string, error) {
