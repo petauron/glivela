@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.29](https://github.com/petauron/glivela/compare/v0.1.0-alpha.28...v0.1.0-alpha.29) (2026-10-21)
+
+
+### Bug Fixes
+
+* retain historical health evidence during controller upgrades ([#65](https://github.com/petauron/glivela/issues/65)) ([dc33e1e](https://github.com/petauron/glivela/commit/dc33e1eedeb4cb4964d94c869e27cc97aec88237))
+
 ## [0.1.0-alpha.28](https://github.com/petauron/glivela/compare/v0.1.0-alpha.27...v0.1.0-alpha.28) (2026-10-21)
 
 
