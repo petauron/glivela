@@ -82,6 +82,29 @@ func validateEntryHealth(desired Desired, health *EntryHealthReport) error {
 	return nil
 }
 
+// Stored pre-hysteresis observations are retained as historical evidence only.
+// Validate their original bounded shape without upgrading the stored proof:
+// live report ingestion and route eligibility still require SecurityCheckedAt.
+func validateStoredEntryHealth(desired Desired, health *EntryHealthReport) error {
+	if err := validateEntryHealth(desired, health); err == nil {
+		return nil
+	}
+	if health == nil {
+		return nil
+	}
+	copy := (Observation{EntryHealth: health}).clone().EntryHealth
+	for id, peer := range copy.Peers {
+		s := &peer.Status
+		if s.State == "healthy" && s.SecurityCheckedAt.IsZero() && s.ConsecutiveFailures == 0 && s.ConsecutiveSuccesses == 0 &&
+			!s.AllowedUntil.After(s.StartedAt.Add(15*time.Second)) {
+			// Temporary validation value only; never stored or returned as proof.
+			s.SecurityCheckedAt = s.StartedAt
+			copy.Peers[id] = peer
+		}
+	}
+	return validateEntryHealth(desired, copy)
+}
+
 // Only the one matching landing is tested. A blocked peer must not invalidate
 // other landings that share the entry process. Missing/expired/future evidence
 // fails closed; configuration flags and process readiness are insufficient.

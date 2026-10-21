@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"net"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,48 @@ import (
 	glivela "github.com/petauron/glivela"
 	"github.com/petauron/glivela/landing"
 )
+
+func TestStoredLegacyHealthLoadsWithoutBecomingCurrentProof(t *testing.T) {
+	s := store(t)
+	d := twoPeerEntry(t)
+	observation := healthyEntryObservation(d, time.Now())
+	for id, peer := range observation.EntryHealth.Peers {
+		peer.Status.SecurityCheckedAt = time.Time{}
+		observation.EntryHealth.Peers[id] = peer
+	}
+	cert := strings.Repeat("a", 64)
+	node := Node{ID: "entry-a", CertificateID: cert, Desired: d, Receipt: &observation}
+	raw, err := json.Marshal([]Node{node})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained := loaded.nodes[cert]
+	if retained.Desired.ConfigSHA256 != d.ConfigSHA256 || retained.CertificateID != cert || retained.Receipt == nil {
+		t.Fatal("retained identity/configuration/receipt changed")
+	}
+	if validateEntryHealth(d, retained.Receipt.EntryHealth) == nil {
+		t.Fatal("historical proof was accepted as current health")
+	}
+	after, err := os.ReadFile(s.path)
+	if err != nil || string(after) != string(raw) {
+		t.Fatal("load rewrote historical data", err)
+	}
+	for id, peer := range observation.EntryHealth.Peers {
+		peer.Status.ExitIP = "192.0.2.254"
+		observation.EntryHealth.Peers[id] = peer
+		break
+	}
+	if validateStoredEntryHealth(d, observation.EntryHealth) == nil {
+		t.Fatal("invalid historical identity accepted")
+	}
+}
 
 // Synthetic producer evidence for controller contract tests only. Actual
 // Docker/process/gate acceptance is not represented by these fixture values.
