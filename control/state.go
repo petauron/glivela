@@ -81,7 +81,7 @@ func OpenStore(path string) (*Store, error) {
 		if node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, node.Receipt.AppliedReceipt) != nil {
 			return nil, errors.New("control: invalid stored receipt")
 		}
-		if node.Receipt != nil && validateEntryHealth(node.Desired, node.Receipt.EntryHealth) != nil {
+		if node.Receipt != nil && validateStoredEntryHealth(node.Desired, node.Receipt.EntryHealth) != nil {
 			return nil, errors.New("control: invalid stored entry observation")
 		}
 		if node.Receipt != nil && validateEntryTraffic(node.Desired, node.Receipt.Traffic) != nil {
