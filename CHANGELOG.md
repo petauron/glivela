@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.31](https://github.com/petauron/glivela/compare/v0.1.0-alpha.30...v0.1.0-alpha.31) (2026-10-21)
+
+
+### Bug Fixes
+
+* retain image volumes during native entry handover ([26a041c](https://github.com/petauron/glivela/commit/26a041c38ec85f84acc7d67b7f18e7fe831b1b52))
+
 ## [0.1.0-alpha.30](https://github.com/petauron/glivela/compare/v0.1.0-alpha.29...v0.1.0-alpha.30) (2026-10-21)
 
 
