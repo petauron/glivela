@@ -54,7 +54,7 @@ func (g *TrafficGate) objects() []map[string]nftObject {
 	}
 	objects := []map[string]nftObject{
 		{"table": {"family": "inet", "name": g.table, "comment": g.marker}},
-		{"set": {"family": "inet", "table": g.table, "name": "allowed", "type": "ipv4_addr", "flags": []string{"timeout"}, "timeout": int(AllowLifetime / time.Second), "size": 1}},
+		{"set": {"family": "inet", "table": g.table, "name": "allowed", "type": "ipv4_addr", "flags": []string{"timeout"}, "timeout": int(gateDefaultLifetime / time.Second), "size": 1}},
 		{"chain": {"family": "inet", "table": g.table, "name": "forward", "type": "filter", "hook": "forward", "prio": -300, "policy": "accept"}},
 		{"chain": {"family": "inet", "table": g.table, "name": "outbound"}},
 		{"chain": {"family": "inet", "table": g.table, "name": "inbound"}},

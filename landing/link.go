@@ -22,8 +22,11 @@ const (
 	CheckInterval   = 5 * time.Second
 	CheckTimeout    = 3 * time.Second
 	TCPCheckTimeout = 5 * time.Second
-	AllowLifetime   = 15 * time.Second
-	DefaultSocket   = "/var/run/tailscale/tailscaled.sock"
+	AllowLifetime   = 30 * time.Second
+	// Keep the persisted set policy unchanged. Every renewal supplies its own
+	// bounded element timeout; the set default is not a maximum.
+	gateDefaultLifetime = 15 * time.Second
+	DefaultSocket       = "/var/run/tailscale/tailscaled.sock"
 )
 
 type PeerIdentity struct {

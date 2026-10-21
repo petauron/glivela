@@ -65,10 +65,14 @@ func validateEntryHealth(desired Desired, health *EntryHealthReport) error {
 			if !status.AllowedUntil.IsZero() {
 				return invalid
 			}
-		case "healthy":
-			if status.LinkState != "direct" || status.Stage != "complete" || status.Reason != "direct_and_business_ready" || !status.TCP || status.UDP || status.ExitIP != peer.ExpectedExit ||
+		case "healthy", "degraded":
+			ready := status.State == "healthy" && status.Stage == "complete" && status.Reason == "direct_and_business_ready" && status.ConsecutiveFailures == 0
+			grace := status.State == "degraded" && status.Reason == "network_failure_grace" && status.ConsecutiveFailures > 0 && status.ConsecutiveFailures < landing.FailureThreshold && status.ConsecutiveSuccesses == 0
+			if (!ready && !grace) || status.LinkState != "direct" || !status.TCP || status.UDP || status.ExitIP != peer.ExpectedExit ||
 				status.StartedAt.IsZero() || status.CheckedAt.Before(status.StartedAt) || status.CheckedAt.Sub(status.StartedAt) > landing.AllowLifetime ||
-				status.LastHealthyAt.Before(status.StartedAt) || status.LastHealthyAt.After(status.CheckedAt) || !status.AllowedUntil.After(status.CheckedAt) || status.AllowedUntil.After(status.StartedAt.Add(landing.AllowLifetime)) {
+				status.LastHealthyAt.IsZero() || status.LastHealthyAt.After(status.CheckedAt) || status.CheckedAt.Sub(status.LastHealthyAt) >= landing.BusinessLifetime ||
+				status.SecurityCheckedAt.Before(status.StartedAt) || status.SecurityCheckedAt.After(status.CheckedAt) ||
+				!status.AllowedUntil.After(status.CheckedAt) || status.AllowedUntil.After(status.SecurityCheckedAt.Add(landing.AllowLifetime)) || status.AllowedUntil.After(status.LastHealthyAt.Add(landing.BusinessLifetime)) {
 				return invalid
 			}
 		default:
@@ -97,7 +101,7 @@ func entryPeerFresh(entry Node, target Node, now time.Time) bool {
 		return false
 	}
 	status := peer.Status
-	return status.State == "healthy" && !status.StartedAt.After(now) && !status.CheckedAt.After(now) && status.AllowedUntil.After(now)
+	return (status.State == "healthy" || status.State == "degraded") && !status.StartedAt.After(now) && !status.CheckedAt.After(now) && status.AllowedUntil.After(now)
 }
 
 func invalidateChangedEntryProofs(nodes map[string]Node, old, current Node, now time.Time) error {
