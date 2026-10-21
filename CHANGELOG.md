@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.28](https://github.com/petauron/glivela/compare/v0.1.0-alpha.27...v0.1.0-alpha.28) (2026-10-21)
+
+
+### Bug Fixes
+
+* tolerate transient route failures with bounded health leases ([#63](https://github.com/petauron/glivela/issues/63)) ([b9529e6](https://github.com/petauron/glivela/commit/b9529e61e51e995d41b6350e2c42aabd2e44b68a))
+
 ## [0.1.0-alpha.27](https://github.com/petauron/glivela/compare/v0.1.0-alpha.26...v0.1.0-alpha.27) (2026-10-21)
 
 
