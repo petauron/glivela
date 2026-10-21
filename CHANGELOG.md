@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.32](https://github.com/petauron/glivela/compare/v0.1.0-alpha.31...v0.1.0-alpha.32) (2026-10-21)
+
+
+### Bug Fixes
+
+* read omitted Docker host fields during entry handover ([#71](https://github.com/petauron/glivela/issues/71)) ([9f28438](https://github.com/petauron/glivela/commit/9f284386dd23176ff88120edbea8014bc28b7cd3))
+
 ## [0.1.0-alpha.31](https://github.com/petauron/glivela/compare/v0.1.0-alpha.30...v0.1.0-alpha.31) (2026-10-21)
 
 
