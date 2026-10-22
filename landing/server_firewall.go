@@ -31,6 +31,10 @@ func (policy ServerFirewall) validate() error {
 	if !ValidEgressIP(policy.EgressIP) {
 		return errors.New("landing: invalid firewall egress IP")
 	}
+	return policy.validateIdentity()
+}
+
+func (policy ServerFirewall) validateIdentity() error {
 	if policy.Revision == 0 || !tailnetIPv4(policy.Address) || policy.UID == 0 || policy.UID == 65534 || !bridgeNamePattern.MatchString(policy.Interface) || len(policy.Sources) > 128 {
 		return errors.New("landing: invalid native firewall identity")
 	}
@@ -158,6 +162,10 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy bool) []
 			// EgressIP is mandatory. Its IP payload match enforces IPv4;
 			// nft strips a redundant nfproto condition on kernel read-back.
 			expr := []any{match(meta("l4proto"), protocol), match(payload("ip", "saddr"), policy.EgressIP)}
+			if legacy && policy.EgressIP == "" {
+				// Exact historical read/remove shape; never installed by Xray.
+				expr = []any{match(meta("nfproto"), "ipv4"), match(meta("l4proto"), protocol)}
+			}
 			rule("destinations", append(expr, nftObject{"return": nil})...)
 		}
 	}

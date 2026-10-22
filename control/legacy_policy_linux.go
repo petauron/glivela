@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/petauron/glivela/landing"
 )
@@ -53,6 +54,22 @@ func (s LegacyLandingSnapshot) migrationPlan() (landing.Plan, legacyPolicy, erro
 		seen[address] = true
 	}
 	plan := landing.Plan{Revision: policy.Revision, Address: policy.Address, EgressIP: policy.EgressIP}
+	if plan.EgressIP == "" {
+		// Earlier journals omitted the exit while the owned Dante file pinned
+		// one IPv4 address. Read that exact retained value, never route discovery.
+		for _, line := range strings.Split(string(s.Files["/etc/vastora-landing/danted.conf"].Contents), "\n") {
+			line, _, _ = strings.Cut(line, "#")
+			key, value, ok := strings.Cut(line, ":")
+			if !ok || strings.TrimSpace(key) != "external" {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			if plan.EgressIP != "" || !landing.ValidEgressIP(value) || strings.Contains(value, ":") {
+				return landing.Plan{}, policy, errors.New("control: one retained literal IPv4 exit required")
+			}
+			plan.EgressIP = value
+		}
+	}
 	for _, address := range policy.Sources {
 		plan.Sources = append(plan.Sources, landing.Source{Address: address, TCPOnly: seen[address]})
 	}
