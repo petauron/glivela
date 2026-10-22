@@ -6,15 +6,14 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"syscall"
 	"time"
 
 	"github.com/petauron/glivela/landing"
 )
 
-// The MVP retains previously reviewed targets, rather than selecting new
-// CDN/WAF targets or trusting system DNS to choose a different fallback.
-// Verify the exact configured public IP with every retained SNI before changing
-// a working runtime. No proxy environment or disabled certificate validation.
+// Retain the configured target (including its hostname) and SNI. Validate the
+// actual resolved destination before dialing, without persisting a CDN address.
 func verifyEntryRealityTargets(ctx context.Context, desired Desired) error {
 	if desired.Entry == nil {
 		return errors.New("control: entry target inventory required")
@@ -23,12 +22,11 @@ func verifyEntryRealityTargets(ctx context.Context, desired Desired) error {
 	defer cancel()
 	for _, endpoint := range desired.Entry.RealityEndpoints {
 		host, port, err := net.SplitHostPort(endpoint.Target)
-		address, addressErr := netip.ParseAddr(host)
-		if err != nil || addressErr != nil || !landing.PublicIP(address) || port != "443" || address.Zone() != "" {
-			return errors.New("control: reviewed pinned public REALITY target required")
+		if err != nil || host == "" || port != "443" {
+			return errors.New("control: public REALITY target on port 443 required")
 		}
 		for _, name := range endpoint.ServerNames {
-			dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}, Config: &tls.Config{
+			dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second, Control: publicRealityDestination}, Config: &tls.Config{
 				MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, ServerName: name,
 				NextProtos: []string{"h2"}, CurvePreferences: []tls.CurveID{tls.X25519},
 			}}
@@ -47,6 +45,14 @@ func verifyEntryRealityTargets(ctx context.Context, desired Desired) error {
 				return errors.New("control: REALITY target must retain valid TLS13/X25519/h2/SNI")
 			}
 		}
+	}
+	return nil
+}
+
+func publicRealityDestination(_, address string, _ syscall.RawConn) error {
+	destination, err := netip.ParseAddrPort(address)
+	if err != nil || destination.Port() != 443 || destination.Addr().Zone() != "" || !landing.PublicIP(destination.Addr().Unmap()) {
+		return errors.New("control: REALITY destination must resolve to a public address")
 	}
 	return nil
 }
