@@ -96,3 +96,64 @@ func TestLandingAcceptanceRequiresAllRoutesAndFreshRuntime(t *testing.T) {
 		t.Fatal("empty inventory accepted")
 	}
 }
+
+func TestLandingTemporarySuspensionPreservesSourcesAndRequiresRecovery(t *testing.T) {
+	s := store(t)
+	plan := artifact(1).Landing
+	plan.Sources = append(plan.Sources, landing.Source{Address: "100.64.0.4"})
+	d, err := NewDesired(*plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, first, second := strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)
+	if err := s.Put(Node{ID: "landing-a", CertificateID: cert, Desired: d, RouteEntries: map[string]RouteEntry{"entry-a": {CertificateID: first, Address: "100.64.0.3"}, "entry-b": {CertificateID: second, Address: "100.64.0.4"}}}); err != nil {
+		t.Fatal(err)
+	}
+	reportRuntime(t, s, cert, d)
+	if err := s.SetAvailability("unknown", "maintenance", time.Time{}, s.availability.Revision); err == nil {
+		t.Fatal("unknown exclusion accepted")
+	}
+	if err := s.SetAvailability("entry-b", "traffic-exhausted", time.Now().Add(time.Hour), s.availability.Revision); err != nil {
+		t.Fatal(err)
+	}
+	p := RouteProbe{SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "203.0.113.9"}
+	if err := s.AssignRouteChecks([]RouteCheck{{CertificateID: first, Request: p}}); err != nil {
+		t.Fatal(err)
+	}
+	p = s.nodes[cert].Checks["entry-a"].Request
+	r := RouteProbeResult{AttemptID: p.AttemptID, SnapshotID: p.SnapshotID, EntryID: p.EntryID, LandingID: p.LandingID, Revision: p.Revision, ConfigSHA256: p.ConfigSHA256, CheckedAt: time.Now(), Passed: true, TLSVerified: true, HTTPStatus: 200, ObservedExit: p.ExpectedExit}
+	if _, err := s.RouteExchange(context.Background(), first, &r); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := s.AcceptLandingRoutes("landing-a", p.SnapshotID, d.Revision, d.ConfigSHA256)
+	if err != nil || !gate.RoutesPassed || gate.Reason != "verified-active-entries" || len(gate.DeferredEntries) != 1 || gate.DeferredEntries[0] != "entry-b" {
+		t.Fatalf("unexpected acceptance %+v %v", gate, err)
+	}
+	if len(s.nodes[cert].Desired.Landing.Sources) != 2 || len(s.nodes[cert].RouteEntries) != 2 {
+		t.Fatal("source authorization lost")
+	}
+	s, err = OpenStore(s.path)
+	if err != nil || !s.suspended("entry-b", time.Now()) {
+		t.Fatal("suspension did not survive restart", err)
+	}
+	if err := s.SetAvailability("entry-b", "resume", time.Time{}, s.availability.Revision-1); err == nil {
+		t.Fatal("stale mutation accepted")
+	}
+	if err := s.SetAvailability("entry-b", "resume", time.Time{}, s.availability.Revision); err != nil {
+		t.Fatal(err)
+	}
+	gate, err = s.AcceptLandingRoutes("landing-a", p.SnapshotID, d.Revision, d.ConfigSHA256)
+	if err != nil || gate.RoutesPassed || gate.Reason != "routes-incomplete" {
+		t.Fatal("resume manufactured success", gate, err)
+	}
+	if err := s.SetAvailability("entry-a", "maintenance", time.Time{}, s.availability.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAvailability("entry-b", "maintenance", time.Time{}, s.availability.Revision); err != nil {
+		t.Fatal(err)
+	}
+	gate, err = s.AcceptLandingRoutes("landing-a", p.SnapshotID, d.Revision, d.ConfigSHA256)
+	if err != nil || gate.RoutesPassed {
+		t.Fatal("zero active checks accepted", gate, err)
+	}
+}

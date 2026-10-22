@@ -15,15 +15,17 @@ import (
 )
 
 type legacyCutover struct {
-	AcceptedSnapshot string    `json:"acceptedSnapshot,omitempty"`
-	AcceptedAt       time.Time `json:"acceptedAt,omitempty"`
-	Version          int       `json:"version"`
-	NodeID           string    `json:"nodeId"`
-	Checkpoint       string    `json:"checkpoint"`
-	Binding          string    `json:"binding"`
-	Phase            string    `json:"phase"`
-	WasEnabled       bool      `json:"wasEnabled"`
-	Candidate        Desired   `json:"candidate"`
+	DeferredEntries      []string  `json:"deferredEntries,omitempty"`
+	AvailabilityRevision uint64    `json:"availabilityRevision,omitempty"`
+	AcceptedSnapshot     string    `json:"acceptedSnapshot,omitempty"`
+	AcceptedAt           time.Time `json:"acceptedAt,omitempty"`
+	Version              int       `json:"version"`
+	NodeID               string    `json:"nodeId"`
+	Checkpoint           string    `json:"checkpoint"`
+	Binding              string    `json:"binding"`
+	Phase                string    `json:"phase"`
+	WasEnabled           bool      `json:"wasEnabled"`
+	Candidate            Desired   `json:"candidate"`
 }
 
 // SwitchLegacyLanding is an offline first-cutover operation, not a health
@@ -288,7 +290,8 @@ func CompleteLegacyLanding(ctx context.Context, directory, snapshot string, driv
 	if err != nil || !observation.RuntimeReady || observation.Revision != state.Candidate.Revision || observation.ConfigSHA256 != state.Candidate.ConfigSHA256 {
 		return errors.New("control: current cutover runtime must be healthy")
 	}
-	if err := client.verifyLandingAcceptance(ctx, snapshot, observation.Revision, observation.ConfigSHA256); err != nil {
+	acceptance, err := client.verifyLandingAcceptance(ctx, snapshot, observation.Revision, observation.ConfigSHA256)
+	if err != nil {
 		return err
 	}
 	if err := driver.Healthy(ctx, state.Candidate); err != nil {
@@ -297,6 +300,8 @@ func CompleteLegacyLanding(ctx context.Context, directory, snapshot string, driv
 	state.Phase = "accepted"
 	state.AcceptedSnapshot = snapshot
 	state.AcceptedAt = time.Now().UTC()
+	state.DeferredEntries = acceptance.DeferredEntries
+	state.AvailabilityRevision = acceptance.AvailabilityRevision
 	return saveLegacyCutover(directory, state)
 }
 

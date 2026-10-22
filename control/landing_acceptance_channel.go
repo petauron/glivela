@@ -48,29 +48,29 @@ func handleLandingAcceptance(repository Repository, w http.ResponseWriter, r *ht
 	_ = json.NewEncoder(w).Encode(status)
 }
 
-func (c *Client) verifyLandingAcceptance(ctx context.Context, snapshot string, revision uint64, digest string) error {
+func (c *Client) verifyLandingAcceptance(ctx context.Context, snapshot string, revision uint64, digest string) (RouteAcceptance, error) {
 	endpoint, err := url.Parse(c.endpoint)
 	if err != nil {
-		return err
+		return RouteAcceptance{}, err
 	}
 	endpoint.Path = "/v1/landing-acceptance"
 	raw, err := json.Marshal(landingAcceptanceRequest{snapshot, revision, digest})
 	if err != nil {
-		return err
+		return RouteAcceptance{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(raw))
 	if err != nil {
-		return err
+		return RouteAcceptance{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	response, err := c.http.Do(req)
 	if err != nil {
-		return errors.New("control: landing acceptance unavailable")
+		return RouteAcceptance{}, errors.New("control: landing acceptance unavailable")
 	}
 	defer response.Body.Close()
 	var status RouteAcceptance
-	if response.StatusCode != http.StatusOK || decode(io.LimitReader(response.Body, 4097), &status) != nil || !status.RuntimeReady || !status.RoutesPassed || status.Reason != "verified" {
-		return errors.New("control: complete fresh landing route acceptance required")
+	if response.StatusCode != http.StatusOK || decode(io.LimitReader(response.Body, 4097), &status) != nil || !status.RuntimeReady || !status.RoutesPassed || (status.Reason != "verified" && status.Reason != "verified-active-entries") || (len(status.DeferredEntries) > 0) != (status.Reason == "verified-active-entries") {
+		return RouteAcceptance{}, errors.New("control: complete fresh landing route acceptance required")
 	}
-	return nil
+	return status, nil
 }

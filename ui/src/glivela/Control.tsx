@@ -9,7 +9,8 @@ type Plan = { totalBytes: string; expiryTime: string; resetDays: number; enabled
 type Account = { account: { id: string; displayName: string; desiredRevision: string; plan: Plan }; usage: { baseline: string; observed: string }[]; schedule: { nextResetAt: string }; traffic: Record<string, { uploadBytes: string; downloadBytes: string }> };
 type Route = { id: string; accountId: string; entryId: string; egressId: string; ipv4EgressId?: string; enabled: boolean; hideNative: boolean; state: string };
 type Runtime = { id: string; role: string; revision: string; runtimeReady: boolean; reportedAt: string; peers: string[] };
-type Inventory = { state: string; accounts: Account[]; endpoints: { id: string; entryId: string; name: string; retired: boolean }[]; routes: Route[]; runtimes: Runtime[]; nodes: { id: string; name: string }[] };
+type Suspension = { reason: string; changedAt: string; resumeAt?: string };
+type Inventory = { state: string; availability?: { revision: string; nodes: Record<string, Suspension> }; accounts: Account[]; endpoints: { id: string; entryId: string; name: string; retired: boolean; nextResetAt?: string }[]; routes: Route[]; runtimes: Runtime[]; nodes: { id: string; name: string }[] };
 
 // Same-origin mTLS is supplied by the browser, not a Vastora cookie or an
 // application credential in JS. Never persist responses/tokens in web storage.
@@ -22,7 +23,7 @@ async function manage<T>(operation: string, body: unknown, signal?: AbortSignal)
 function amount(value: string) { return `${(Number(BigInt(value) / 1048576n) / 1024).toFixed(2)} GiB`; }
 function used(account: Account) { return account.usage.reduce((sum, item) => sum + BigInt(item.observed) - BigInt(item.baseline), 0n).toString(); }
 const unlimited: Plan = { totalBytes: "0", expiryTime: "0", resetDays: 0, enabled: true };
-const routeLabels: Record<string,string> = { verified: "当前验证通过", disabled: "已停用", "policy-disabled": "配额或账户策略停用", unverified: "待验证 / 验证过期" };
+const routeLabels: Record<string,string> = { verified: "当前验证通过", disabled: "已停用", "temporarily-suspended": "临时停用 · 延期验证", "policy-disabled": "配额或账户策略停用", unverified: "待验证 / 验证过期" };
 
 export function GlivelaControl() {
   const [inventory, setInventory] = useState<Inventory>();
@@ -58,6 +59,7 @@ export function GlivelaControl() {
     {notice ? <p role="status">{notice}</p> : null}
     {!inventory ? <p role="status">正在读取…</p> : <>
       {!owned ? <Alert><AlertDescription>当前状态：{inventory.state}。需要完成离线数据接管，管理操作尚不可用；不会初始化或覆盖已有数据。</AlertDescription></Alert> : null}
+      <AvailabilityEditor inventory={inventory} disabled={busy} save={change} />
       <section aria-label="节点状态"><h2 className="text-lg font-medium">节点状态</h2><Table><TableHeader><TableRow><TableHead>节点</TableHead><TableHead>角色</TableHead><TableHead>配置修订</TableHead><TableHead>运行回执</TableHead><TableHead>最后上报</TableHead></TableRow></TableHeader><TableBody>{inventory.runtimes.map(node => <TableRow key={node.id}><TableCell>{endpointNames.get(node.id) ?? names.get(node.id) ?? node.id}</TableCell><TableCell>{node.role === "entry" ? "入口" : "落地"}</TableCell><TableCell>{node.revision}</TableCell><TableCell>{node.runtimeReady ? "当前修订已应用（非整条线路证明）" : "待核验 / 上报过期"}</TableCell><TableCell>{node.reportedAt.startsWith("0001-") ? "尚无上报" : node.reportedAt}</TableCell></TableRow>)}</TableBody></Table></section>
       <section aria-label="账户与流量" className="flex flex-col gap-4"><h2 className="text-lg font-medium">账户与流量</h2>{inventory.accounts.map(account => <details key={account.account.id} className="rounded-lg border p-3"><summary className="cursor-pointer">{account.account.displayName} · 已用 {amount(used(account))} · {account.account.plan.enabled ? "启用" : "停用"}</summary><p className="my-3 text-sm text-muted-foreground">下次重置：{account.schedule.nextResetAt || "未设置"} · 用量按保留的账户账本统计，不代替供应商账单。</p><PlanEditor key={`${account.account.id}/${account.account.desiredRevision}`} initial={account.account.plan} disabled={busy || !owned} onSave={plan => change("account-plan", { accountId: account.account.id, expectedRevision: account.account.desiredRevision, plan })} /><Button className="mt-3" variant="outline" disabled={busy || !owned} onClick={() => { if (window.confirm("只重置此账户当前周期用量？原始计数、身份和历史保留。")) void change("account-reset", { accountId: account.account.id, expectedRevision: account.account.desiredRevision }); }}>重置当前周期用量</Button></details>)}</section>
       <CreateAccount inventory={inventory} disabled={busy || !owned} save={change} />
@@ -70,6 +72,33 @@ export function GlivelaControl() {
       <p className="text-sm text-muted-foreground">卸载：先停止线路或落地的 Glivela 节点端，使用持久配置执行本地 retire-node -config，确认 Xray 已停止且所属防火墙规则已清理，再由 Vastora 保留数据卸载。退役未确认时不要删除应用。</p>
     </>}
   </section>;
+}
+
+function AvailabilityEditor({ inventory, disabled, save }: { inventory: Inventory; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean> }) {
+  const [id, setID] = useState("");
+  const [reason, setReason] = useState("traffic-exhausted");
+  const [resumeAt, setResumeAt] = useState("");
+  const [error, setError] = useState("");
+  const entries = new Map(inventory.endpoints.filter(e => !e.retired).map(e => [e.entryId, e.name]));
+  for (const n of inventory.runtimes) if (!entries.has(n.id)) entries.set(n.id, inventory.nodes.find(item => item.id === n.id)?.name ?? n.id);
+  if (inventory.state === "empty") for (const n of inventory.nodes) if (!entries.has(n.id)) entries.set(n.id, n.name);
+  const state = inventory.availability;
+  const pause = state?.nodes[id];
+  const reset = inventory.endpoints.find(e => e.entryId === id)?.nextResetAt;
+  const localTime = (value: string) => { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+  return <details className="rounded-lg border p-3"><summary className="cursor-pointer">临时停用与恢复验证</summary><p className="my-3 text-sm text-muted-foreground">保留配置、身份、授权和账本，仅暂停订阅发布及本次线路验收。到期只开始重新验证，不直接认定恢复；已缓存的客户端订阅需要刷新。</p><form onSubmit={event => {
+    event.preventDefault(); setError("");
+    const date = resumeAt ? new Date(resumeAt) : undefined;
+    if (date && (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now())) { setError("请选择未来的恢复时间。"); return; }
+    if (id && state) void save("availability", { id, reason, resumeAt: date?.toISOString(), expectedRevision: state.revision });
+  }}><FieldGroup>
+    <Field><FieldLabel>节点<select required disabled={disabled} value={id} onChange={event => { setID(event.target.value); setResumeAt(""); setError(""); }}><option value="">请选择</option>{[...entries].map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></FieldLabel></Field>
+    <Field><FieldLabel>原因<select disabled={disabled} value={reason} onChange={event => setReason(event.target.value)}><option value="traffic-exhausted">流量用尽</option><option value="maintenance">维护</option></select></FieldLabel></Field>
+    <Field data-invalid={!!error}><FieldLabel>恢复验证时间（本机时区；留空则手动恢复）<Input type="datetime-local" disabled={disabled} aria-invalid={!!error} value={resumeAt} onChange={event => setResumeAt(event.target.value)} /></FieldLabel>{error ? <p role="alert">{error}</p> : null}</Field>
+    {reset && Date.parse(reset) > Date.now() ? <Button type="button" variant="outline" disabled={disabled} onClick={() => setResumeAt(localTime(reset))}>使用下次流量重置时间</Button> : null}
+    {pause ? <p role="status">{pause.reason === "traffic-exhausted" ? "流量用尽" : "维护"} · {pause.resumeAt && !pause.resumeAt.startsWith("0001-") ? `恢复验证时间 ${new Date(pause.resumeAt).toLocaleString()}；是否可用以最新线路验证为准` : "等待手动恢复"}</p> : null}
+    <div className="flex flex-wrap gap-2"><Button type="submit" disabled={disabled || !id || !state}>保存临时停用</Button>{pause ? <Button type="button" variant="outline" disabled={disabled} onClick={() => void save("availability", { id, reason: "resume", expectedRevision: state?.revision })}>立即重新验证</Button> : null}</div>
+  </FieldGroup></form></details>;
 }
 
 function PlanEditor({ initial, disabled, onSave }: { initial: Plan; disabled: boolean; onSave: (plan: Plan) => Promise<boolean> }) {

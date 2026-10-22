@@ -5,6 +5,9 @@
 For per-node retained cutover acceptance and old-writer retirement, follow
 [the landing handover procedure](docs/landing-handover.md). Its acceptance step
 uses the existing full route inventory and never deletes retained old data.
+Explicit [temporary availability](docs/temporary-availability.md) can defer a
+known exhausted/maintenance source without deleting its authorization or claiming
+that its route passed. Recovery requires fresh evidence.
 
 The target boundary is a Glivela controller communicating **directly** with a
 Glivela node process. Glivela owns proxy configuration, component compatibility,

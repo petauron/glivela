@@ -149,7 +149,7 @@ func (s *Store) subscription(ctx context.Context, token string, mihomo bool) (su
 			continue
 		}
 		entry, found := entryNodes[credential.EntryID]
-		if !found || !runtimeFresh(entry, now) {
+		if !found || !s.availableRuntime(entry, now) {
 			continue
 		}
 		material := glivela.CredentialMaterial{Credential: credential, ProtocolID: m.ProtocolSecrets[credential.ID], HysteriaAuth: m.HysteriaSecrets[credential.ID], HysteriaIdentity: account.HysteriaIdentities[credential.ID]}
@@ -249,11 +249,14 @@ func sameGrantPolicy(a, b glivela.RouteGrant) bool {
 // authorize the new owned subscription.
 func (s *Store) subscriptionPeerReady(entry Node, landingID string, now time.Time) bool {
 	for _, node := range s.nodes {
-		if node.ID != landingID || !runtimeFresh(node, now) || !entryPeerFresh(entry, node, now) {
+		if node.ID != landingID || !s.availableRuntime(entry, now) || !s.availableRuntime(node, now) || !entryPeerFresh(entry, node, now) {
 			continue
 		}
 		authorized, ok := node.RouteEntries[entry.ID]
 		check, hasCheck := node.Checks[entry.ID]
+		if !check.IssuedAt.After(s.recoveryBarrier(entry.ID)) || !check.IssuedAt.After(s.recoveryBarrier(node.ID)) {
+			return false
+		}
 		if !ok || !hasCheck || s.nodes[authorized.CertificateID].ID != entry.ID || check.CertificateID != authorized.CertificateID || check.Request.SnapshotID != s.business.snapshotID || !routeTargetsLanding(check.Request, node) || !entryRouteMatches(entry, check.Request) || check.Result == nil || validateRouteResult(check.Request, *check.Result) != nil || !check.Result.Passed || check.ReceivedAt.IsZero() || check.ReceivedAt.After(now) || now.Sub(check.ReceivedAt) > 5*time.Minute {
 			return false
 		}

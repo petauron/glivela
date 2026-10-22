@@ -19,6 +19,9 @@ reset accounting merely to replace the landing transport.
    -snapshot-id <verified-snapshot>`. It checks the current worker, old writer
    fence and retained backup, then queries the controller through the node's
    own mTLS identity. Missing, partial, stale or failed route evidence is refused.
+   An explicitly [temporarily suspended](temporary-availability.md) source is
+   retained and recorded as deferred, not passed. All remaining active sources
+   must pass; an entirely suspended inventory cannot complete acceptance.
 5. Restart the Glivela node daemon. With Agent still masked, use the supporting
    Vastora release's `agent retire-landing-execution --native-state <owned-state>`.
    This retains the old journal and recovery material, fencing only old landing

@@ -40,13 +40,25 @@ func validateRouteEntries(node Node) error {
 	return nil
 }
 
-func completeRouteInventory(node Node, checks map[string]RouteCheck) bool {
-	if len(node.RouteEntries) == 0 || validateRouteEntries(node) != nil || len(checks) != len(node.RouteEntries) {
+func completeRouteInventory(node Node, checks map[string]RouteCheck, deferred ...map[string]bool) bool {
+	skip := map[string]bool{}
+	if len(deferred) == 1 {
+		skip = deferred[0]
+	}
+	if len(node.RouteEntries) == 0 || validateRouteEntries(node) != nil || len(checks) > len(node.RouteEntries) {
 		return false
 	}
 	for id, entry := range node.RouteEntries {
 		check, ok := checks[id]
+		if !ok && skip[id] {
+			continue
+		}
 		if !ok || check.Request.EntryID != id || check.CertificateID != entry.CertificateID {
+			return false
+		}
+	}
+	for id := range checks {
+		if _, ok := node.RouteEntries[id]; !ok {
 			return false
 		}
 	}

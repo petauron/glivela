@@ -92,6 +92,27 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/admin/availability":
+			var input struct {
+				ID               string    `json:"id"`
+				Reason           string    `json:"reason"`
+				ResumeAt         time.Time `json:"resumeAt"`
+				ExpectedRevision uint64    `json:"expectedRevision,string"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
+				http.Error(w, "invalid availability request", http.StatusBadRequest)
+				return
+			}
+			if input.ID != "" {
+				if err := store.SetAvailability(input.ID, input.Reason, input.ResumeAt, input.ExpectedRevision); err != nil {
+					http.Error(w, "availability change refused", http.StatusConflict)
+					return
+				}
+			}
+			store.mu.Lock()
+			defer store.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(store.availability)
 		case "/v1/admin/backup":
 			var input struct{}
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
