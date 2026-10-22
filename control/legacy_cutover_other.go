@@ -16,3 +16,7 @@ func checkLegacyCutoverApply(*NativeRuntime, Desired) error { return nil }
 func SwitchLegacyLanding(context.Context, string, string, string, SystemdDriver) error {
 	return errors.New("control: legacy cutover requires Linux")
 }
+
+func CompleteLegacyLanding(context.Context, string, string, SystemdDriver, *Client) error {
+	return errors.New("control: legacy cutover requires Linux")
+}

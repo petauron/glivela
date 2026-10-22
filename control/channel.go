@@ -63,6 +63,10 @@ func Handler(repository Repository) http.Handler {
 			handleRouteExchange(repository, w, r)
 			return
 		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/landing-acceptance" && r.URL.RawQuery == "" {
+			handleLandingAcceptance(repository, w, r)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/exchange" || r.URL.RawQuery != "" {
 			http.Error(w, "unsupported request", http.StatusNotFound)
 			return

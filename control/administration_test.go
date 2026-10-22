@@ -119,8 +119,13 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 			t.Fatalf("incorrect business acceptance: %+v", status)
 		}
 		response.Body.Close()
+		err := landingClient.verifyLandingAcceptance(context.Background(), p.SnapshotID, p.Revision, p.ConfigSHA256)
+		if (err == nil) != want {
+			t.Fatalf("node acceptance disagrees with complete admin gate: %v", err)
+		}
 	}
 	read(false)
+	post(entryHTTP, "/v1/landing-acceptance", landingAcceptanceRequest{p.SnapshotID, p.Revision, p.ConfigSHA256}, http.StatusForbidden)
 	entry, err := NewClient(listener.URL, entryIdentity, roots)
 	if err != nil {
 		t.Fatal(err)

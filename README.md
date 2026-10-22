@@ -2,6 +2,10 @@
 
 ## Landing ownership migration (#54, in progress)
 
+For per-node retained cutover acceptance and old-writer retirement, follow
+[the landing handover procedure](docs/landing-handover.md). Its acceptance step
+uses the existing full route inventory and never deletes retained old data.
+
 The target boundary is a Glivela controller communicating **directly** with a
 Glivela node process. Glivela owns proxy configuration, component compatibility,
 migration and business health. Vastora installs, updates and uninstalls the
@@ -294,16 +298,16 @@ candidate. Failure attempts bounded recovery through the retained executable;
 failed recovery retains its pending record. Node startup handles interrupted
 first switches before normal runtime recovery. A rolled-back switch blocks
 automatic retries. The command returns `awaiting-routes`; later revisions remain
-blocked until the remaining controller-side acceptance/authority handover is
-implemented. This command path is not yet accepted for production: real systemd
-first-cutover/recovery integration and complete data/control handover remain
-outstanding.
+blocked until `complete-legacy-landing` verifies the current runtime and all
+required entry routes through the landing's authenticated controller channel.
+The supporting Vastora release must then retire the old landing execution
+authority before its Agent can resume. Follow the
+[per-node handover procedure](docs/landing-handover.md); preserve old data and
+backups, and do not treat compilation or process readiness as deployment proof.
 
-This is **not yet an installable landing replacement**. The installer still
-needs to provision the dedicated Xray unit and its enforced firewall dependency;
-this code refuses an unknown unit rather than installing an unsafe substitute.
-Existing-data handover, catalog packaging and removal of the old Vastora
-business path remain incomplete. The optional official-binary test verifies
+The signed native package must provision the dedicated Xray unit and its
+enforced firewall dependency; this code refuses an unknown unit rather than
+installing an unsafe substitute. The optional official-binary test verifies
 actual Xray configuration validation and SOCKS/TLS forwarding on loopback,
 including certificate rejection and HTTP 404 handling. Runtime recovery tests
 use a fake systemd driver. Real Linux nftables lifecycle tests cover IPv4/IPv6
@@ -313,8 +317,8 @@ enforcement tests additionally cover actual rendered IPv4/IPv6 DNS/TLS policy
 and literal-IPv4 SOCKS UDP request/reply, target-observed egress and source/UID
 denials with the official core. Full migration systemd recovery, QUIC and
 independent kernel ingress isolation for dynamic UDP sockets remain unaccepted.
-Do not deploy or close #54 based on these tests. The existing
-architecture below stays active until the complete migration is accepted.
+Do not declare a migration complete or close #54 based on these tests. Each
+selected host still requires real runtime and route acceptance before proceeding.
 
 Formerly Meridian. See [the in-place brand migration](BRANDING.md) for stable
 installation identities and coordinated release steps.

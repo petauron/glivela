@@ -20,6 +20,10 @@ type RouteAcceptance struct {
 func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint64, digest string) (RouteAcceptance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.acceptLandingRoutesLocked(landingID, snapshotID, revision, digest)
+}
+
+func (s *Store) acceptLandingRoutesLocked(landingID, snapshotID string, revision uint64, digest string) (RouteAcceptance, error) {
 	if !glivela.ValidIdentifier(landingID) || !glivela.ValidIdentifier(snapshotID) || revision == 0 || !glivela.ValidIdentity(digest) {
 		return RouteAcceptance{}, errors.New("control: complete route acceptance identity required")
 	}
