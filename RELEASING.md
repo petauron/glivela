@@ -1,5 +1,27 @@
 # Version releases
 
+## Preserving an existing local resolver
+
+Native Xray services accept one narrowly checked administrator-owned drop-in:
+`/etc/systemd/system/<owned-unit>.d/90-preserve-dns.conf`. Its entire content
+must be `[Service]` followed by a single `BindReadOnlyPaths` line mapping
+`<installation-directory>/<logical-service>/reality-resolv.conf` to
+`/etc/resolv.conf`, with a newline after each line. Both files and all parent
+directories must be root-owned, not symlinks, and not group/other writable.
+The loaded read-only mount must match exactly. Other drop-ins and additional
+directives remain rejected, as do changes to the installer-owned unit hash,
+worker identity or stale systemd state. This does not change system DNS or
+configure a resolver automatically; existing resolver content is retained.
+
+Before migrating a locally repaired unit, back up its program, configuration
+and state. Move only its existing resolver mount to the checked drop-in and
+restore original installer-owned files from hash-verified backups. Do not
+rewrite ownership receipts to bless local modifications. Upgrade through the
+normal signed package flow; verify the effective resolver, subscription and
+actual proxy route before accepting success. On failure retain the failed
+task and restore working program/service files without rewinding live state
+or usage counters. No platform installer change is needed.
+
 ## Runtime roles
 
 The controller and its management UI remain a nonroot Docker application,
