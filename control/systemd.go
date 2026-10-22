@@ -182,7 +182,11 @@ func (d SystemdDriver) verifyLoadedService(ctx context.Context) error {
 	defer cancel()
 	raw, err := exec.CommandContext(inspection, "/usr/bin/systemctl", "show", d.Unit,
 		"--property=LoadState,FragmentPath,DropInPaths,NeedDaemonReload,User").Output()
-	if err != nil || !d.loadedUnitMatches(string(raw)) {
+	if err != nil {
+		return errors.New("control: loaded Xray service unavailable")
+	}
+	checked, err := d.verifyDNSOverride(inspection, string(raw))
+	if err != nil || !d.loadedUnitMatches(checked) {
 		return errors.New("control: loaded Xray service differs from owned installation")
 	}
 	return nil
