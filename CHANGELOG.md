@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.34](https://github.com/petauron/glivela/compare/v0.1.0-alpha.33...v0.1.0-alpha.34) (2026-10-22)
+
+
+### Bug Fixes
+
+* **control:** refresh unactivated quota preparations safely ([#75](https://github.com/petauron/glivela/issues/75)) ([aa8e770](https://github.com/petauron/glivela/commit/aa8e7707a3018e665a95f617baaa9a0ca1a9067a))
+* **control:** retain refreshed legacy health in prepared handovers ([#76](https://github.com/petauron/glivela/issues/76)) ([23158d9](https://github.com/petauron/glivela/commit/23158d9d5ea8151c0f5b6abe28ce2cf50dbeda02))
+
 ## [0.1.0-alpha.33](https://github.com/petauron/glivela/compare/v0.1.0-alpha.32...v0.1.0-alpha.33) (2026-10-21)
 
 
