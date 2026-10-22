@@ -94,8 +94,15 @@ func StageNativeEntryHandover(ctx context.Context, checkpoint string, driver *Na
 		if err := runtime.verifyConfig(desired); err != nil {
 			return err
 		}
-		if err := verifyNativeEntrySource(driver.Directory, checkpoint, raw, driver.Binding(), desired); err != nil {
-			return err
+		// A first apply can recover to an empty ready journal before handover
+		// has ever written its source proof. Only this unapplied state may
+		// create a missing proof below, after validating the stopped source.
+		// Existing proofs (including malformed files) must still match exactly.
+		_, proofErr := os.Lstat(filepath.Join(driver.Directory, "entry-source.json"))
+		if state.Current != nil || !errors.Is(proofErr, os.ErrNotExist) {
+			if err := verifyNativeEntrySource(driver.Directory, checkpoint, raw, driver.Binding(), desired); err != nil {
+				return err
+			}
 		}
 		if state.Current != nil {
 			return nil
