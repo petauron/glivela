@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.39](https://github.com/petauron/glivela/compare/v0.1.0-alpha.38...v0.1.0-alpha.39) (2026-10-22)
+
+
+### Bug Fixes
+
+* complete authenticated landing handover acceptance ([ee026f1](https://github.com/petauron/glivela/commit/ee026f1d70fa39715fd2699adb22f39bd6328fe4))
+* preserve retained fixed IPv4 exits during landing migration ([da4766a](https://github.com/petauron/glivela/commit/da4766ac24b222eea72d869006dbd52e1fe1cb4c))
+
 ## [0.1.0-alpha.38](https://github.com/petauron/glivela/compare/v0.1.0-alpha.37...v0.1.0-alpha.38) (2026-10-22)
 
 
