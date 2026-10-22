@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.37](https://github.com/petauron/glivela/compare/v0.1.0-alpha.36...v0.1.0-alpha.37) (2026-10-22)
+
+
+### Bug Fixes
+
+* allow native entry queries to existing DNS resolvers ([65fb076](https://github.com/petauron/glivela/commit/65fb076f9b10a3e6ed2bfe3c3cbd9fbba04ad40d))
+
 ## [0.1.0-alpha.36](https://github.com/petauron/glivela/compare/v0.1.0-alpha.35...v0.1.0-alpha.36) (2026-10-22)
 
 
