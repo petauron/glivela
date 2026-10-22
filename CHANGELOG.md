@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.36](https://github.com/petauron/glivela/compare/v0.1.0-alpha.35...v0.1.0-alpha.36) (2026-10-22)
+
+
+### Bug Fixes
+
+* preserve verified local resolver overrides during native upgrades ([#81](https://github.com/petauron/glivela/issues/81)) ([68c5f26](https://github.com/petauron/glivela/commit/68c5f266b0de1a7747a269f99f9ef5676f97c00d))
+
 ## [0.1.0-alpha.35](https://github.com/petauron/glivela/compare/v0.1.0-alpha.34...v0.1.0-alpha.35) (2026-10-22)
 
 
