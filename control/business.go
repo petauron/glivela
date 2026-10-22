@@ -77,13 +77,14 @@ func (a BusinessAccount) MarshalJSON() ([]byte, error) {
 // endpoint-private-key, certificate-private-key or retained-source fields.
 // Historical statuses are not current runtime-health evidence.
 type BusinessInventory struct {
-	State      string             `json:"state"`
-	SnapshotID string             `json:"snapshotId,omitempty"`
-	Accounts   []BusinessAccount  `json:"accounts"`
-	Nodes      []BusinessNode     `json:"nodes"`
-	Endpoints  []BusinessEndpoint `json:"endpoints"`
-	Routes     []BusinessRoute    `json:"routes"`
-	Runtimes   []BusinessRuntime  `json:"runtimes"`
+	Availability availabilityState  `json:"availability"`
+	State        string             `json:"state"`
+	SnapshotID   string             `json:"snapshotId,omitempty"`
+	Accounts     []BusinessAccount  `json:"accounts"`
+	Nodes        []BusinessNode     `json:"nodes"`
+	Endpoints    []BusinessEndpoint `json:"endpoints"`
+	Routes       []BusinessRoute    `json:"routes"`
+	Runtimes     []BusinessRuntime  `json:"runtimes"`
 }
 
 type BusinessRoute struct {
@@ -112,13 +113,14 @@ type BusinessNode struct {
 }
 
 type BusinessEndpoint struct {
-	ID         string `json:"id"`
-	EntryID    string `json:"entryId"`
-	NodeID     string `json:"nodeId"`
-	ServiceID  string `json:"serviceId"`
-	Name       string `json:"name"`
-	RegionCode string `json:"regionCode"`
-	Retired    bool   `json:"retired"`
+	NextResetAt string `json:"nextResetAt,omitempty"`
+	ID          string `json:"id"`
+	EntryID     string `json:"entryId"`
+	NodeID      string `json:"nodeId"`
+	ServiceID   string `json:"serviceId"`
+	Name        string `json:"name"`
+	RegionCode  string `json:"regionCode"`
+	Retired     bool   `json:"retired"`
 }
 
 // LoadBusiness must run before serving requests and under the same directory
@@ -216,8 +218,34 @@ func readBusinessKey(path string) ([]byte, error) {
 func (s *Store) Business() BusinessInventory {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	view := BusinessInventory{State: "empty", Accounts: []BusinessAccount{}, Nodes: []BusinessNode{}, Endpoints: []BusinessEndpoint{}, Routes: []BusinessRoute{}, Runtimes: []BusinessRuntime{}}
+	view := BusinessInventory{State: "empty", Availability: availabilityState{Version: s.availability.Version, Revision: s.availability.Revision, Nodes: s.effectiveAvailabilities()}, Accounts: []BusinessAccount{}, Nodes: []BusinessNode{}, Endpoints: []BusinessEndpoint{}, Routes: []BusinessRoute{}, Runtimes: []BusinessRuntime{}}
 	if s.business == nil {
+		// Transport-only staged controllers still own enrollment and availability;
+		// they must not need to adopt the legacy ledger to pause a known source.
+		names := map[string]bool{}
+		for _, node := range s.nodes {
+			role := "landing"
+			peers := []string{}
+			if node.Desired.Entry != nil {
+				role = "entry"
+				for _, peer := range node.Desired.EntryNetwork.Peers {
+					peers = append(peers, peer.EgressID)
+				}
+			}
+			names[node.ID] = true
+			for id := range node.RouteEntries {
+				names[id] = true
+			}
+			view.Runtimes = append(view.Runtimes, BusinessRuntime{ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+			if node.EntryQuota != nil {
+				view.Endpoints = append(view.Endpoints, BusinessEndpoint{ID: node.ID, EntryID: node.ID, Name: node.ID, NextResetAt: node.EntryQuota.NextResetAt.Format(time.RFC3339)})
+			}
+		}
+		for id := range names {
+			view.Nodes = append(view.Nodes, BusinessNode{ID: id, Name: id})
+		}
+		slices.SortFunc(view.Nodes, func(a, b BusinessNode) int { return strings.Compare(a.ID, b.ID) })
+		slices.SortFunc(view.Runtimes, func(a, b BusinessRuntime) int { return strings.Compare(a.ID, b.ID) })
 		return view
 	}
 	m := s.business.material
@@ -235,7 +263,7 @@ func (s *Store) Business() BusinessInventory {
 	for _, endpoint := range m.Endpoints {
 		service := m.References.Services[endpoint.ServiceID]
 		app := m.References.Applications[service.ApplicationID]
-		view.Endpoints = append(view.Endpoints, BusinessEndpoint{ID: endpoint.Reality.ID, EntryID: endpoint.Reality.EntryID, NodeID: app.NodeID, ServiceID: endpoint.ServiceID, Name: app.Name, RegionCode: service.RegionCode, Retired: endpoint.Retired})
+		view.Endpoints = append(view.Endpoints, BusinessEndpoint{NextResetAt: endpoint.ResetSchedule.NextResetAt, ID: endpoint.Reality.ID, EntryID: endpoint.Reality.EntryID, NodeID: app.NodeID, ServiceID: endpoint.ServiceID, Name: app.Name, RegionCode: service.RegionCode, Retired: endpoint.Retired})
 	}
 	slices.SortFunc(view.Endpoints, func(a, b BusinessEndpoint) int { return strings.Compare(a.ID, b.ID) })
 	now := time.Now().UTC()
@@ -256,13 +284,16 @@ func (s *Store) Business() BusinessInventory {
 					state = "policy-disabled"
 				}
 				for _, entry := range s.nodes {
-					if projectionErr != nil || entry.ID != grant.EntryID || entry.Desired.Entry == nil || !effective.Deployable() || !runtimeFresh(entry, now) {
+					if projectionErr != nil || entry.ID != grant.EntryID || entry.Desired.Entry == nil || !effective.Deployable() || !s.availableRuntime(entry, now) {
 						continue
 					}
 					if slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Base.ID]) && slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Route.ID]) && slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, effective) }) && s.subscriptionPeerReady(entry, grant.EgressID, now) && (grant.IPv4EgressID == "" || s.subscriptionPeerReady(entry, grant.IPv4EgressID, now)) {
 						state = "verified"
 					}
 				}
+			}
+			if s.suspended(grant.EntryID, now) || s.suspended(grant.EgressID, now) || s.suspended(grant.IPv4EgressID, now) {
+				state = "temporarily-suspended"
 			}
 			view.Routes = append(view.Routes, BusinessRoute{ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
 		}
@@ -277,7 +308,7 @@ func (s *Store) Business() BusinessInventory {
 			}
 		}
 		slices.Sort(peers)
-		view.Runtimes = append(view.Runtimes, BusinessRuntime{ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: runtimeFresh(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+		view.Runtimes = append(view.Runtimes, BusinessRuntime{ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
 	}
 	slices.SortFunc(view.Runtimes, func(a, b BusinessRuntime) int { return strings.Compare(a.ID, b.ID) })
 	slices.SortFunc(view.Routes, func(a, b BusinessRoute) int { return strings.Compare(a.ID, b.ID) })

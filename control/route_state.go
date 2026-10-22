@@ -35,8 +35,11 @@ func runtimeFresh(node Node, now time.Time) bool {
 	return node.Receipt != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, node.Receipt.AppliedReceipt) == nil && !node.ReportedAt.IsZero() && !node.ReportedAt.After(now) && now.Sub(node.ReportedAt) <= time.Minute
 }
 
-func enrolledEntriesFresh(node Node, nodes map[string]Node, now time.Time) bool {
+func enrolledEntriesFresh(node Node, nodes map[string]Node, now time.Time, deferred ...map[string]bool) bool {
 	for id, entry := range node.RouteEntries {
+		if len(deferred) == 1 && deferred[0][id] {
+			continue
+		}
 		if enrolled, ok := nodes[entry.CertificateID]; ok && (enrolled.Desired.Entry == nil || enrolled.ID != id || !runtimeFresh(enrolled, now)) {
 			return false
 		}
@@ -44,8 +47,11 @@ func enrolledEntriesFresh(node Node, nodes map[string]Node, now time.Time) bool 
 	return true
 }
 
-func enrolledEntryPeersFresh(node Node, nodes map[string]Node, now time.Time) bool {
-	for _, entry := range node.RouteEntries {
+func enrolledEntryPeersFresh(node Node, nodes map[string]Node, now time.Time, deferred ...map[string]bool) bool {
+	for id, entry := range node.RouteEntries {
+		if len(deferred) == 1 && deferred[0][id] {
+			continue
+		}
 		if enrolled, found := nodes[entry.CertificateID]; found && !entryPeerFresh(enrolled, node, now) {
 			return false
 		}
@@ -96,7 +102,7 @@ func (s *Store) AssignRouteChecks(assignments []RouteCheck) error {
 		if node.Desired.Revision != request.Revision || node.Desired.ConfigSHA256 != request.ConfigSHA256 {
 			return errors.New("control: route assignment is stale")
 		}
-		if !completeRouteInventory(node, checks) {
+		if !completeRouteInventory(node, checks, s.deferredEntries(node, now)) {
 			return errors.New("control: route checks must cover every enrolled entry")
 		}
 		for _, check := range checks {
@@ -155,7 +161,7 @@ func (s *Store) RouteExchange(ctx context.Context, certificate string, report *R
 				continue
 			}
 			check, ok := node.Checks[report.EntryID]
-			if !ok || !completeRouteInventory(node, node.Checks) || check.CertificateID != certificate || !routeTargetsLanding(check.Request, node) || validateRouteResult(check.Request, *report) != nil || node.Desired.Revision != report.Revision || node.Desired.ConfigSHA256 != report.ConfigSHA256 {
+			if !ok || !completeRouteInventory(node, node.Checks, s.deferredEntries(node, now)) || check.CertificateID != certificate || !routeTargetsLanding(check.Request, node) || validateRouteResult(check.Request, *report) != nil || node.Desired.Revision != report.Revision || node.Desired.ConfigSHA256 != report.ConfigSHA256 {
 				return nil, errors.New("control: route report refused")
 			}
 			if check.Result != nil {
@@ -190,10 +196,13 @@ func (s *Store) RouteExchange(ctx context.Context, certificate string, report *R
 	}
 	var pending []RouteProbe
 	for _, node := range s.nodes {
-		if !runtimeFresh(node, now) || !completeRouteInventory(node, node.Checks) {
+		if !s.availableRuntime(node, now) || !completeRouteInventory(node, node.Checks, s.deferredEntries(node, now)) {
 			continue
 		}
 		for _, check := range node.Checks {
+			if s.suspended(check.Request.EntryID, now) {
+				continue
+			}
 			if check.CertificateID == certificate && check.Result == nil && now.Sub(check.IssuedAt) <= 5*time.Minute && routeTargetsLanding(check.Request, node) {
 				pending = append(pending, check.Request)
 			}

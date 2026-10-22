@@ -2,6 +2,7 @@ package control
 
 import (
 	"errors"
+	"slices"
 	"time"
 
 	glivela "github.com/petauron/glivela"
@@ -12,9 +13,11 @@ import (
 // of whichever checks happened to finish. It does not commit a
 // migration or remove recovery resources.
 type RouteAcceptance struct {
-	RuntimeReady bool   `json:"runtimeReady"`
-	RoutesPassed bool   `json:"routesPassed"`
-	Reason       string `json:"reason"`
+	RuntimeReady         bool     `json:"runtimeReady"`
+	RoutesPassed         bool     `json:"routesPassed"`
+	Reason               string   `json:"reason"`
+	DeferredEntries      []string `json:"deferredEntries,omitempty"`
+	AvailabilityRevision uint64   `json:"availabilityRevision,omitempty"`
 }
 
 func (s *Store) AcceptLandingRoutes(landingID, snapshotID string, revision uint64, digest string) (RouteAcceptance, error) {
@@ -38,23 +41,36 @@ func (s *Store) acceptLandingRoutesLocked(landingID, snapshotID string, revision
 			return RouteAcceptance{Reason: "revision-changed"}, nil
 		}
 		now := time.Now().UTC()
-		if !runtimeFresh(node, now) {
+		if !s.availableRuntime(node, now) {
 			return RouteAcceptance{Reason: "runtime-unverified"}, nil
 		}
 		status := RouteAcceptance{RuntimeReady: true}
-		if !enrolledEntriesFresh(node, s.nodes, now) {
+		status.AvailabilityRevision = s.availability.Revision
+		deferred := s.deferredEntries(node, now)
+		for id := range deferred {
+			status.DeferredEntries = append(status.DeferredEntries, id)
+		}
+		slices.Sort(status.DeferredEntries)
+		if !enrolledEntriesFresh(node, s.nodes, now, deferred) {
 			status.Reason = "entry-runtime-unverified"
 			return status, nil
 		}
-		if !enrolledEntryPeersFresh(node, s.nodes, now) {
+		if !enrolledEntryPeersFresh(node, s.nodes, now, deferred) {
 			status.Reason = "entry-route-unverified"
 			return status, nil
 		}
-		if !completeRouteInventory(node, node.Checks) {
+		if !completeRouteInventory(node, node.Checks, deferred) || len(deferred) == len(node.RouteEntries) {
 			status.Reason = "routes-incomplete"
 			return status, nil
 		}
-		for _, check := range node.Checks {
+		for id, check := range node.Checks {
+			if deferred[id] {
+				continue
+			}
+			if !check.IssuedAt.After(s.recoveryBarrier(id)) || !check.IssuedAt.After(s.recoveryBarrier(node.ID)) {
+				status.Reason = "recovery-unverified"
+				return status, nil
+			}
 			if entry, found := s.nodes[check.CertificateID]; found && !entryRouteMatches(entry, check.Request) {
 				status.Reason = "entry-route-policy-changed"
 				return status, nil
@@ -74,6 +90,9 @@ func (s *Store) acceptLandingRoutesLocked(landingID, snapshotID string, revision
 		}
 		status.RoutesPassed = true
 		status.Reason = "verified"
+		if len(deferred) > 0 {
+			status.Reason = "verified-active-entries"
+		}
 		return status, nil
 	}
 	return RouteAcceptance{}, errors.New("control: landing is not enrolled")

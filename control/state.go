@@ -17,6 +17,8 @@ import (
 )
 
 type Node struct {
+	PublicationSuspended bool                  `json:"publicationSuspended,omitempty"`
+	AvailabilityRevision uint64                `json:"availabilityRevision,omitempty"`
 	EntryQuota           *EntryQuota           `json:"entryQuota,omitempty"`
 	RouteEntries         map[string]RouteEntry `json:"routeEntries,omitempty"`
 	Checks               map[string]RouteCheck `json:"checks,omitempty"`
@@ -37,6 +39,7 @@ type Store struct {
 	mu                 sync.Mutex
 	path               string
 	nodes              map[string]Node
+	availability       availabilityState
 	business           *businessState
 	managementUI       http.Handler
 	subscriptionOrigin string
@@ -53,6 +56,9 @@ func OpenStore(path string) (*Store, error) {
 		}
 	}
 	s := &Store{path: path, nodes: map[string]Node{}}
+	if err := s.loadAvailability(); err != nil {
+		return nil, err
+	}
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -73,6 +79,9 @@ func OpenStore(path string) (*Store, error) {
 	}
 	seen := map[string]bool{}
 	for _, node := range nodes {
+		if node.AvailabilityRevision > s.availability.Revision {
+			return nil, errors.New("control: availability state missing or rolled back")
+		}
 		if node.EntryQuota != nil && (node.EntryQuota.validate() != nil || node.EntryQuota.validateDesired(node.Desired) != nil) {
 			return nil, errors.New("control: invalid stored entry quota")
 		}
@@ -99,11 +108,17 @@ func OpenStore(path string) (*Store, error) {
 				return nil, errors.New("control: inconsistent stored route check")
 			}
 		}
-		if len(node.Checks) > 0 && !completeRouteInventory(node, node.Checks) {
-			return nil, errors.New("control: incomplete stored entry verification inventory")
-		}
 		seen[node.ID] = true
 		s.nodes[node.CertificateID] = node
+	}
+	retainedDeferred := map[string]bool{}
+	for id := range s.effectiveAvailabilities() {
+		retainedDeferred[id] = true
+	}
+	for _, node := range s.nodes {
+		if len(node.Checks) > 0 && !completeRouteInventory(node, node.Checks, retainedDeferred) {
+			return nil, errors.New("control: incomplete stored entry verification inventory")
+		}
 	}
 	if err := validateEnrollmentRoles(s.nodes); err != nil {
 		return nil, err
@@ -252,6 +267,7 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 		}
 	}
 	node.ReportedAt = now
+	node.PublicationSuspended = s.suspended(node.ID, now) || !s.availableRuntime(node, now)
 	next := s.copy()
 	next[certificate] = node
 	if node.Desired.Entry != nil {
@@ -259,7 +275,7 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 			return Desired{}, err
 		}
 	}
-	if err := reconcileOwnedRouteChecks(next, s.business, now); err != nil {
+	if err := reconcileOwnedRouteChecks(next, s.business, now, s.effectiveAvailabilities()); err != nil {
 		return Desired{}, err
 	}
 	if err := s.commit(next); err != nil {
@@ -280,8 +296,21 @@ func (s *Store) copy() map[string]Node {
 }
 
 func (s *Store) commit(nodes map[string]Node) error {
+	if err := s.retainQuotaSuspensions(nodes); err != nil {
+		return err
+	}
+	nodes = maps.Clone(nodes)
 	values := make([]Node, 0, len(nodes))
-	for _, node := range nodes {
+	for key, node := range nodes {
+		if record, affected := s.availability.Nodes[node.ID]; affected {
+			node.AvailabilityRevision = max(node.AvailabilityRevision, record.Revision)
+		}
+		for id := range node.RouteEntries {
+			if record, affected := s.availability.Nodes[id]; affected {
+				node.AvailabilityRevision = max(node.AvailabilityRevision, record.Revision)
+			}
+		}
+		nodes[key] = node
 		values = append(values, node)
 	}
 	sort.Slice(values, func(i, j int) bool { return values[i].ID < values[j].ID })

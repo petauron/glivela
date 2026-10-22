@@ -58,12 +58,18 @@ func openControllerBackup(raw, key []byte) (controllerBackup, error) {
 		return value, errors.New("control: controller backup authentication failed")
 	}
 	defer clear(plain)
-	if decode(bytes.NewReader(plain), &value) != nil || value.Version != 1 || value.CreatedAt.IsZero() || value.CreatedAt.After(time.Now().Add(5*time.Minute)) || len(value.Files) != 3 {
+	if decode(bytes.NewReader(plain), &value) != nil || value.Version != 1 || value.CreatedAt.IsZero() || value.CreatedAt.After(time.Now().Add(5*time.Minute)) || len(value.Files) < 3 || len(value.Files) > 4 {
 		return controllerBackup{}, errors.New("control: invalid controller backup contents")
 	}
 	for _, name := range []string{"nodes.json", "business.json", "business.adoption.json"} {
 		if !json.Valid(value.Files[name]) {
 			return controllerBackup{}, errors.New("control: incomplete controller backup")
+		}
+	}
+	if len(value.Files) == 4 {
+		var availability availabilityState
+		if decode(bytes.NewReader(value.Files["availability.json"]), &availability) != nil || availability.validate() != nil {
+			return controllerBackup{}, errors.New("control: invalid availability backup")
 		}
 	}
 	return value, nil
@@ -89,6 +95,11 @@ func (s *Store) BackupController(now time.Time) error {
 		return errors.New("control: controller backup source changed")
 	}
 	value := controllerBackup{Version: 1, CreatedAt: now.UTC(), Files: map[string]json.RawMessage{}}
+	availabilityRaw, err := json.Marshal(s.availability)
+	if err != nil || s.availability.validate() != nil {
+		return errors.New("control: invalid availability backup source")
+	}
+	value.Files["availability.json"] = availabilityRaw
 	for _, name := range []string{"nodes.json", "business.json", "business.adoption.json"} {
 		path := filepath.Join(directory, name)
 		if name == "nodes.json" {
@@ -227,7 +238,11 @@ func RestoreControllerBackup(source, keyPath, destination string) error {
 	if err := os.Mkdir(destination, 0700); err != nil {
 		return err
 	}
-	for _, name := range []string{"business.adoption.json", "business.json", "nodes.json"} {
+	names := []string{"business.adoption.json", "business.json", "nodes.json"}
+	if _, ok := value.Files["availability.json"]; ok {
+		names = append(names, "availability.json")
+	}
+	for _, name := range names {
 		if err := writeNewBusinessFile(destination, name, value.Files[name]); err != nil {
 			return err
 		}
