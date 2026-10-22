@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.35](https://github.com/petauron/glivela/compare/v0.1.0-alpha.34...v0.1.0-alpha.35) (2026-10-22)
+
+
+### Bug Fixes
+
+* **control:** preserve domain REALITY targets with public destination validation ([#79](https://github.com/petauron/glivela/issues/79)) ([3644379](https://github.com/petauron/glivela/commit/36443799ebcb3e80dadfa40e85cd0232a772d8c9))
+
 ## [0.1.0-alpha.34](https://github.com/petauron/glivela/compare/v0.1.0-alpha.33...v0.1.0-alpha.34) (2026-10-22)
 
 
