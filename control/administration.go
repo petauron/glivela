@@ -201,6 +201,22 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(status)
+		case "/v1/admin/entries/refresh-prepared-quota":
+			var request struct {
+				ID              string          `json:"id"`
+				CertificateID   string          `json:"certificateId"`
+				ExpectedCutover time.Time       `json:"expectedCutoverAt"`
+				Quota           *EntryQuotaSeed `json:"quota"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil || request.Quota == nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
+				http.Error(w, "invalid prepared quota refresh", http.StatusBadRequest)
+				return
+			}
+			if err := store.RefreshPreparedEntryQuota(request.ID, request.CertificateID, request.ExpectedCutover, *request.Quota); err != nil {
+				http.Error(w, "prepared quota refresh refused", http.StatusConflict)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case "/v1/admin/entries":
 			var request struct {
 				ID            string           `json:"id"`
