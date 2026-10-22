@@ -47,6 +47,15 @@ type configuration struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "complete-legacy-landing" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := completeLandingCommand(ctx, os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela landing acceptance not completed; retain the old writer fence and recovery data")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "restore-controller-backup" {
 		if err := restoreControllerCommand(os.Args[2:], os.Stdout); err != nil {
 			log.Print("Glivela controller restore not confirmed; live state unchanged, retain partial destination for inspection")

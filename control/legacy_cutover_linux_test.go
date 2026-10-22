@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLegacyCutoverJournalPinsCandidateAndBlocksSilentRetry(t *testing.T) {
@@ -45,16 +46,28 @@ func TestLegacyCutoverJournalPinsCandidateAndBlocksSilentRetry(t *testing.T) {
 	if r.Apply(context.Background(), candidate) == nil || driver.starts != 0 {
 		t.Fatal("rolled-back migration restarted a candidate")
 	}
+	state.Phase = "accepted"
+	state.AcceptedSnapshot = "verified-snapshot"
+	state.AcceptedAt = time.Now().UTC()
+	if err := saveLegacyCutover(r.Directory, state); err != nil {
+		t.Fatal(err)
+	}
+	got, err = readLegacyCutover(r)
+	if err != nil || got.AcceptedSnapshot != state.AcceptedSnapshot || !got.AcceptedAt.Equal(state.AcceptedAt) {
+		t.Fatal("accepted route evidence was not retained", err)
+	}
 }
 
 func TestLegacyCutoverRejectsUnsafeCheckpoint(t *testing.T) {
-	for _, scenario := range []string{"unknown phase", "wrong binding", "changed candidate", "public file", "symlink"} {
+	for _, scenario := range []string{"unknown phase", "missing acceptance", "wrong binding", "changed candidate", "public file", "symlink"} {
 		t.Run(scenario, func(t *testing.T) {
 			r, _ := nativeFixture(t)
 			state := legacyCutover{Version: 1, NodeID: "node-example", Checkpoint: "/private-recovery/checkpoint/snapshot.json", Binding: r.Driver.Binding(), Phase: "pending", Candidate: artifact(1)}
 			switch scenario {
 			case "unknown phase":
 				state.Phase = "success"
+			case "missing acceptance":
+				state.Phase = "accepted"
 			case "wrong binding":
 				state.Binding = "other"
 			case "changed candidate":

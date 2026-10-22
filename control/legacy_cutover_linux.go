@@ -8,19 +8,22 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/petauron/glivela/landing"
 )
 
 type legacyCutover struct {
-	Version    int     `json:"version"`
-	NodeID     string  `json:"nodeId"`
-	Checkpoint string  `json:"checkpoint"`
-	Binding    string  `json:"binding"`
-	Phase      string  `json:"phase"`
-	WasEnabled bool    `json:"wasEnabled"`
-	Candidate  Desired `json:"candidate"`
+	AcceptedSnapshot string    `json:"acceptedSnapshot,omitempty"`
+	AcceptedAt       time.Time `json:"acceptedAt,omitempty"`
+	Version          int       `json:"version"`
+	NodeID           string    `json:"nodeId"`
+	Checkpoint       string    `json:"checkpoint"`
+	Binding          string    `json:"binding"`
+	Phase            string    `json:"phase"`
+	WasEnabled       bool      `json:"wasEnabled"`
+	Candidate        Desired   `json:"candidate"`
 }
 
 // SwitchLegacyLanding is an offline first-cutover operation, not a health
@@ -171,8 +174,11 @@ func readLegacyCutover(r *NativeRuntime) (legacyCutover, error) {
 	if err != nil || decode(strings.NewReader(string(raw)), &state) != nil || state.Version != 1 || state.NodeID == "" || state.Binding != r.Driver.Binding() || state.Candidate.Validate() != nil || state.Candidate.Landing == nil || !filepath.IsAbs(state.Checkpoint) {
 		return state, errors.New("control: invalid cutover journal")
 	}
-	if state.Phase != "pending" && state.Phase != "awaiting-routes" && state.Phase != "rolled-back" {
+	if state.Phase != "pending" && state.Phase != "awaiting-routes" && state.Phase != "rolled-back" && state.Phase != "accepted" {
 		return state, errors.New("control: unknown cutover phase")
+	}
+	if state.Phase == "accepted" && (state.AcceptedSnapshot == "" || state.AcceptedAt.IsZero()) {
+		return state, errors.New("control: cutover acceptance evidence missing")
 	}
 	return state, nil
 }
@@ -184,6 +190,9 @@ func checkLegacyCutoverApply(r *NativeRuntime, desired Desired) error {
 	}
 	if err != nil {
 		return err
+	}
+	if state.Phase == "accepted" {
+		return requireLegacyLandingFenced(context.Background(), state.NodeID)
 	}
 	if state.Phase == "rolled-back" || desired.Revision != state.Candidate.Revision || desired.ConfigSHA256 != state.Candidate.ConfigSHA256 {
 		return errors.New("control: first cutover awaits acceptance or explicit recovery; later revisions refused")
@@ -216,6 +225,12 @@ func RecoverLegacyCutover(ctx context.Context, r *NativeRuntime) error {
 	if err != nil {
 		return err
 	}
+	if state.Phase == "accepted" {
+		if err := requireLegacyLandingFenced(ctx, state.NodeID); err != nil {
+			return err
+		}
+		return requireLegacyProxyStopped(ctx)
+	}
 	driver, ok := r.Driver.(SystemdDriver)
 	if !ok {
 		return errors.New("control: cutover requires the native installed driver")
@@ -236,6 +251,81 @@ func RecoverLegacyCutover(ctx context.Context, r *NativeRuntime) error {
 		return err
 	}
 	return nil
+}
+
+// CompleteLegacyLanding records authority acceptance without deleting the old
+// checkpoint or changing proxy configuration. The node daemon must be stopped
+// to acquire its state lock, but the validated Xray worker remains running.
+func CompleteLegacyLanding(ctx context.Context, directory, snapshot string, driver SystemdDriver, client *Client) error {
+	if os.Geteuid() != 0 || client == nil || snapshot == "" {
+		return errors.New("control: root and authenticated acceptance required")
+	}
+	unlock, err := LockDirectory(directory)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	r := &NativeRuntime{Directory: directory, Driver: driver}
+	state, err := readLegacyCutover(r)
+	if err != nil {
+		return err
+	}
+	if state.Phase != "awaiting-routes" {
+		return errors.New("control: cutover is not awaiting routes")
+	}
+	if err := requireLegacyWriterStopped(ctx); err != nil {
+		return err
+	}
+	if err := requireLegacyProxyStopped(ctx); err != nil {
+		return err
+	}
+	_, program, err := loadLegacyBackup(state.Checkpoint, state.NodeID, 0)
+	if err != nil {
+		return err
+	}
+	program.Close()
+	observation, err := r.Inspect(ctx)
+	if err != nil || !observation.RuntimeReady || observation.Revision != state.Candidate.Revision || observation.ConfigSHA256 != state.Candidate.ConfigSHA256 {
+		return errors.New("control: current cutover runtime must be healthy")
+	}
+	if err := client.verifyLandingAcceptance(ctx, snapshot, observation.Revision, observation.ConfigSHA256); err != nil {
+		return err
+	}
+	if err := driver.Healthy(ctx, state.Candidate); err != nil {
+		return err
+	}
+	state.Phase = "accepted"
+	state.AcceptedSnapshot = snapshot
+	state.AcceptedAt = time.Now().UTC()
+	return saveLegacyCutover(directory, state)
+}
+
+func requireLegacyLandingFenced(ctx context.Context, nodeID string) error {
+	for path := legacyLandingJournal; path != "/"; path = filepath.Dir(path) {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		owner, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || owner.Uid != 0 || info.Mode().Perm()&0022 != 0 || path == legacyLandingJournal && (!info.Mode().IsRegular() || info.Size() > 128<<10) || path != legacyLandingJournal && !info.IsDir() {
+			return errors.New("control: unsafe retained legacy ownership")
+		}
+	}
+	raw, err := os.ReadFile(legacyLandingJournal)
+	if err != nil {
+		return err
+	}
+	var journal struct {
+		NodeID           string `json:"nodeId"`
+		ExecutionRetired bool   `json:"executionRetired"`
+	}
+	if json.Unmarshal(raw, &journal) != nil || journal.NodeID != nodeID {
+		return errors.New("control: retained legacy ownership differs")
+	}
+	if journal.ExecutionRetired {
+		return nil
+	}
+	return requireLegacyWriterStopped(ctx)
 }
 
 func legacySystemctl(ctx context.Context, action, unit string) error {
