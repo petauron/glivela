@@ -81,4 +81,12 @@ func TestLegacyDantePortAndSourceBoundaries(t *testing.T) {
 	if strings.Contains(string(current), `"range":[1081,1208]`) || strings.Contains(string(current), "vastora_landing_server_") {
 		t.Fatal("legacy removal changed current runtime")
 	}
+	p.EgressIP = ""
+	raw, _ = json.Marshal(p.objects())
+	if p.validate() != nil || !strings.Contains(string(raw), `"nfproto"`) || strings.Contains(string(raw), `"right":""`) {
+		t.Fatal("legacy omitted-exit policy was not preserved")
+	}
+	if ServerFirewall(p).validate() == nil {
+		t.Fatal("new runtime accepted an implicit exit")
+	}
 }

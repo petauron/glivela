@@ -169,9 +169,6 @@ func snapshotLegacyLanding(root, nodeID string, owner uint32) (LegacyLandingSnap
 		return result, errors.New("control: incomplete legacy ownership inventory")
 	}
 	result = LegacyLandingSnapshot{Version: 1, NodeID: nodeID, Revision: metadata.Revision, Journal: journal, Files: make(map[string]LegacyOwnedFile)}
-	if _, _, err := result.migrationPlan(); err != nil {
-		return LegacyLandingSnapshot{}, err
-	}
 	for _, name := range legacyLandingFiles {
 		limit := int64(128 << 10)
 		if name == "/etc/vastora-landing/danted" {
@@ -186,6 +183,9 @@ func snapshotLegacyLanding(root, nodeID string, owner uint32) (LegacyLandingSnap
 			return LegacyLandingSnapshot{}, errors.New("control: legacy resource changed outside its owner")
 		}
 		result.Files[name] = LegacyOwnedFile{Contents: raw, Mode: mode}
+	}
+	if _, _, err := result.migrationPlan(); err != nil {
+		return LegacyLandingSnapshot{}, err
 	}
 	program, source, err := inspectLegacyRecoveryProgram(root, owner, result.Files["/etc/systemd/system/vastora-landing-firewall.service"].Contents)
 	if err != nil {

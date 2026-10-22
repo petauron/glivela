@@ -14,6 +14,13 @@ import (
 // configuration writer before removing the verified table.
 type LegacyDanteFirewall ServerFirewall
 
+func (p LegacyDanteFirewall) validate() error {
+	if p.EgressIP != "" && !ValidEgressIP(p.EgressIP) {
+		return errors.New("landing: invalid retained firewall exit")
+	}
+	return ServerFirewall(p).validateIdentity()
+}
+
 func (p LegacyDanteFirewall) identity() (string, string) {
 	p.Sources = slices.Clone(p.Sources)
 	slices.Sort(p.Sources)
@@ -35,7 +42,7 @@ func (p LegacyDanteFirewall) Verify(ctx context.Context) error {
 }
 
 func (p LegacyDanteFirewall) verify(ctx context.Context, run func(context.Context, []byte, ...string) ([]byte, error)) error {
-	if err := ServerFirewall(p).validate(); err != nil {
+	if err := p.validate(); err != nil {
 		return err
 	}
 	raw, err := run(ctx, nil, "--json", "list", "ruleset")
@@ -58,7 +65,7 @@ func (p LegacyDanteFirewall) Remove(ctx context.Context) error {
 }
 
 func (p LegacyDanteFirewall) remove(ctx context.Context, run func(context.Context, []byte, ...string) ([]byte, error)) error {
-	if err := ServerFirewall(p).validate(); err != nil {
+	if err := p.validate(); err != nil {
 		return err
 	}
 	table, _ := p.identity()
