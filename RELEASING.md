@@ -2,6 +2,14 @@
 
 ## Preserving an existing local resolver
 
+New native entries permit only TCP/UDP destination port 53 to nameservers read
+from the root-owned effective resolver file (the checked override below, or
+the host resolver). Other private destinations remain blocked. No DNS value is
+accepted from a remote desired document. Resolver changes after activation fail
+exact firewall verification; this release does not silently replace existing
+firewall policy or migrate already-active entries. Roll out to new takeovers
+only and verify DNS plus real routes before activating traffic.
+
 Native Xray services accept one narrowly checked administrator-owned drop-in:
 `/etc/systemd/system/<owned-unit>.d/90-preserve-dns.conf`. Its entire content
 must be `[Service]` followed by a single `BindReadOnlyPaths` line mapping

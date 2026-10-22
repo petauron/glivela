@@ -58,7 +58,11 @@ func (r *NativeRuntime) Retire(ctx context.Context) error {
 				return err
 			}
 		}
-		return entry.policy(*state.Current).Remove(ctx)
+		policy, err := entry.policy(*state.Current)
+		if err != nil {
+			return err
+		}
+		return policy.Remove(ctx)
 	}
 	return nil
 }
