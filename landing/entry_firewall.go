@@ -19,6 +19,10 @@ type EntryFirewall struct {
 	UID      uint32
 	Revision uint64
 	Peers    []string
+	// Local, root-owned resolver configuration only; never supplied by peers.
+	// Exclude from the stable table identity: changed DNS must fail exact rule
+	// verification rather than leave a second, conflicting output table behind.
+	DNS []string `json:"-"`
 }
 
 func (p EntryFirewall) validate() error {
@@ -26,6 +30,17 @@ func (p EntryFirewall) validate() error {
 		return errors.New("landing: invalid native entry firewall identity")
 	}
 	seen := map[string]bool{}
+	if len(p.DNS) > 16 {
+		return errors.New("landing: too many entry resolvers")
+	}
+	for _, address := range p.DNS {
+		ip, err := netip.ParseAddr(address)
+		if err != nil || ip.Zone() != "" || ip.IsUnspecified() || ip.IsMulticast() || ip.Is4In6() || ip.String() != address || seen[address] {
+			return errors.New("landing: invalid entry resolver")
+		}
+		seen[address] = true
+	}
+	seen = map[string]bool{}
 	for _, address := range p.Peers {
 		if !tailnetIPv4(address) || seen[address] {
 			return errors.New("landing: invalid native entry peer")
@@ -64,6 +79,17 @@ func (p EntryFirewall) objects() []map[string]nftObject {
 	// destination connections. There is no general established-flow bypass for
 	// original-direction traffic to a newly resolved private destination.
 	rule("destinations", match(nftObject{"ct": nftObject{"key": "direction"}}, "reply"), nftObject{"return": nil})
+	resolvers := slices.Clone(p.DNS)
+	slices.Sort(resolvers)
+	for _, address := range resolvers {
+		family := "ip"
+		if netip.MustParseAddr(address).Is6() {
+			family = "ip6"
+		}
+		for _, protocol := range []string{"tcp", "udp"} {
+			rule("destinations", match(payload(family, "daddr"), address), match(payload(protocol, "dport"), 53), nftObject{"return": nil})
+		}
+	}
 	peers := slices.Clone(p.Peers)
 	slices.Sort(peers)
 	for _, address := range peers {

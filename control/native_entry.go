@@ -38,18 +38,23 @@ func (d *NativeEntryDriver) Validate(ctx context.Context, desired Desired, confi
 	if err := d.verifyLoadedService(ctx); err != nil {
 		return err
 	}
+	if _, err := d.existingEntryDNS(); err != nil {
+		return err
+	}
 	if err := verifyEntryRealityTargets(ctx, desired); err != nil {
 		return err
 	}
 	return validateXrayFile(ctx, d.Binary, d.BinarySHA256, config)
 }
 
-func (d *NativeEntryDriver) policy(desired Desired) landing.EntryFirewall {
+func (d *NativeEntryDriver) policy(desired Desired) (landing.EntryFirewall, error) {
 	policy := landing.EntryFirewall{UID: d.WorkerUID, Revision: desired.Revision}
 	for _, peer := range desired.EntryNetwork.Peers {
 		policy.Peers = append(policy.Peers, peer.Identity.Address)
 	}
-	return policy
+	var err error
+	policy.DNS, err = d.existingEntryDNS()
+	return policy, err
 }
 
 func (d *NativeEntryDriver) gates(desired Desired) ([]*landing.TrafficGate, error) {
@@ -107,6 +112,10 @@ func (d *NativeEntryDriver) Activate(ctx context.Context, desired Desired, previ
 	if err := verifyEntryConfigFile(filepath.Join(d.Directory, "config.json"), desired.Config); err != nil {
 		return err
 	}
+	policy, err := d.policy(desired)
+	if err != nil {
+		return err
+	}
 	resume := previous != nil && bytes.Equal(previous.Config, desired.Config) && sameEntryTransport(previous.EntryNetwork, desired.EntryNetwork) && d.readyProcess(ctx, desired) == nil
 	if !resume {
 		if err := verifyEntryRealityTargets(ctx, desired); err != nil {
@@ -121,7 +130,7 @@ func (d *NativeEntryDriver) Activate(ctx context.Context, desired Desired, previ
 			return err
 		}
 	}
-	if err := d.policy(desired).Install(ctx); err != nil {
+	if err := policy.Install(ctx); err != nil {
 		return err
 	}
 	gates, err := d.gates(desired)
@@ -143,7 +152,11 @@ func (d *NativeEntryDriver) Activate(ctx context.Context, desired Desired, previ
 				return err
 			}
 		}
-		if err := d.policy(*previous).Remove(ctx); err != nil {
+		oldPolicy, err := d.policy(*previous)
+		if err != nil {
+			return err
+		}
+		if err := oldPolicy.Remove(ctx); err != nil {
 			return err
 		}
 	}
@@ -205,7 +218,11 @@ func (d *NativeEntryDriver) Healthy(ctx context.Context, desired Desired) error 
 	if err := verifyEntryConfigFile(filepath.Join(d.Directory, "config.json"), desired.Config); err != nil {
 		return err
 	}
-	if err := d.policy(desired).Verify(ctx); err != nil {
+	policy, err := d.policy(desired)
+	if err != nil {
+		return err
+	}
+	if err := policy.Verify(ctx); err != nil {
 		return err
 	}
 	gates, err := d.gates(desired)
