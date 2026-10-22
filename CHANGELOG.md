@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.40](https://github.com/petauron/glivela/compare/v0.1.0-alpha.39...v0.1.0-alpha.40) (2026-10-22)
+
+
+### Features
+
+* add temporary node suspension with verified recovery ([08b1f97](https://github.com/petauron/glivela/commit/08b1f9700621a132311831c930d086fd47550eaa))
+
 ## [0.1.0-alpha.39](https://github.com/petauron/glivela/compare/v0.1.0-alpha.38...v0.1.0-alpha.39) (2026-10-22)
 
 
