@@ -207,12 +207,13 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				CertificateID   string          `json:"certificateId"`
 				ExpectedCutover time.Time       `json:"expectedCutoverAt"`
 				Quota           *EntryQuotaSeed `json:"quota"`
+				RouteHealth     map[string]bool `json:"routeHealth"`
 			}
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil || request.Quota == nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
 				http.Error(w, "invalid prepared quota refresh", http.StatusBadRequest)
 				return
 			}
-			if err := store.RefreshPreparedEntryQuota(request.ID, request.CertificateID, request.ExpectedCutover, *request.Quota); err != nil {
+			if err := store.RefreshPreparedEntryQuota(request.ID, request.CertificateID, request.ExpectedCutover, *request.Quota, request.RouteHealth); err != nil {
 				http.Error(w, "prepared quota refresh refused", http.StatusConflict)
 				return
 			}
