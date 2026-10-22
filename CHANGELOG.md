@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.38](https://github.com/petauron/glivela/compare/v0.1.0-alpha.37...v0.1.0-alpha.38) (2026-10-22)
+
+
+### Bug Fixes
+
+* initialize unused native handover journals safely ([#85](https://github.com/petauron/glivela/issues/85)) ([661fbda](https://github.com/petauron/glivela/commit/661fbda789e84414870772f643fa2121d4594554))
+
 ## [0.1.0-alpha.37](https://github.com/petauron/glivela/compare/v0.1.0-alpha.36...v0.1.0-alpha.37) (2026-10-22)
 
 
