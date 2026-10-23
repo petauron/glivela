@@ -347,8 +347,21 @@ func (r *NativeRuntime) backup(a Desired) error {
 			return errors.New("control: unsafe recovery backup")
 		}
 		existing, err := os.ReadFile(path)
-		if err != nil || !bytes.Equal(existing, raw) {
+		if err != nil {
 			return errors.New("control: recovery backup changed")
+		}
+		if !bytes.Equal(existing, raw) {
+			// Retain immutable backups written before empty transport fields
+			// were omitted. Decode strictly and verify the complete desired
+			// artifact; representation changes never authorize a policy change.
+			var saved Desired
+			if decode(bytes.NewReader(existing), &saved) != nil || saved.Validate() != nil {
+				return errors.New("control: recovery backup changed")
+			}
+			canonical, err := json.Marshal(saved)
+			if err != nil || !bytes.Equal(canonical, raw) {
+				return errors.New("control: recovery backup changed")
+			}
 		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
