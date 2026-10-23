@@ -59,7 +59,14 @@ func transportCommand(parent context.Context, args []string, output io.Writer, a
 		return err
 	}
 	defer client.Close()
-	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
+	timeout := time.Minute
+	if action == "prepare" {
+		// The bundled core keeps idle DoH connections for five minutes.
+		// Wait for natural drainage before sampling; final-tail freshness
+		// remains independently limited to one minute by the runtime.
+		timeout = 6 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	driver := &control.NativeEntryDriver{SystemdDriver: installed, Directory: cfg.Directory}
 	runtime := &control.NativeRuntime{Directory: cfg.Directory, Driver: driver}
