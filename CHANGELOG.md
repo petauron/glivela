@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.43](https://github.com/petauron/glivela/compare/v0.1.0-alpha.42...v0.1.0-alpha.43) (2026-10-23)
+
+
+### Bug Fixes
+
+* **runtime:** preserve equivalent legacy recovery backups ([#97](https://github.com/petauron/glivela/issues/97)) ([2221d14](https://github.com/petauron/glivela/commit/2221d1428c73660239cb75c8cf5d8f6abfad889c))
+* **transport:** allow natural DNS connection drainage ([#99](https://github.com/petauron/glivela/issues/99)) ([7c5fb12](https://github.com/petauron/glivela/commit/7c5fb12615832ab478cf1b3351365ced865b8973))
+
 ## [0.1.0-alpha.42](https://github.com/petauron/glivela/compare/v0.1.0-alpha.41...v0.1.0-alpha.42) (2026-10-23)
 
 
