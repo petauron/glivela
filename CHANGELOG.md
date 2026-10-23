@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.42](https://github.com/petauron/glivela/compare/v0.1.0-alpha.41...v0.1.0-alpha.42) (2026-10-23)
+
+
+### Bug Fixes
+
+* **transport:** preserve legacy policy digest for empty transport ([81a0a5a](https://github.com/petauron/glivela/commit/81a0a5a4cbdb43f7bf697ac93d2839f6381f8efb))
+
 ## [0.1.0-alpha.41](https://github.com/petauron/glivela/compare/v0.1.0-alpha.40...v0.1.0-alpha.41) (2026-10-23)
 
 
