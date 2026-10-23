@@ -156,6 +156,10 @@ func (r *NativeRuntime) CancelTransport(ctx context.Context, client *Client) err
 	} else if driver, ok := r.Driver.(*NativeEntryDriver); ok && !saved.Acknowledged {
 		// If the final HTTP write never committed, preserve that process's
 		// unacknowledged counters by restoring listeners without restarting it.
+		state, stateErr := r.journal()
+		if stateErr != nil || state.Phase != "ready" || state.Retired || state.Current == nil || !reflect.DeepEqual(*state.Current, saved.Desired) || r.verifyConfig(saved.Desired) != nil {
+			return errors.New("control: cancellation runtime differs")
+		}
 		if err := driver.restorePreparedListeners(ctx, saved.Desired, saved.Tail.Traffic); err != nil {
 			return err
 		}
