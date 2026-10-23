@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.41](https://github.com/petauron/glivela/compare/v0.1.0-alpha.40...v0.1.0-alpha.41) (2026-10-23)
+
+
+### Features
+
+* **transport:** add fenced SS2022 landing cutover and recovery ([#93](https://github.com/petauron/glivela/issues/93)) ([a15a9ab](https://github.com/petauron/glivela/commit/a15a9abbde7a439454119b2b9bd0b036930134fc))
+
 ## [0.1.0-alpha.40](https://github.com/petauron/glivela/compare/v0.1.0-alpha.39...v0.1.0-alpha.40) (2026-10-22)
 
 
