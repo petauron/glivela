@@ -67,6 +67,50 @@ func Handler(repository Repository) http.Handler {
 			handleLandingAcceptance(repository, w, r)
 			return
 		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/transport-cancel-intent" && r.URL.RawQuery == "" {
+			store, ok := repository.(*Store)
+			var tail TransportTail
+			if !ok || decode(http.MaxBytesReader(w, r.Body, maxMessage), &tail) != nil {
+				http.Error(w, "invalid cancellation", http.StatusBadRequest)
+				return
+			}
+			desired, err := store.TransportCancelIntent(r.Context(), CertificateID(r.TLS.PeerCertificates[0]), tail)
+			if err != nil {
+				http.Error(w, "cancellation refused", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(desired)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/transport-tail" && r.URL.RawQuery == "" {
+			store, ok := repository.(*Store)
+			var tail TransportTail
+			if !ok || decode(http.MaxBytesReader(w, r.Body, maxMessage), &tail) != nil {
+				http.Error(w, "invalid final sample", http.StatusBadRequest)
+				return
+			}
+			if store.RecordTransportTail(r.Context(), CertificateID(r.TLS.PeerCertificates[0]), tail) != nil {
+				http.Error(w, "final sample not committed", http.StatusConflict)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/transport-resume" && r.URL.RawQuery == "" {
+			store, ok := repository.(*Store)
+			var actual Observation
+			if !ok || decode(http.MaxBytesReader(w, r.Body, maxMessage), &actual) != nil {
+				http.Error(w, "invalid restoration observation", http.StatusBadRequest)
+				return
+			}
+			if store.ResumeTransportPreparation(r.Context(), CertificateID(r.TLS.PeerCertificates[0]), actual) != nil {
+				http.Error(w, "original worker restoration not verified", http.StatusConflict)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/exchange" || r.URL.RawQuery != "" {
 			http.Error(w, "unsupported request", http.StatusNotFound)
 			return

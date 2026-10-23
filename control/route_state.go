@@ -66,7 +66,7 @@ func routeTargetsLanding(p RouteProbe, node Node) bool {
 	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)
 	address, addressErr := netip.ParseAddr(node.Desired.Landing.Address)
 	return err == nil && addressErr == nil && endpoint.Addr() == address && endpoint.Port() == landing.SOCKSPort &&
-		p.LandingID == node.ID && p.Revision == node.Desired.Revision && p.ConfigSHA256 == node.Desired.ConfigSHA256
+		p.LandingID == node.ID && p.Revision == node.Desired.Revision && p.ConfigSHA256 == node.Desired.ConfigSHA256 && p.Transport == node.Desired.Landing.Transport
 }
 
 // AssignRouteChecks atomically queues the complete independently enrolled entry

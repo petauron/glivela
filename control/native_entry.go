@@ -188,7 +188,9 @@ func (d *NativeEntryDriver) Activate(ctx context.Context, desired Desired, previ
 	if err != nil {
 		return err
 	}
-	return d.monitors.start(desired, gates, id, d.readyProcess, d.stopOwned, nil)
+	return d.monitors.start(desired, gates, id, d.readyProcess, d.stopOwned, nil, func(ctx context.Context, p RouteProbe) (RouteProbeResult, error) {
+		return ProbeWithCore(ctx, p, d.Binary, d.BinarySHA256)
+	})
 }
 
 func (d *NativeEntryDriver) Stop(ctx context.Context, desired Desired) error {

@@ -110,6 +110,10 @@ func (q *EntryQuota) validate() error {
 // projection and desired state together before returning policy to the node.
 // A cycle boundary clears only period usage, never cumulative forwarded bytes.
 func advanceEntryQuota(current *EntryQuota, desired Desired, receipt *Observation, now time.Time) (*EntryQuota, Desired, error) {
+	return advanceEntryQuotaWithTransportRecovery(current, desired, receipt, now, nil)
+}
+
+func advanceEntryQuotaWithTransportRecovery(current *EntryQuota, desired Desired, receipt *Observation, now time.Time, previous *Desired) (*EntryQuota, Desired, error) {
 	if err := current.validate(); err != nil {
 		return nil, Desired{}, err
 	}
@@ -131,7 +135,11 @@ func advanceEntryQuota(current *EntryQuota, desired Desired, receipt *Observatio
 		q.LastResetAt = last
 		q.NextResetAt = monthlyReset(last.Year(), last.Month()+1, q.ResetDay, location)
 	}
-	if receipt != nil && receipt.Traffic != nil && glivela.VerifyAppliedReceipt(desired.DesiredArtifact, receipt.AppliedReceipt) == nil {
+	verified := receipt != nil && glivela.VerifyAppliedReceipt(desired.DesiredArtifact, receipt.AppliedReceipt) == nil
+	if !verified && receipt != nil && previous != nil && transportOnlyEntryChange(*previous, desired) {
+		verified = glivela.VerifyAppliedReceipt(previous.DesiredArtifact, receipt.AppliedReceipt) == nil
+	}
+	if receipt != nil && receipt.Traffic != nil && verified {
 		sample := receipt.Traffic
 		if validateEntryTraffic(desired, sample) != nil || sample.SampledAt.After(now) {
 			return nil, Desired{}, errors.New("control: quota traffic refused")

@@ -239,6 +239,11 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case "/v1/admin/private-transport":
+			var request TransportSwitch
+			if decode(http.MaxBytesReader(w,r.Body,maxMessage),&request)!=nil { http.Error(w,"invalid transport request",http.StatusBadRequest); return }
+			if store.SwitchPrivateTransport(request)!=nil { http.Error(w,"transport switch refused",http.StatusConflict); return }
+			w.WriteHeader(http.StatusAccepted)
 		case "/v1/admin/entries":
 			var request struct {
 				ID            string           `json:"id"`
