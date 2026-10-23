@@ -25,6 +25,56 @@ type driverFixture struct {
 	activationError func(Desired) error
 }
 
+func TestRecoveryBackupPreservesEquivalentLegacyTransport(t *testing.T) {
+	_, entry, _ := quotaFixture(t)
+	for _, desired := range []Desired{artifact(1), entry} {
+		r := &NativeRuntime{Directory: t.TempDir()}
+		raw, err := json.Marshal(desired)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var legacy map[string]any
+		if err := json.Unmarshal(raw, &legacy); err != nil {
+			t.Fatal(err)
+		}
+		if desired.Landing != nil {
+			legacy["landing"].(map[string]any)["transport"] = map[string]any{}
+		} else {
+			for _, peer := range legacy["entry"].(map[string]any)["peers"].([]any) {
+				peer.(map[string]any)["transport"] = map[string]any{}
+			}
+		}
+		old, _ := json.Marshal(legacy)
+		path := filepath.Join(r.Directory, fmt.Sprintf("backup-%d-%s.json", desired.Revision, desired.ConfigSHA256))
+		if err := os.WriteFile(path, old, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.backup(desired); err != nil {
+			t.Fatal("equivalent old backup rejected", err)
+		}
+		retained, _ := os.ReadFile(path)
+		if !bytes.Equal(retained, old) {
+			t.Fatal("old backup rewritten")
+		}
+		for _, invalid := range [][]byte{
+			append(append([]byte{}, old...), []byte(` {}`)...),
+			bytes.Replace(old, []byte(`"revision":1`), []byte(`"revision":999`), 1),
+			append(append([]byte{}, old[:len(old)-1]...), []byte(`,"unknown":true}`)...),
+			bytes.Replace(old, []byte(`"transport":{}`), []byte(`"transport":{"protocol":"ss2022","key":"AAECAwQFBgcICQoLDA0ODw=="}`), 1),
+		} {
+			if bytes.Equal(invalid, old) {
+				continue
+			}
+			if err := os.WriteFile(path, invalid, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if r.backup(desired) == nil {
+				t.Fatal("changed or malformed backup accepted")
+			}
+		}
+	}
+}
+
 func (f *driverFixture) Binding() string { return "fixture:" + f.binding }
 
 func (f *driverFixture) EntryHealth(Desired) *EntryHealthReport { return nil }
