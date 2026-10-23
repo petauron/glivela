@@ -82,7 +82,7 @@ func (s *Store) RecordTransportTail(ctx context.Context, certificate string, tai
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if !ok || s.business != nil || n.EntryQuota == nil || validateTransportTail(n, &tail) != nil {
+	if !ok || s.business != nil || validateTransportTail(n, &tail) != nil {
 		return errors.New("control: private transport tail refused")
 	}
 	if n.TransportTail != nil {
@@ -94,6 +94,26 @@ func (s *Store) RecordTransportTail(ctx context.Context, certificate string, tai
 	now := time.Now().UTC()
 	if tail.Traffic.SampledAt.After(now) || now.Sub(tail.Traffic.SampledAt) > time.Minute {
 		return errors.New("control: final sample is not current")
+	}
+	if n.EntryQuota == nil {
+		// Older unlimited entries forward raw generations. Preserve the last
+		// acknowledged generation/counters as the existing projection's origin,
+		// so its owner consumes only the remaining delta, never a zero baseline.
+		if n.Receipt == nil || glivela.VerifyAppliedReceipt(n.Desired.DesiredArtifact, n.Receipt.AppliedReceipt) != nil || n.Receipt.Traffic == nil || validateEntryTraffic(n.Desired, n.Receipt.Traffic) != nil || tail.validate(n.Desired) != nil {
+			return errors.New("control: unlimited entry accounting origin unavailable")
+		}
+		prior := n.Receipt.Traffic
+		started, err := time.Parse(time.RFC3339Nano, prior.StartedAt)
+		if err != nil || prior.StartedAt != tail.Traffic.StartedAt || tail.Traffic.SampledAt.Before(prior.SampledAt) {
+			return errors.New("control: unlimited entry accounting generation changed")
+		}
+		for id, counter := range prior.Counters {
+			final := tail.Traffic.Counters[id]
+			if final.Upload < counter.Upload || final.Download < counter.Download {
+				return errors.New("control: unlimited entry counters decreased")
+			}
+		}
+		n.EntryQuota = &EntryQuota{CutoverAt: started, Base: n.Desired.clone(), Raw: prior.clone(), Forwarded: prior.clone()}
 	}
 	// This receipt is used ONLY by the existing cumulative accounting reducer.
 	// It is never stored or exposed as evidence that the stopped worker is ready.

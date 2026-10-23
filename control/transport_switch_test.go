@@ -119,6 +119,43 @@ func TestEncryptedProbeCannotFallBackToSOCKS(t *testing.T) {
 	}
 }
 
+func TestUnlimitedTransportTailPreservesExistingCounterOrigin(t *testing.T) {
+	s := store(t)
+	d := routedEntryArtifact(t)
+	cert := strings.Repeat("a", 64)
+	ctx := context.Background()
+	if err := s.Put(Node{ID: "entry-example", CertificateID: cert, Desired: d}); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	prior := quotaReceipt(d, started, time.Now().UTC().Add(-time.Second), 100)
+	if _, err := s.Exchange(ctx, cert, prior); err != nil {
+		t.Fatal(err)
+	}
+	tail := TransportTail{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, Traffic: quotaReceipt(d, started, time.Now().UTC(), 125).Traffic}
+	if err := s.RecordTransportTail(ctx, cert, tail); err != nil {
+		t.Fatal(err)
+	}
+	q := s.nodes[cert].EntryQuota
+	credential := d.Entry.Credentials[0].Credential.ID
+	if q.TotalBytes != 0 || q.ResetDay != 0 || q.UsedBytes != 25 || q.Forwarded.StartedAt != prior.Traffic.StartedAt || q.Forwarded.Counters[credential].Upload != 125 {
+		t.Fatal("unlimited origin changed or bytes counted twice")
+	}
+	if err := s.RecordTransportTail(ctx, cert, tail); err != nil || s.nodes[cert].EntryQuota.UsedBytes != 25 {
+		t.Fatal("tail retry changed usage", err)
+	}
+	if _, err := OpenStore(s.path); err != nil {
+		t.Fatal("unlimited projection cannot reload", err)
+	}
+	// A restored process contributes only its new bytes, while the external
+	// ledger still sees the original generation and cumulative counters.
+	now := time.Now().UTC().Add(time.Second)
+	next, _, err := advanceEntryQuota(q, d, quotaReceipt(d, now, now.Add(time.Second), 7), now.Add(time.Second))
+	if err != nil || next.Forwarded.StartedAt != prior.Traffic.StartedAt || next.Forwarded.Counters[credential].Upload != 132 || next.UsedBytes != 32 {
+		t.Fatal("restored unlimited worker lost or duplicated bytes", err)
+	}
+}
+
 func TestFailedTransportActivationAccountsRetainedWorkerWithoutPublishingHealth(t *testing.T) {
 	s := store(t)
 	q, old, started := quotaFixture(t)
