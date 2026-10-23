@@ -92,7 +92,7 @@ func (r *NativeRuntime) CompleteTransport(ctx context.Context, client *Client) e
 	restored := previous.clone()
 	restored.Entry.Revision = desired.Revision
 	sameConfiguration := reflect.DeepEqual(restored.Entry, desired.Entry) && reflect.DeepEqual(restored.EntryNetwork, desired.EntryNetwork)
-	if desired.Revision <= previous.Revision || !transportOnlyEntryChange(previous, desired) && !sameConfiguration {
+	if desired.Revision <= previous.Revision || !transportOnlyEntryChange(previous, desired) && !probeOnlyEntryChange(previous, desired) && !sameConfiguration {
 		return errors.New("control: controller has not committed the paired transport change")
 	}
 	state, err := r.journal()
