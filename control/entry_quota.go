@@ -14,16 +14,18 @@ import (
 // remain with the existing owner. Forwarded preserves sampled core bytes across
 // quota-driven configuration revisions until that owner consumes them.
 type EntryQuota struct {
-	TotalBytes  int64         `json:"totalBytes,string"`
-	UsedBytes   int64         `json:"usedBytes,string"`
-	ResetDay    int           `json:"resetDay"`
-	Timezone    string        `json:"timezone"`
-	LastResetAt time.Time     `json:"lastResetAt,omitempty"`
-	NextResetAt time.Time     `json:"nextResetAt"`
-	CutoverAt   time.Time     `json:"cutoverAt"`
-	Base        Desired       `json:"base"`
-	Raw         *EntryTraffic `json:"raw,omitempty"`
-	Forwarded   *EntryTraffic `json:"forwarded"`
+	TotalBytes  int64     `json:"totalBytes,string"`
+	UsedBytes   int64     `json:"usedBytes,string"`
+	ResetDay    int       `json:"resetDay"`
+	Timezone    string    `json:"timezone"`
+	LastResetAt time.Time `json:"lastResetAt,omitempty"`
+	NextResetAt time.Time `json:"nextResetAt"`
+	CutoverAt   time.Time `json:"cutoverAt"`
+	Base        Desired   `json:"base"`
+	// TransportOrigin retains the immutable pre-transport accounting policy.
+	TransportOrigin *Desired      `json:"transportOrigin,omitempty"`
+	Raw             *EntryTraffic `json:"raw,omitempty"`
+	Forwarded       *EntryTraffic `json:"forwarded"`
 }
 
 // EntryQuotaSeed is supplied only by the authenticated, backed-up handover.
@@ -59,6 +61,10 @@ func (q *EntryQuota) clone() *EntryQuota {
 	}
 	next := *q
 	next.Base = q.Base.clone()
+	if q.TransportOrigin != nil {
+		origin := q.TransportOrigin.clone()
+		next.TransportOrigin = &origin
+	}
 	next.Raw = q.Raw.clone()
 	next.Forwarded = q.Forwarded.clone()
 	return &next
@@ -68,6 +74,19 @@ func (q *EntryQuota) validate() error {
 	invalid := errors.New("control: invalid staged entry quota")
 	if q == nil || q.TotalBytes < 0 || q.UsedBytes < 0 || q.ResetDay < 0 || q.ResetDay > 31 || q.CutoverAt.IsZero() || q.Base.Entry == nil || q.Base.Validate() != nil || q.Forwarded == nil {
 		return invalid
+	}
+	if q.TransportOrigin != nil {
+		origin := q.TransportOrigin.clone()
+		if origin.Validate() != nil || origin.Entry == nil || origin.Revision > q.Base.Revision || len(origin.Entry.Peers) != len(q.Base.Entry.Peers) || !reflect.DeepEqual(origin.EntryNetwork, q.Base.EntryNetwork) {
+			return invalid
+		}
+		origin.Entry.Revision = q.Base.Entry.Revision
+		for i := range origin.Entry.Peers {
+			origin.Entry.Peers[i].Transport = q.Base.Entry.Peers[i].Transport
+		}
+		if !reflect.DeepEqual(origin.Entry, q.Base.Entry) {
+			return invalid
+		}
 	}
 	if q.ResetDay == 0 {
 		if !q.NextResetAt.IsZero() || !q.LastResetAt.IsZero() {

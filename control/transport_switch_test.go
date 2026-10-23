@@ -47,6 +47,9 @@ func TestPrivateTransportSwitchPreservesRetainedTraffic(t *testing.T) {
 		t.Fatal("pre-switch execution configuration not retained")
 	}
 	after := entry.EntryQuota
+	if after.TransportOrigin == nil || !reflect.DeepEqual(*after.TransportOrigin, before.Base) {
+		t.Fatal("original accounting policy not retained")
+	}
 	if before.UsedBytes != after.UsedBytes || before.TotalBytes != after.TotalBytes || before.ResetDay != after.ResetDay || before.NextResetAt != after.NextResetAt || !reflect.DeepEqual(before.Raw, after.Raw) || !reflect.DeepEqual(before.Forwarded, after.Forwarded) {
 		t.Fatal("retained ledger or cycle changed")
 	}
@@ -87,6 +90,9 @@ func TestPrivateTransportSwitchPreservesRetainedTraffic(t *testing.T) {
 		t.Fatal("configuration recovery refused", err)
 	}
 	recovered := s.nodes[entryCert]
+	if !reflect.DeepEqual(recovered.EntryQuota.TransportOrigin, after.TransportOrigin) {
+		t.Fatal("recovery changed accounting origin")
+	}
 	if recovered.EntryQuota.UsedBytes != q2.UsedBytes || !reflect.DeepEqual(recovered.EntryQuota.Forwarded, q2.Forwarded) || recovered.Desired.Revision <= entry.Desired.Revision || recovered.Desired.Entry.Peers[0].Transport != d.Entry.Peers[0].Transport || recovered.Receipt != nil {
 		t.Fatal("recovery rolled back accounting or invented health")
 	}

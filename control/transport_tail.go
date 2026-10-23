@@ -113,7 +113,8 @@ func (s *Store) RecordTransportTail(ctx context.Context, certificate string, tai
 				return errors.New("control: unlimited entry counters decreased")
 			}
 		}
-		n.EntryQuota = &EntryQuota{CutoverAt: started, Base: n.Desired.clone(), Raw: prior.clone(), Forwarded: prior.clone()}
+		origin := n.Desired.clone()
+		n.EntryQuota = &EntryQuota{CutoverAt: started, Base: n.Desired.clone(), TransportOrigin: &origin, Raw: prior.clone(), Forwarded: prior.clone()}
 	}
 	// This receipt is used ONLY by the existing cumulative accounting reducer.
 	// It is never stored or exposed as evidence that the stopped worker is ready.

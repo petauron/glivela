@@ -114,6 +114,10 @@ func (s *Store) SwitchPrivateTransport(request TransportSwitch) error {
 		current.Entry.Revision++
 		if n.EntryQuota != nil {
 			q := n.EntryQuota.clone()
+			if q.TransportOrigin == nil {
+				origin := q.Base.clone()
+				q.TransportOrigin = &origin
+			}
 			for i, peer := range q.Base.Entry.Peers {
 				if peer.EgressID == request.LandingID {
 					q.Base.Entry.Peers[i].Transport = request.Transport
