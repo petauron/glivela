@@ -344,7 +344,12 @@ func run(ctx context.Context, path string) error {
 		}
 		nodeRunner := control.NodeRunner{Client: client, Runtime: nodeRuntime}
 		if cfg.Xray.Role == "entry" {
-			return runEntryReconcilers(ctx, nodeRunner, control.RouteRunner{Client: client, CoreBinary: cfg.Xray.Binary, CoreSHA256: cfg.Xray.BinarySHA256})
+			maintenance, err := startLiveMaintenance(ctx, nodeRuntime, client)
+			if err != nil {
+				return err
+			}
+			defer maintenance.Close()
+			return runEntryReconcilers(ctx, nodeRunner, control.RouteRunner{Client: client, CoreBinary: cfg.Xray.Binary, CoreSHA256: cfg.Xray.BinarySHA256}, maintenance)
 		}
 		return nodeRunner.Run(ctx, 10*time.Second, func(err error) {
 			if err != nil {
@@ -412,7 +417,7 @@ func run(ctx context.Context, path string) error {
 
 // Entry-owned configuration and end-to-end checks use the same authenticated
 // identity but independent bounded loops. Neither calls a Vastora task API.
-func runEntryReconcilers(parent context.Context, node control.NodeRunner, routes control.RouteRunner) error {
+func runEntryReconcilers(parent context.Context, node control.NodeRunner, routes control.RouteRunner, maintenance ...*liveMaintenance) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	finished := make(chan error, 2)
@@ -424,7 +429,25 @@ func runEntryReconcilers(parent context.Context, node control.NodeRunner, routes
 	// Entry health leases are short-lived. Report independently of the slower
 	// route verification loop so valid evidence reaches subscription readers
 	// before its original deadline; never extend the runtime's lease here.
-	go func() { finished <- node.Run(ctx, 2*time.Second, report) }()
+	go func() {
+		if len(maintenance) == 0 {
+			finished <- node.Run(ctx, 2*time.Second, report)
+			return
+		}
+		for {
+			step, stop := context.WithTimeout(ctx, 30*time.Second)
+			report(maintenance[0].step(step, node))
+			stop()
+			timer := time.NewTimer(2 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				finished <- ctx.Err()
+				return
+			case <-timer.C:
+			}
+		}
+	}()
 	go func() { finished <- routes.Run(ctx, 10*time.Second, report) }()
 	err := <-finished
 	cancel()

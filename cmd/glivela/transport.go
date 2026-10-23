@@ -22,6 +22,7 @@ func transportCommand(parent context.Context, args []string, output io.Writer, a
 	flags := flag.NewFlagSet("prepare-private-transport", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	path := flags.String("config", "", "persistent owned node bootstrap")
+	offline := flags.Bool("offline-recovery", false, "complete/cancel only after manager crash")
 	if flags.Parse(args) != nil || flags.NArg() != 0 || *path == "" || os.Geteuid() != 0 {
 		return errors.New("transport maintenance requires root and persistent bootstrap")
 	}
@@ -32,6 +33,17 @@ func transportCommand(parent context.Context, args []string, output io.Writer, a
 	if cfg.Mode != "node" || cfg.Installation == "" || cfg.Xray.Role != "entry" || cfg.Entry != nil || cfg.EntryProvision || cfg.LegacyEntryCheckpoint != "" {
 		return errors.New("installed native entry required")
 	}
+	if *offline && action == "prepare" {
+		return errors.New("preparation requires the live manager")
+	}
+	if !*offline {
+		if err := requestLiveMaintenance(parent, cfg.Directory, action); err != nil {
+			return err
+		}
+		return json.NewEncoder(output).Encode(map[string]string{"status": "live-maintenance-confirmed", "action": action})
+	}
+	// Offline completion/cancellation is retained for crash recovery only.
+	// Preparation must never stop a healthy manager and its live route gates.
 	unlock, err := control.LockDirectory(cfg.Directory)
 	if err != nil {
 		return err

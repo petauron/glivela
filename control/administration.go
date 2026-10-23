@@ -239,6 +239,17 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case "/v1/admin/probe-targets":
+			var request ProbeUpdate
+			if decode(http.MaxBytesReader(w, r.Body, maxMessage), &request) != nil {
+				http.Error(w, "invalid probe update", http.StatusBadRequest)
+				return
+			}
+			if store.UpdateProbeTargets(request) != nil {
+				http.Error(w, "probe update refused", http.StatusConflict)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
 		case "/v1/admin/private-transport":
 			var request TransportSwitch
 			if decode(http.MaxBytesReader(w, r.Body, maxMessage), &request) != nil {

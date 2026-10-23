@@ -172,9 +172,7 @@ func TestInstalledTransportFailureRecovery(t *testing.T) {
 	client := &Client{endpoint: server.URL, http: server.Client()}
 	prepare := func() TransportTail {
 		t.Helper()
-		if err := driver.Close(ctx); err != nil {
-			t.Fatal("pause node monitors", err)
-		}
+		// Keep the live manager's health monitor group running during drainage.
 		t.Log("preparing installed generation")
 		tail, err := r.PrepareTransportTail(ctx)
 		if err != nil {
@@ -264,4 +262,24 @@ func TestInstalledTransportFailureRecovery(t *testing.T) {
 		t.Fatal("pending checkpoint retained after confirmed completion")
 	}
 	t.Log("real systemd candidate failed after activation; original worker restored fenced; fresh final tail recorded; reverse completion reopened listener without ledger rollback")
+	// Probe-only maintenance uses exactly the same installed drain and final
+	// accounting boundary, not live gate replacement or node re-enrollment.
+	probeTail := prepare()
+	beforeProbe := s.nodes[cert]
+	peer := beforeProbe.Desired.EntryNetwork.Peers[0]
+	if err := s.UpdateProbeTargets(ProbeUpdate{EntryID: beforeProbe.ID, Expected: TransportCheckpoint{Revision: beforeProbe.Desired.Revision, ConfigSHA256: beforeProbe.Desired.ConfigSHA256, Traffic: probeTail.Traffic}, Targets: map[string]string{peer.EgressID: "https://probe.example.net"}}); err != nil {
+		t.Fatal("drained probe update", err)
+	}
+	if err := r.CompleteTransport(ctx, client); err != nil {
+		t.Fatal("installed probe completion", err)
+	}
+	if s.nodes[cert].EntryQuota.UsedBytes != beforeProbe.EntryQuota.UsedBytes {
+		t.Fatal("probe update changed retained usage")
+	}
+	conn, err = net.DialTimeout("tcp", "100.64.0.3:10443", time.Second)
+	if err != nil {
+		t.Fatal("probe update failed to reopen acknowledged listener", err)
+	}
+	conn.Close()
+	t.Log("installed probe-only maintenance completed with retained accounting")
 }

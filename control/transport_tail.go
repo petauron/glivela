@@ -47,7 +47,7 @@ func validateTransportTail(n Node, tail *TransportTail) error {
 	if tail.validate(n.Desired) == nil {
 		return nil
 	}
-	if n.TransportPrevious != nil && transportOnlyEntryChange(*n.TransportPrevious, n.Desired) && tail.validate(*n.TransportPrevious) == nil {
+	if n.TransportPrevious != nil && (transportOnlyEntryChange(*n.TransportPrevious, n.Desired) || probeOnlyEntryChange(*n.TransportPrevious, n.Desired)) && tail.validate(*n.TransportPrevious) == nil {
 		return nil
 	}
 	return errors.New("control: final sample does not match an owned transport generation")

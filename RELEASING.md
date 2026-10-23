@@ -9,9 +9,12 @@ and `2022-blake3-aes-128-gcm`; keys remain in private configuration, never logs,
 command-line arguments or release artifacts. There is no protocol fallback.
 
 For each landing, back up controller/node state and the installed programs first.
-Hold the existing node-directory lease by stopping the entry management loop;
-do not independently restart its Xray. Run `prepare-private-transport --config
-<owned-bootstrap>` for each participating entry. Preparation removes its owned
+Keep the entry management loop running; do not stop it or independently restart
+its Xray. Run `prepare-private-transport --config <owned-bootstrap>` for each
+participating entry. The command uses the manager's root-only local maintenance
+socket. The manager retains its directory lease and independent health monitors,
+while serializing maintenance against normal configuration reconciliation.
+Preparation removes its owned
 proxy listeners, requires established sockets to drain, installs an exact
 temporary client-ingress exclusion, samples the same process, saves the private
 checkpoint, obtains controller accounting acknowledgement, and only then stops
@@ -30,6 +33,17 @@ activation, keeps ingress excluded through failure recovery and accounting
 acknowledgement, and archives the checkpoint before normal management resumes.
 Verify the landing, the public subscription and actual double-hop traffic before
 moving to the next landing. The temporary exclusion never permits new ingress.
+
+Probe target maintenance uses this same natural-drain checkpoint, not ordinary
+re-enrollment or a live firewall-gate reload. Submit `/v1/admin/probe-targets`
+with the exact entry revision/hash, sealed final sample and changed landing-to-
+HTTPS-target map; then complete and reverify the entry. Quotas, raw counters,
+forwarded counters and the original accounting policy remain retained.
+
+After a manager crash only, explicit `--offline-recovery` permits completion or
+cancellation under the exclusive directory lease. It never permits preparation.
+Do not stop an older manager to imitate the live maintenance path: upgrading
+such a manager first requires separately verified non-disruptive drainage.
 
 If preparation expires before the paired commit, use `cancel-private-transport
 --config <owned-bootstrap>`. An expired sample can cancel its already-accounted

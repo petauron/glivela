@@ -77,7 +77,7 @@ func (q *EntryQuota) validate() error {
 	}
 	if q.TransportOrigin != nil {
 		origin := q.TransportOrigin.clone()
-		if origin.Validate() != nil || origin.Entry == nil || origin.Revision > q.Base.Revision || len(origin.Entry.Peers) != len(q.Base.Entry.Peers) || !reflect.DeepEqual(origin.EntryNetwork, q.Base.EntryNetwork) {
+		if origin.Validate() != nil || origin.Entry == nil || origin.Revision > q.Base.Revision || len(origin.Entry.Peers) != len(q.Base.Entry.Peers) || !sameProbeNetworkIdentity(origin.EntryNetwork, q.Base.EntryNetwork) {
 			return invalid
 		}
 		origin.Entry.Revision = q.Base.Entry.Revision
@@ -155,7 +155,7 @@ func advanceEntryQuotaWithTransportRecovery(current *EntryQuota, desired Desired
 		q.NextResetAt = monthlyReset(last.Year(), last.Month()+1, q.ResetDay, location)
 	}
 	verified := receipt != nil && glivela.VerifyAppliedReceipt(desired.DesiredArtifact, receipt.AppliedReceipt) == nil
-	if !verified && receipt != nil && previous != nil && transportOnlyEntryChange(*previous, desired) {
+	if !verified && receipt != nil && previous != nil && (transportOnlyEntryChange(*previous, desired) || probeOnlyEntryChange(*previous, desired)) {
 		verified = glivela.VerifyAppliedReceipt(previous.DesiredArtifact, receipt.AppliedReceipt) == nil
 	}
 	if receipt != nil && receipt.Traffic != nil && verified {
