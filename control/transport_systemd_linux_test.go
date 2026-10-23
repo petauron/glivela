@@ -172,9 +172,7 @@ func TestInstalledTransportFailureRecovery(t *testing.T) {
 	client := &Client{endpoint: server.URL, http: server.Client()}
 	prepare := func() TransportTail {
 		t.Helper()
-		if err := driver.Close(ctx); err != nil {
-			t.Fatal("pause node monitors", err)
-		}
+		// Keep the live manager's health monitor group running during drainage.
 		t.Log("preparing installed generation")
 		tail, err := r.PrepareTransportTail(ctx)
 		if err != nil {
