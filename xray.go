@@ -139,7 +139,7 @@ func (e RealityEndpoint) validateSubscription() error {
 }
 
 type RoutePeer struct {
-	Transport  PrivateTransport `json:"transport,omitempty"`
+	Transport  PrivateTransport `json:"transport,omitzero"`
 	EgressID   string           `json:"egressId"`
 	Address    string           `json:"address"`
 	Port       int              `json:"port"`

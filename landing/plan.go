@@ -24,7 +24,7 @@ type Source struct {
 // the external address seen by a website. No automatic source selection is
 // performed while migrating an existing landing.
 type Plan struct {
-	Transport glivela.PrivateTransport `json:"transport,omitempty"`
+	Transport glivela.PrivateTransport `json:"transport,omitzero"`
 	Revision  uint64                   `json:"revision"`
 	Address   string                   `json:"address"`
 	EgressIP  string                   `json:"egressIp"`

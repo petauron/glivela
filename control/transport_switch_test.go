@@ -2,13 +2,31 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
+
+func TestEmptyTransportRetainsOriginalSerializedPolicy(t *testing.T) {
+	transport := glivela.PrivateTransport{Protocol: "ss2022", Key: "AAECAwQFBgcICQoLDA0ODw=="}
+	for _, value := range []any{glivela.RoutePeer{}, landing.Plan{}, RouteProbe{}} {
+		raw, err := json.Marshal(value)
+		if err != nil || strings.Contains(string(raw), `"transport"`) {
+			t.Fatalf("empty transport changed retained policy: %T", value)
+		}
+	}
+	for _, value := range []any{glivela.RoutePeer{Transport: transport}, landing.Plan{Transport: transport}, RouteProbe{Transport: transport}} {
+		raw, err := json.Marshal(value)
+		if err != nil || !strings.Contains(string(raw), `"transport":{"protocol":"ss2022","key":`) {
+			t.Fatalf("nonempty transport lost: %T", value)
+		}
+	}
+}
 
 func TestPrivateTransportSwitchPreservesRetainedTraffic(t *testing.T) {
 	s := store(t)
