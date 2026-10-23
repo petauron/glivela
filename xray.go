@@ -139,16 +139,17 @@ func (e RealityEndpoint) validateSubscription() error {
 }
 
 type RoutePeer struct {
-	EgressID   string       `json:"egressId"`
-	Address    string       `json:"address"`
-	Port       int          `json:"port"`
-	ExitFamily EgressPolicy `json:"exitFamily,omitempty"`
-	Ready      bool         `json:"ready,omitempty"`
+	Transport  PrivateTransport `json:"transport,omitempty"`
+	EgressID   string           `json:"egressId"`
+	Address    string           `json:"address"`
+	Port       int              `json:"port"`
+	ExitFamily EgressPolicy     `json:"exitFamily,omitempty"`
+	Ready      bool             `json:"ready,omitempty"`
 }
 
 func (p RoutePeer) Validate() error {
 	address, err := netip.ParseAddr(p.Address)
-	if !ValidIdentifier(p.EgressID) || err != nil || !privateServiceIPv4(address) || !validPort(p.Port) {
+	if !ValidIdentifier(p.EgressID) || err != nil || !privateServiceIPv4(address) || !validPort(p.Port) || p.Transport.Validate() != nil {
 		return errors.New("glivela: invalid route peer")
 	}
 	return nil
@@ -254,18 +255,14 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 	for _, grant := range projection.grants {
 		peer := projection.peers[grant.EgressID]
 		tag := routeOutboundTag(grant.ID)
-		outbound := map[string]any{
-			"protocol": "socks", "tag": tag,
-			"settings": map[string]any{"servers": []any{map[string]any{"address": peer.Address, "port": peer.Port}}},
-		}
+		outbound := peer.outbound(tag)
 		if grant.IPv4EgressID != "" {
 			composite = true
 			outbound["targetStrategy"] = "ForceIPv6"
 			ipv4 := projection.peers[grant.IPv4EgressID]
-			outbounds = append(outbounds, outbound, map[string]any{
-				"protocol": "socks", "tag": tag + "-ipv4", "targetStrategy": "ForceIPv4",
-				"settings": map[string]any{"servers": []any{map[string]any{"address": ipv4.Address, "port": ipv4.Port}}},
-			})
+			fallback := ipv4.outbound(tag + "-ipv4")
+			fallback["targetStrategy"] = "ForceIPv4"
+			outbounds = append(outbounds, outbound, fallback)
 			rules = append(rules, compositeXrayRules(grant)...)
 			continue
 		}

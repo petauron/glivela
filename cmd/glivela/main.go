@@ -47,6 +47,27 @@ type configuration struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "cancel-private-transport" {
+		if err := transportCommand(context.Background(), os.Args[2:], os.Stdout, "cancel"); err != nil {
+			log.Print("Glivela transport cancellation not confirmed; retain checkpoint")
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "complete-private-transport" {
+		if err := transportCommand(context.Background(), os.Args[2:], os.Stdout, "complete"); err != nil {
+			log.Print("Glivela transport completion failed; retain checkpoint for recovery")
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "prepare-private-transport" {
+		if err := prepareTransportCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela transport preparation not completed; retain checkpoint and original configuration")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "complete-legacy-landing" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -323,7 +344,7 @@ func run(ctx context.Context, path string) error {
 		}
 		nodeRunner := control.NodeRunner{Client: client, Runtime: nodeRuntime}
 		if cfg.Xray.Role == "entry" {
-			return runEntryReconcilers(ctx, nodeRunner, control.RouteRunner{Client: client})
+			return runEntryReconcilers(ctx, nodeRunner, control.RouteRunner{Client: client, CoreBinary: cfg.Xray.Binary, CoreSHA256: cfg.Xray.BinarySHA256})
 		}
 		return nodeRunner.Run(ctx, 10*time.Second, func(err error) {
 			if err != nil {

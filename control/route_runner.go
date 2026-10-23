@@ -14,8 +14,10 @@ type RouteClient interface {
 // Fetch before every check: if the previous report committed but its response
 // was lost, the completed attempt is no longer offered and is not rerun.
 type RouteRunner struct {
-	Client RouteClient
-	probe  func(context.Context, RouteProbe) (RouteProbeResult, error)
+	Client     RouteClient
+	CoreBinary string
+	CoreSHA256 string
+	probe      func(context.Context, RouteProbe) (RouteProbeResult, error)
 }
 
 func (r RouteRunner) Step(ctx context.Context) error {
@@ -36,7 +38,9 @@ func (r RouteRunner) Step(ctx context.Context) error {
 	}
 	probe := r.probe
 	if probe == nil {
-		probe = CheckRoute
+		probe = func(ctx context.Context, p RouteProbe) (RouteProbeResult, error) {
+			return ProbeWithCore(ctx, p, r.CoreBinary, r.CoreSHA256)
+		}
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	result, probeErr := probe(checkCtx, p)

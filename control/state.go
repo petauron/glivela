@@ -17,6 +17,9 @@ import (
 )
 
 type Node struct {
+	// Execution configuration only: never a quota or accounting rollback.
+	TransportPrevious    *Desired              `json:"transportPrevious,omitempty"`
+	TransportTail        *TransportTail        `json:"transportTail,omitempty"`
 	PublicationSuspended bool                  `json:"publicationSuspended,omitempty"`
 	AvailabilityRevision uint64                `json:"availabilityRevision,omitempty"`
 	EntryQuota           *EntryQuota           `json:"entryQuota,omitempty"`
@@ -79,6 +82,12 @@ func OpenStore(path string) (*Store, error) {
 	}
 	seen := map[string]bool{}
 	for _, node := range nodes {
+		if node.TransportPrevious != nil && (node.TransportPrevious.Validate() != nil || node.TransportPrevious.Revision >= node.Desired.Revision || (node.TransportPrevious.Entry == nil) != (node.Desired.Entry == nil)) {
+			return nil, errors.New("control: invalid previous transport configuration")
+		}
+		if node.TransportTail != nil && validateTransportTail(node, node.TransportTail) != nil {
+			return nil, errors.New("control: invalid private transport checkpoint")
+		}
 		if node.AvailabilityRevision > s.availability.Revision {
 			return nil, errors.New("control: availability state missing or rolled back")
 		}
@@ -216,6 +225,9 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 	node, ok := s.nodes[certificate]
 	if !ok {
 		return Desired{}, errors.New("control: not enrolled")
+	}
+	if node.TransportTail != nil {
+		return Desired{}, errors.New("control: private transport maintenance requires explicit completion")
 	}
 	if err := s.observeBusinessTrafficLocked(node, receipt, time.Now().UTC()); err != nil {
 		return Desired{}, err

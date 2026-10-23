@@ -125,7 +125,7 @@ func (d *EntryDriver) startMonitors(desired Desired, gates []*landing.TrafficGat
 	return d.monitors.start(desired, gates, d.Container.ApplicationID, d.readyProcess, d.stopOwned, d.links)
 }
 
-func (m *entryMonitors) start(desired Desired, gates []*landing.TrafficGate, entryID string, ready, stop func(context.Context, Desired) error, links func() *landing.LinkChecker) error {
+func (m *entryMonitors) start(desired Desired, gates []*landing.TrafficGate, entryID string, ready, stop func(context.Context, Desired) error, links func() *landing.LinkChecker, coreProbe ...func(context.Context, RouteProbe) (RouteProbeResult, error)) error {
 	if len(desired.EntryNetwork.Peers) == 0 {
 		return nil
 	}
@@ -166,7 +166,16 @@ func (m *entryMonitors) start(desired Desired, gates []*landing.TrafficGate, ent
 					return result, err
 				}
 				probe := RouteProbe{AttemptID: "entry-monitor", SnapshotID: desired.ConfigSHA256, EntryID: entryID, LandingID: peer.EgressID, Revision: revision, ConfigSHA256: desired.ConfigSHA256, SOCKSAddress: net.JoinHostPort(identity.Address, "1080"), Target: peer.Target, ExpectedExit: peer.ExpectedExit}
-				observed, err := CheckRoute(check, probe)
+				for _, route := range desired.Entry.Peers {
+					if route.EgressID == peer.EgressID {
+						probe.Transport = route.Transport
+					}
+				}
+				checkRoute := CheckRoute
+				if len(coreProbe) == 1 {
+					checkRoute = coreProbe[0]
+				}
+				observed, err := checkRoute(check, probe)
 				probeErr := err
 				var network *landing.NetworkFailure
 				if err != nil && !errors.As(err, &network) {

@@ -22,15 +22,16 @@ import (
 // The controlled HTTPS target must return its observed source IP as plain text.
 // It is not a command execution request or an arbitrary HTTP forwarding API.
 type RouteProbe struct {
-	AttemptID    string `json:"attemptId"`
-	SnapshotID   string `json:"snapshotId"`
-	EntryID      string `json:"entryId"`
-	LandingID    string `json:"landingId"`
-	Revision     uint64 `json:"revision"`
-	ConfigSHA256 string `json:"configSha256"`
-	SOCKSAddress string `json:"socksAddress"`
-	Target       string `json:"target"`
-	ExpectedExit string `json:"expectedExit"`
+	Transport    glivela.PrivateTransport `json:"transport,omitempty"`
+	AttemptID    string                   `json:"attemptId"`
+	SnapshotID   string                   `json:"snapshotId"`
+	EntryID      string                   `json:"entryId"`
+	LandingID    string                   `json:"landingId"`
+	Revision     uint64                   `json:"revision"`
+	ConfigSHA256 string                   `json:"configSha256"`
+	SOCKSAddress string                   `json:"socksAddress"`
+	Target       string                   `json:"target"`
+	ExpectedExit string                   `json:"expectedExit"`
 }
 
 type RouteProbeResult struct {
@@ -50,7 +51,7 @@ type RouteProbeResult struct {
 }
 
 func (p RouteProbe) Validate() error {
-	if !glivela.ValidIdentifier(p.AttemptID) || !glivela.ValidIdentifier(p.SnapshotID) || !glivela.ValidIdentifier(p.EntryID) || !glivela.ValidIdentifier(p.LandingID) || p.Revision == 0 || !glivela.ValidIdentity(p.ConfigSHA256) {
+	if !glivela.ValidIdentifier(p.AttemptID) || !glivela.ValidIdentifier(p.SnapshotID) || !glivela.ValidIdentifier(p.EntryID) || !glivela.ValidIdentifier(p.LandingID) || p.Revision == 0 || !glivela.ValidIdentity(p.ConfigSHA256) || p.Transport.Validate() != nil {
 		return errors.New("control: route check identity required")
 	}
 	proxy, err := netip.ParseAddrPort(p.SOCKSAddress)
@@ -89,13 +90,20 @@ func CheckRoute(ctx context.Context, p RouteProbe) (RouteProbeResult, error) {
 }
 
 func checkRoute(ctx context.Context, p RouteProbe, roots *x509.CertPool) (result RouteProbeResult, err error) {
+	if p.Transport.Protocol != "" {
+		return result, errors.New("control: encrypted route requires verified core probe")
+	}
+	return checkRouteProxy(ctx, p, roots, &url.URL{Scheme: "socks5", Host: p.SOCKSAddress})
+}
+
+func checkRouteProxy(ctx context.Context, p RouteProbe, roots *x509.CertPool, proxy *url.URL) (result RouteProbeResult, err error) {
 	if err := p.Validate(); err != nil {
 		return result, err
 	}
 	start := time.Now()
 	result = RouteProbeResult{AttemptID: p.AttemptID, SnapshotID: p.SnapshotID, EntryID: p.EntryID, LandingID: p.LandingID, Revision: p.Revision, ConfigSHA256: p.ConfigSHA256, CheckedAt: start.UTC()}
 	defer func() { result.DurationMillis = time.Since(start).Milliseconds() }()
-	transport := &http.Transport{Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: p.SOCKSAddress}),
+	transport := &http.Transport{Proxy: http.ProxyURL(proxy),
 		DialContext:     (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}, TLSHandshakeTimeout: 5 * time.Second,
 		ResponseHeaderTimeout: 5 * time.Second, DisableKeepAlives: true}

@@ -59,6 +59,7 @@ jobs:
         run: |
           go test -c -o "$RUNNER_TEMP/glivela-entry-auth.test" ./control
           sudo env GLIVELA_ENTRY_AUTH_TEST=1 GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net --mount --propagation private "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestRenderedEntryAccountAuthentication$' -test.v -test.timeout 100s
+          sudo env GLIVELA_TEST_XRAY="$RUNNER_TEMP/native-runtime/xray" GLIVELA_TEST_TRANSPORT_FENCE=1 unshare --net sh -c 'ip link set lo up; exec "$1" -test.run "^TestSS2022ProbeWithOfficialCore$" -test.v -test.timeout 45s' sh "$RUNNER_TEMP/glivela-entry-auth.test"
   selection-runtime:
     name: Reviewed target-selection runtime
     runs-on: ubuntu-24.04

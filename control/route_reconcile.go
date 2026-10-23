@@ -65,6 +65,7 @@ func reconcileOwnedRouteChecks(nodes map[string]Node, business *businessState, n
 				break
 			}
 			request := RouteProbe{SnapshotID: snapshot, EntryID: id, LandingID: node.ID, Revision: node.Desired.Revision, ConfigSHA256: node.Desired.ConfigSHA256, SOCKSAddress: net.JoinHostPort(node.Desired.Landing.Address, strconv.Itoa(landing.SOCKSPort)), Target: peer.Target, ExpectedExit: peer.ExpectedExit}
+			request.Transport = node.Desired.Landing.Transport
 			old, exists := node.Checks[id]
 			request.AttemptID = old.Request.AttemptID
 			reuse := exists && old.CertificateID == authorized.CertificateID && reflect.DeepEqual(old.Request, request) && !old.IssuedAt.After(now)

@@ -194,6 +194,9 @@ func replacePrivate(directory, name string, contents []byte) error {
 func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.verifyTransportMaintenance(ctx); err != nil {
+		return err
+	}
 	if desired.Validate() != nil {
 		return errors.New("control: invalid runtime artifact")
 	}
@@ -291,6 +294,9 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 }
 
 func (r *NativeRuntime) restore(ctx context.Context, state runtimeJournal) error {
+	if err := r.verifyTransportMaintenance(ctx); err != nil {
+		return err
+	}
 	if state.Candidate == nil {
 		return errors.New("control: missing recovery candidate")
 	}
@@ -355,6 +361,11 @@ func (r *NativeRuntime) backup(a Desired) error {
 // configuration after an interrupted switch; it never upgrades from a partial
 // journal or marks an unchecked candidate successful.
 func (r *NativeRuntime) Recover(ctx context.Context) error {
+	if _, err := os.Lstat(filepath.Join(r.Directory, "transport-prepared.json")); err == nil {
+		return errors.New("control: sealed transport preparation requires explicit completion or recovery")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Retirement must fence legacy recovery too, before it can operate services.

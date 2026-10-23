@@ -1,5 +1,48 @@
 # Version releases
 
+## Private landing SS2022 cutover
+
+Only the private entry-to-landing transport changes. Keep listener addresses,
+ports, source policies, resolver configuration, public exits, account identities,
+subscriptions and the existing cumulative ledger. SS2022 uses the bundled core
+and `2022-blake3-aes-128-gcm`; keys remain in private configuration, never logs,
+command-line arguments or release artifacts. There is no protocol fallback.
+
+For each landing, back up controller/node state and the installed programs first.
+Hold the existing node-directory lease by stopping the entry management loop;
+do not independently restart its Xray. Run `prepare-private-transport --config
+<owned-bootstrap>` for each participating entry. Preparation removes its owned
+proxy listeners, requires established sockets to drain, installs an exact
+temporary client-ingress exclusion, samples the same process, saves the private
+checkpoint, obtains controller accounting acknowledgement, and only then stops
+the worker. Neither a quiet counter interval nor a periodic report proves drainage.
+
+The administrator's private transport transaction must include every participating
+entry and the landing's exact revision/hash. Final samples older than one minute
+are rejected. Explicitly deferred sources remain deferred, not marked tested.
+After the paired desired-state transaction, use `complete-private-transport
+--config <owned-bootstrap>` on each entry. The node rechecks freshness before
+activation, keeps ingress excluded through failure recovery and accounting
+acknowledgement, and archives the checkpoint before normal management resumes.
+Verify the landing, the public subscription and actual double-hop traffic before
+moving to the next landing. The temporary exclusion never permits new ingress.
+
+If preparation expires before the paired commit, use `cancel-private-transport
+--config <owned-bootstrap>`. An expired sample can cancel its already-accounted
+preparation, but cannot authorize a switch. Lost acknowledgements do not justify
+resetting counters: an unacknowledged original process is retained and its
+listeners restored in that same generation. Controller acknowledgement of the
+restored worker is required before client ingress is restored.
+
+After a paired commit, recovery is a new monotonic transaction using retained
+execution configuration and fresh final samples, never a database restore. Keep
+the failed checkpoint and ingress exclusion. Collect actual counters again from
+any restored old generation; never relabel an expired sample with a new timestamp.
+Use the recovery transaction only for the retained transport. Every completed
+entry that has resumed traffic must be prepared again before reversing the pair.
+Do not remove checkpoints, force old revisions, fabricate health, relax ownership
+checks or clear accounting to unblock a failed operation.
+
 ## Preserving an existing local resolver
 
 New native entries permit only TCP/UDP destination port 53 to nameservers read

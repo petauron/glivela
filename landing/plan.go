@@ -24,10 +24,11 @@ type Source struct {
 // the external address seen by a website. No automatic source selection is
 // performed while migrating an existing landing.
 type Plan struct {
-	Revision uint64   `json:"revision"`
-	Address  string   `json:"address"`
-	EgressIP string   `json:"egressIp"`
-	Sources  []Source `json:"sources"`
+	Transport glivela.PrivateTransport `json:"transport,omitempty"`
+	Revision  uint64                   `json:"revision"`
+	Address   string                   `json:"address"`
+	EgressIP  string                   `json:"egressIp"`
+	Sources   []Source                 `json:"sources"`
 }
 
 func tailnetIPv4(value string) bool {
@@ -36,7 +37,7 @@ func tailnetIPv4(value string) bool {
 }
 
 func (p Plan) Validate() error {
-	if p.Revision == 0 || !tailnetIPv4(p.Address) || !ValidEgressIP(p.EgressIP) || len(p.Sources) > 128 {
+	if p.Revision == 0 || !tailnetIPv4(p.Address) || !ValidEgressIP(p.EgressIP) || len(p.Sources) > 128 || p.Transport.Validate() != nil {
 		return errors.New("landing: invalid plan")
 	}
 	egress, _ := netip.ParseAddr(p.EgressIP)
@@ -88,10 +89,19 @@ func (p Plan) Render() ([]byte, error) {
 		}
 		rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{"landing"}, "source": []string{source.Address + "/32"}, "network": network, "outboundTag": "egress"})
 	}
+	inbound := map[string]any{"tag": "landing", "listen": p.Address, "port": SOCKSPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": udp, "ip": p.Address}}
+	if p.Transport.Protocol == "ss2022" {
+		network := "tcp"
+		if udp {
+			network = "tcp,udp"
+		}
+		inbound["protocol"] = "shadowsocks"
+		inbound["settings"] = map[string]any{"method": glivela.SS2022Method, "password": p.Transport.Key, "network": network}
+	}
 	value := map[string]any{
 		"log":      map[string]any{"loglevel": "warning"},
 		"dns":      map[string]any{"tag": "resolver", "servers": []string{"1.1.1.1", "1.0.0.1"}, "queryStrategy": strategy},
-		"inbounds": []any{map[string]any{"tag": "landing", "listen": p.Address, "port": SOCKSPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": udp, "ip": p.Address}}},
+		"inbounds": []any{inbound},
 		// A miss is blocked, including an unrecognized source or UDP grant.
 		"outbounds": []any{map[string]any{"tag": "deny", "protocol": "blackhole"}, map[string]any{"tag": "egress", "protocol": "freedom", "sendThrough": p.EgressIP, "settings": map[string]any{"domainStrategy": strategy}}, map[string]any{"tag": "resolver", "protocol": "freedom", "settings": map[string]any{"domainStrategy": "AsIs"}}},
 		"routing":   map[string]any{"domainStrategy": "IPOnDemand", "rules": rules},
