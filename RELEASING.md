@@ -16,6 +16,10 @@ proxy listeners, requires established sockets to drain, installs an exact
 temporary client-ingress exclusion, samples the same process, saves the private
 checkpoint, obtains controller accounting acknowledgement, and only then stops
 the worker. Neither a quiet counter interval nor a periodic report proves drainage.
+Preparation permits up to six minutes for natural drainage, including the bundled
+core's five-minute idle DoH connection lifetime. No sockets are force-closed.
+This pre-sample wait does not extend the one-minute final-sample validity window;
+an interrupted or expired preparation restores the original listeners.
 
 The administrator's private transport transaction must include every participating
 entry and the landing's exact revision/hash. Final samples older than one minute
