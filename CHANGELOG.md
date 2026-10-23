@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.44](https://github.com/petauron/glivela/compare/v0.1.0-alpha.43...v0.1.0-alpha.44) (2026-10-23)
+
+
+### Bug Fixes
+
+* preserve accounting during drained probe target updates ([#100](https://github.com/petauron/glivela/issues/100)) ([ce36d39](https://github.com/petauron/glivela/commit/ce36d39191b7067a3a07647e51f9b1a4c22cb344))
+
 ## [0.1.0-alpha.43](https://github.com/petauron/glivela/compare/v0.1.0-alpha.42...v0.1.0-alpha.43) (2026-10-23)
 
 
