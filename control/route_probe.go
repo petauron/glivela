@@ -22,7 +22,7 @@ import (
 // The controlled HTTPS target must return its observed source IP as plain text.
 // It is not a command execution request or an arbitrary HTTP forwarding API.
 type RouteProbe struct {
-	Transport    glivela.PrivateTransport `json:"transport,omitempty"`
+	Transport    glivela.PrivateTransport `json:"transport,omitzero"`
 	AttemptID    string                   `json:"attemptId"`
 	SnapshotID   string                   `json:"snapshotId"`
 	EntryID      string                   `json:"entryId"`
