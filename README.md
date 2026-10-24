@@ -1,5 +1,10 @@
 # Petauron Glivela
 
+For native entry-to-landing public SS2022, see the
+[public data-path cutover procedure](RELEASING.md#public-ss2022-data-path).
+Management identities remain on the private network; public listeners accept
+only explicitly assigned source addresses and retain the existing egress policy.
+
 ## Landing ownership migration (#54, in progress)
 
 For per-node retained cutover acceptance and old-writer retirement, follow

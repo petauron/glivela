@@ -226,7 +226,11 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 	if err != nil || worker.Uid != strconv.FormatUint(uint64(d.WorkerUID), 10) {
 		return landing.ServerFirewall{}, errors.New("control: dedicated worker identity differs")
 	}
-	iface, err := net.InterfaceByName(d.Interface)
+	ifaceName, err := d.landingInterface(*desired.Landing)
+	if err != nil {
+		return landing.ServerFirewall{}, err
+	}
+	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return landing.ServerFirewall{}, errors.New("control: private interface unavailable")
 	}
@@ -243,14 +247,54 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 		}
 		return false
 	}
-	if !assigned(addresses, desired.Landing.Address) {
+	if !assigned(addresses, desired.Landing.Transport.Endpoint(desired.Landing.Address)) {
 		return landing.ServerFirewall{}, errors.New("control: landing listener is not on private interface")
 	}
 	all, err := net.InterfaceAddrs()
 	if err != nil || !assigned(all, desired.Landing.EgressIP) {
 		return landing.ServerFirewall{}, errors.New("control: egress source is not locally assigned")
 	}
-	return desired.Landing.Firewall(d.WorkerUID, d.Interface)
+	return desired.Landing.Firewall(d.WorkerUID, ifaceName)
+}
+
+// Public listeners bind an exact locally assigned IPv4 address. Discover its
+// actual interface rather than changing the retained management interface.
+func (d SystemdDriver) landingInterface(plan landing.Plan) (string, error) {
+	if plan.Transport.PublicAddress == "" {
+		return d.Interface, nil
+	}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+	found := ""
+	for _, iface := range interfaces {
+		addresses, err := iface.Addrs()
+		if err != nil {
+			return "", err
+		}
+		for _, address := range addresses {
+			prefix, err := netip.ParsePrefix(address.String())
+			if err == nil && prefix.Addr().String() == plan.Transport.PublicAddress {
+				if found != "" || iface.Flags&net.FlagUp == 0 {
+					return "", errors.New("control: public listener interface is ambiguous or down")
+				}
+				found = iface.Name
+			}
+		}
+	}
+	if found == "" {
+		return "", errors.New("control: public listener is not locally assigned")
+	}
+	return found, nil
+}
+
+func (d SystemdDriver) landingFirewall(plan landing.Plan) (landing.ServerFirewall, error) {
+	iface, err := d.landingInterface(plan)
+	if err != nil {
+		return landing.ServerFirewall{}, err
+	}
+	return plan.Firewall(d.WorkerUID, iface)
 }
 
 func (d SystemdDriver) Activate(ctx context.Context, desired Desired, previous *Desired) error {
@@ -270,7 +314,7 @@ func (d SystemdDriver) Activate(ctx context.Context, desired Desired, previous *
 		return err
 	}
 	if previous != nil && previous.Revision != desired.Revision {
-		old, err := previous.Landing.Firewall(d.WorkerUID, d.Interface)
+		old, err := d.landingFirewall(*previous.Landing)
 		if err != nil {
 			return err
 		}
@@ -304,7 +348,7 @@ func (d SystemdDriver) Stop(ctx context.Context, desired Desired) error {
 	if err := d.stopOwned(ctx); err != nil {
 		return err
 	}
-	policy, err := desired.Landing.Firewall(d.WorkerUID, d.Interface)
+	policy, err := d.landingFirewall(*desired.Landing)
 	if err != nil {
 		return err
 	}
@@ -342,7 +386,7 @@ func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 	if err := policy.Verify(ctx); err != nil {
 		return err
 	}
-	return verifyOwnedListener(desired.Landing.Address, landing.SOCKSPort, d.WorkerUID)
+	return verifyOwnedListener(desired.Landing.Transport.Endpoint(desired.Landing.Address), landing.SOCKSPort, d.WorkerUID)
 }
 
 func probeSOCKSTLS(ctx context.Context, socksAddress, probeURL string, roots *x509.CertPool) error {

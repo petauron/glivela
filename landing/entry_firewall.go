@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	glivela "github.com/petauron/glivela"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -42,7 +43,7 @@ func (p EntryFirewall) validate() error {
 	}
 	seen = map[string]bool{}
 	for _, address := range p.Peers {
-		if !tailnetIPv4(address) || seen[address] {
+		if !(tailnetIPv4(address) || glivela.PublicTransportIPv4(address)) || seen[address] {
 			return errors.New("landing: invalid native entry peer")
 		}
 		seen[address] = true
@@ -95,7 +96,11 @@ func (p EntryFirewall) objects() []map[string]nftObject {
 	for _, address := range peers {
 		rule("destinations", match(payload("ip", "daddr"), address), match(payload("tcp", "dport"), SOCKSPort), nftObject{"return": nil})
 		// The landing independently retains its source-specific UDP policy.
-		rule("destinations", match(payload("ip", "daddr"), address), match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"), nftObject{"return": nil})
+		if glivela.PublicTransportIPv4(address) {
+			rule("destinations", match(payload("ip", "daddr"), address), match(payload("udp", "dport"), SOCKSPort), nftObject{"return": nil})
+		} else {
+			rule("destinations", match(payload("ip", "daddr"), address), match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"), nftObject{"return": nil})
+		}
 	}
 	for _, cidr := range blockedIPv4 {
 		prefix := netip.MustParsePrefix(cidr)

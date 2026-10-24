@@ -149,7 +149,7 @@ type RoutePeer struct {
 
 func (p RoutePeer) Validate() error {
 	address, err := netip.ParseAddr(p.Address)
-	if !ValidIdentifier(p.EgressID) || err != nil || !privateServiceIPv4(address) || !validPort(p.Port) || p.Transport.Validate() != nil {
+	if !ValidIdentifier(p.EgressID) || err != nil || !privateServiceIPv4(address) || !validPort(p.Port) || p.Transport.Validate() != nil || p.Transport.PublicAddress != "" && p.Port != 1080 {
 		return errors.New("glivela: invalid route peer")
 	}
 	return nil

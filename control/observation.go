@@ -66,9 +66,15 @@ func validateEntryHealth(desired Desired, health *EntryHealthReport) error {
 				return invalid
 			}
 		case "healthy", "degraded":
-			ready := status.State == "healthy" && status.Stage == "complete" && status.Reason == "direct_and_business_ready" && status.ConsecutiveFailures == 0
+			reason, link := "direct_and_business_ready", "direct"
+			for _, route := range desired.Entry.Peers {
+				if route.EgressID == peer.EgressID && route.Transport.PublicAddress != "" {
+					reason, link = "public_ss2022_and_business_ready", "authenticated"
+				}
+			}
+			ready := status.State == "healthy" && status.Stage == "complete" && status.Reason == reason && status.ConsecutiveFailures == 0
 			grace := status.State == "degraded" && status.Reason == "network_failure_grace" && status.ConsecutiveFailures > 0 && status.ConsecutiveFailures < landing.FailureThreshold && status.ConsecutiveSuccesses == 0
-			if (!ready && !grace) || status.LinkState != "direct" || !status.TCP || status.UDP || status.ExitIP != peer.ExpectedExit ||
+			if (!ready && !grace) || status.LinkState != link || !status.TCP || status.UDP || status.ExitIP != peer.ExpectedExit ||
 				status.StartedAt.IsZero() || status.CheckedAt.Before(status.StartedAt) || status.CheckedAt.Sub(status.StartedAt) > landing.AllowLifetime ||
 				status.LastHealthyAt.IsZero() || status.LastHealthyAt.After(status.CheckedAt) || status.CheckedAt.Sub(status.LastHealthyAt) >= landing.BusinessLifetime ||
 				status.SecurityCheckedAt.Before(status.StartedAt) || status.SecurityCheckedAt.After(status.CheckedAt) ||

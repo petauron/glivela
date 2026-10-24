@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	glivela "github.com/petauron/glivela"
 	"strings"
 )
 
@@ -14,7 +15,7 @@ import (
 // not a packet routing mark.
 const hostGateConnectionMark = 0x474c5650
 
-func NewHostGate(peer PeerIdentity, gid uint32, revision uint64) (*TrafficGate, error) {
+func NewHostGate(peer PeerIdentity, gid uint32, revision uint64, publicAddress ...string) (*TrafficGate, error) {
 	if peer.Validate() != nil || gid == 0 || gid == 65534 || revision == 0 {
 		return nil, errors.New("landing: invalid host gate identity")
 	}
@@ -23,8 +24,21 @@ func NewHostGate(peer PeerIdentity, gid uint32, revision uint64) (*TrafficGate, 
 		GID      uint32
 		Revision uint64
 	}{peer, gid, revision})
+	endpoint := ""
+	if len(publicAddress) > 1 {
+		return nil, errors.New("landing: ambiguous public endpoint")
+	}
+	if len(publicAddress) == 1 {
+		endpoint = publicAddress[0]
+	}
+	if endpoint != "" {
+		if !glivela.PublicTransportIPv4(endpoint) {
+			return nil, errors.New("landing: invalid public endpoint")
+		}
+		identity = append(identity, []byte("\npublic:"+endpoint)...)
+	}
 	hash := sha256.Sum256(identity)
-	return &TrafficGate{peer: peer, gid: gid, revision: revision,
+	return &TrafficGate{peer: peer, publicAddress: endpoint, gid: gid, revision: revision,
 		table:  "glivela_entry_peer_host_" + hex.EncodeToString(hash[:12]),
 		marker: "glivela-entry-peer-host-v1:" + hex.EncodeToString(hash[:]), run: runNFT}, nil
 }
@@ -75,11 +89,14 @@ func (g *TrafficGate) hostObjects() []map[string]nftObject {
 		objects = append(objects, map[string]nftObject{"rule": {"family": "inet", "table": g.table, "chain": chain, "expr": expr}})
 	}
 	for _, protocol := range []string{"tcp", "udp"} {
-		outbound := []any{match(nftObject{"meta": nftObject{"key": "skgid"}}, g.gid), match(payload("ip", "daddr"), g.peer.Address)}
-		inbound := []any{match(ctMark, hostGateConnectionMark), match(payload("ip", "saddr"), g.peer.Address)}
+		outbound := []any{match(nftObject{"meta": nftObject{"key": "skgid"}}, g.gid), match(payload("ip", "daddr"), g.endpoint())}
+		inbound := []any{match(ctMark, hostGateConnectionMark), match(payload("ip", "saddr"), g.endpoint())}
 		if protocol == "tcp" {
 			outbound = append(outbound, match(payload("tcp", "dport"), SOCKSPort))
 			inbound = append(inbound, match(payload("tcp", "sport"), SOCKSPort))
+		} else if g.publicAddress != "" {
+			outbound = append(outbound, match(payload("udp", "dport"), SOCKSPort))
+			inbound = append(inbound, match(payload("udp", "sport"), SOCKSPort))
 		} else {
 			outbound = append(outbound, match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"))
 			inbound = append(inbound, match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"))

@@ -15,8 +15,9 @@ import (
 )
 
 type Source struct {
-	Address string `json:"address"`
-	TCPOnly bool   `json:"tcpOnly"`
+	Address       string `json:"address"`
+	TCPOnly       bool   `json:"tcpOnly"`
+	PublicAddress string `json:"publicAddress,omitempty"`
 }
 
 // Plan keeps the original exact-source private SOCKS trust boundary. Egress
@@ -42,11 +43,20 @@ func (p Plan) Validate() error {
 	}
 	egress, _ := netip.ParseAddr(p.EgressIP)
 	seen := map[string]bool{}
+	publicSources := map[string]bool{}
 	for _, source := range p.Sources {
 		if !tailnetIPv4(source.Address) || source.Address == p.Address || seen[source.Address] || egress.Is6() && !source.TCPOnly {
 			return errors.New("landing: invalid source grant")
 		}
 		seen[source.Address] = true
+		if p.Transport.PublicAddress != "" {
+			if !glivela.PublicTransportIPv4(source.PublicAddress) || source.PublicAddress == p.Transport.PublicAddress || publicSources[source.PublicAddress] {
+				return errors.New("landing: exact unique public source required")
+			}
+			publicSources[source.PublicAddress] = true
+		} else if source.PublicAddress != "" {
+			return errors.New("landing: public source without public transport")
+		}
 	}
 	return nil
 }
@@ -87,10 +97,15 @@ func (p Plan) Render() ([]byte, error) {
 			network = "tcp,udp"
 			udp = true
 		}
-		rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{"landing"}, "source": []string{source.Address + "/32"}, "network": network, "outboundTag": "egress"})
+		address := source.Address
+		if p.Transport.PublicAddress != "" {
+			address = source.PublicAddress
+		}
+		rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{"landing"}, "source": []string{address + "/32"}, "network": network, "outboundTag": "egress"})
 	}
 	inbound := map[string]any{"tag": "landing", "listen": p.Address, "port": SOCKSPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": udp, "ip": p.Address}}
 	if p.Transport.Protocol == "ss2022" {
+		inbound["listen"] = p.Transport.Endpoint(p.Address)
 		network := "tcp"
 		if udp {
 			network = "tcp,udp"
@@ -126,11 +141,15 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 	if err := p.Validate(); err != nil {
 		return ServerFirewall{}, err
 	}
-	result := ServerFirewall{Revision: p.Revision, Address: p.Address, EgressIP: p.EgressIP, UID: uid, Interface: iface}
+	result := ServerFirewall{Revision: p.Revision, Address: p.Transport.Endpoint(p.Address), EgressIP: p.EgressIP, UID: uid, Interface: iface, Public: p.Transport.PublicAddress != ""}
 	for _, source := range p.Sources {
-		result.Sources = append(result.Sources, source.Address)
+		address := source.Address
+		if result.Public {
+			address = source.PublicAddress
+		}
+		result.Sources = append(result.Sources, address)
 		if source.TCPOnly {
-			result.TCPOnlySources = append(result.TCPOnlySources, source.Address)
+			result.TCPOnlySources = append(result.TCPOnlySources, address)
 		}
 	}
 	return result, result.validate()

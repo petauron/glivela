@@ -1,5 +1,29 @@
 # Version releases
 
+## Public SS2022 data path
+
+Public data transport is opt-in and requires native entry runtimes. Keep the
+recorded tailnet addresses and certificate identities unchanged for management.
+The paired transport transaction accepts `transport.publicAddress` (one exact
+public IPv4 listener, locally assigned to the landing) and `publicSources`
+(retained private source address to verified public source IPv4). Every retained
+source must have a unique exact address; CIDRs, wildcard listeners and public
+unauthenticated SOCKS are rejected. Deferred sources are retained but not counted
+as tested. There is no private-path or alternate-exit fallback.
+
+Upgrade the controller and participating native programs before enabling this
+field. Back up each participant first. Verify actual public source routing and
+existing host/provider ingress policy; do not disable unrelated firewalls.
+Use the same final-counter preparation, one-minute expiry, paired commit and
+monotonic recovery described below. The listener uses TCP/UDP 1080 with the
+existing per-source TCP-only restriction. Keep DNS, egress source, subscription
+credentials and the unique traffic ledger unchanged. Management identity checks
+do not require Tailscale direct connectivity for public data routes; encrypted
+business probes must reach the exact assigned public endpoint and original exit.
+Verify subscription downloads, every active double-hop and unauthorized-source
+rejection before proceeding to the next landing. Recovery restores the retained
+transport and source mappings using fresh final samples, never a ledger restore.
+
 ## Private landing SS2022 cutover
 
 Only the private entry-to-landing transport changes. Keep listener addresses,

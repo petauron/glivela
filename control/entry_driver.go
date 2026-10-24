@@ -66,6 +66,11 @@ func (d *EntryDriver) plan(desired Desired) error {
 	if d.Binding() == "" || desired.Entry == nil || desired.Landing != nil || desired.Validate() != nil {
 		return errors.New("control: exact owned entry role required")
 	}
+	for _, peer := range desired.Entry.Peers {
+		if peer.Transport.PublicAddress != "" {
+			return errors.New("control: public SS2022 requires the native entry runtime")
+		}
+	}
 	id, err := entryPlanIdentity(*desired.Entry)
 	if err != nil || id != d.Container.ApplicationID {
 		return errors.New("control: entry application identity differs")

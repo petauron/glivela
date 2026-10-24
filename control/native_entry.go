@@ -50,7 +50,11 @@ func (d *NativeEntryDriver) Validate(ctx context.Context, desired Desired, confi
 func (d *NativeEntryDriver) policy(desired Desired) (landing.EntryFirewall, error) {
 	policy := landing.EntryFirewall{UID: d.WorkerUID, Revision: desired.Revision}
 	for _, peer := range desired.EntryNetwork.Peers {
-		policy.Peers = append(policy.Peers, peer.Identity.Address)
+		for _, route := range desired.Entry.Peers {
+			if route.EgressID == peer.EgressID {
+				policy.Peers = append(policy.Peers, route.Transport.Endpoint(route.Address))
+			}
+		}
 	}
 	var err error
 	policy.DNS, err = d.existingEntryDNS()
@@ -63,7 +67,13 @@ func (d *NativeEntryDriver) gates(desired Desired) ([]*landing.TrafficGate, erro
 	}
 	var gates []*landing.TrafficGate
 	for _, peer := range desired.EntryNetwork.Peers {
-		gate, err := landing.NewHostGate(peer.Identity, d.WorkerGID, desired.Revision)
+		publicAddress := ""
+		for _, route := range desired.Entry.Peers {
+			if route.EgressID == peer.EgressID {
+				publicAddress = route.Transport.PublicAddress
+			}
+		}
+		gate, err := landing.NewHostGate(peer.Identity, d.WorkerGID, desired.Revision, publicAddress)
 		if err != nil {
 			return nil, err
 		}

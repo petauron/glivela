@@ -64,7 +64,7 @@ func routeTargetsLanding(p RouteProbe, node Node) bool {
 		return false
 	}
 	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)
-	address, addressErr := netip.ParseAddr(node.Desired.Landing.Address)
+	address, addressErr := netip.ParseAddr(node.Desired.Landing.Transport.Endpoint(node.Desired.Landing.Address))
 	return err == nil && addressErr == nil && endpoint.Addr() == address && endpoint.Port() == landing.SOCKSPort &&
 		p.LandingID == node.ID && p.Revision == node.Desired.Revision && p.ConfigSHA256 == node.Desired.ConfigSHA256 && p.Transport == node.Desired.Landing.Transport
 }

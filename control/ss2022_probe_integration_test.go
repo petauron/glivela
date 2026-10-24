@@ -24,6 +24,13 @@ import (
 // Reuses an explicitly supplied official core. No download, container, public
 // listener, production credential or external HTTP endpoint is used.
 func TestSS2022ProbeWithOfficialCore(t *testing.T) {
+	t.Run("loopback", func(t *testing.T) { testSS2022ProbeWithOfficialCore(t, false) })
+	if os.Getenv("GLIVELA_TEST_TRANSPORT_FENCE") == "1" {
+		t.Run("public-endpoint", func(t *testing.T) { testSS2022ProbeWithOfficialCore(t, true) })
+	}
+}
+
+func testSS2022ProbeWithOfficialCore(t *testing.T, public bool) {
 	binary := os.Getenv("GLIVELA_TEST_XRAY")
 	if binary == "" {
 		t.Skip("official Xray not supplied")
@@ -45,8 +52,21 @@ func TestSS2022ProbeWithOfficialCore(t *testing.T) {
 	address := listener.Addr().String()
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
+	listenAddress := "127.0.0.1"
+	if public {
+		current, err := os.Readlink("/proc/self/ns/net")
+		initial, initialErr := os.Readlink("/proc/1/ns/net")
+		if err != nil || initialErr != nil || current == initial || os.Geteuid() != 0 {
+			t.Fatal("isolated namespace required for synthetic public address")
+		}
+		if err := exec.Command("ip", "address", "add", "8.8.4.4/32", "dev", "lo").Run(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = exec.Command("ip", "address", "del", "8.8.4.4/32", "dev", "lo").Run() }()
+		listenAddress, port, address = "8.8.4.4", 1080, "8.8.4.4:1080"
+	}
 	key := "AAECAwQFBgcICQoLDA0ODw=="
-	config := map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "shadowsocks", "settings": map[string]any{"method": glivela.SS2022Method, "password": key, "network": "tcp"}}}, "outbounds": []any{map[string]any{"protocol": "freedom"}}}
+	config := map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": listenAddress, "port": port, "protocol": "shadowsocks", "settings": map[string]any{"method": glivela.SS2022Method, "password": key, "network": "tcp"}}}, "outbounds": []any{map[string]any{"protocol": "freedom"}}}
 	apiListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -83,6 +103,9 @@ func TestSS2022ProbeWithOfficialCore(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	p := RouteProbe{AttemptID: "test-attempt", SnapshotID: "test-snapshot", EntryID: "test-entry", LandingID: "test-landing", Revision: 1, ConfigSHA256: strings.Repeat("a", 64), SOCKSAddress: address, Target: target.URL, ExpectedExit: "8.8.8.8", Transport: glivela.PrivateTransport{Protocol: "ss2022", Key: key}}
+	if public {
+		p.Transport.PublicAddress = listenAddress
+	}
 	result, err := probeWithCore(ctx, p, binary, digest, roots)
 	if err != nil || !result.Passed || !result.TLSVerified || result.ObservedExit != p.ExpectedExit {
 		cancel()
@@ -91,7 +114,7 @@ func TestSS2022ProbeWithOfficialCore(t *testing.T) {
 		t.Fatalf("real SS2022 probe did not pass: %+v %v", result, err)
 	}
 	if os.Getenv("GLIVELA_TEST_TRANSPORT_FENCE") == "1" {
-		fence := landing.TransportFence{Binding: "isolated-ss2022-integration", Listeners: []landing.TransportListener{{Address: "127.0.0.1", Port: port, Network: "tcp"}}}
+		fence := landing.TransportFence{Binding: "isolated-ss2022-integration", Listeners: []landing.TransportListener{{Address: listenAddress, Port: port, Network: "tcp"}}}
 		if err := fence.Install(ctx); err != nil {
 			t.Fatal(err)
 		}
