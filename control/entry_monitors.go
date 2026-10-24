@@ -169,6 +169,7 @@ func (m *entryMonitors) start(desired Desired, gates []*landing.TrafficGate, ent
 				for _, route := range desired.Entry.Peers {
 					if route.EgressID == peer.EgressID {
 						probe.Transport = route.Transport
+						probe.SOCKSAddress = net.JoinHostPort(route.Transport.Endpoint(route.Address), "1080")
 					}
 				}
 				checkRoute := CheckRoute

@@ -35,7 +35,7 @@ func probeWithCore(ctx context.Context, p RouteProbe, binary, digest string, roo
 		return failed, errors.New("control: encrypted probe prerequisites unavailable")
 	}
 	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)
-	if err != nil || !(netip.MustParsePrefix("100.64.0.0/10").Contains(endpoint.Addr()) && endpoint.Port() == 1080 || endpoint.Addr().IsLoopback()) {
+	if err != nil || !(p.Transport.PublicAddress != "" && endpoint.Addr().String() == p.Transport.PublicAddress && endpoint.Port() == 1080 || netip.MustParsePrefix("100.64.0.0/10").Contains(endpoint.Addr()) && endpoint.Port() == 1080 || endpoint.Addr().IsLoopback()) {
 		return failed, errors.New("control: encrypted probe requires assigned private endpoint")
 	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")

@@ -41,6 +41,16 @@ func TestKernelFirewallLifecycle(t *testing.T) {
 		t.Run(egress, func(t *testing.T) { kernelPolicyLifecycle(t, ctx, egress) })
 		t.Run("legacy-"+egress, func(t *testing.T) { kernelLegacyRemoval(t, ctx, egress) })
 	}
+	public := ServerFirewall{Public: true, Revision: 17, Address: "8.8.8.8", Sources: []string{"1.1.1.1"}, TCPOnlySources: []string{"1.1.1.1"}, Interface: "mesh-test", UID: 12345, EgressIP: "2606:4700::1111"}
+	if err := public.Install(ctx); err != nil {
+		t.Fatal("public install", err)
+	}
+	if err := public.Verify(ctx); err != nil {
+		t.Fatal("public verify", err)
+	}
+	if err := public.Remove(ctx); err != nil {
+		t.Fatal("public remove", err)
+	}
 	after, err := runNFT(ctx, nil, "--json", "list", "table", "inet", "glivela_fixture_unrelated")
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("unrelated firewall modified")

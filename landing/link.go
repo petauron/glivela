@@ -218,6 +218,23 @@ func (c *LinkChecker) Check(ctx context.Context, expected PeerIdentity) LinkResu
 	return finish("direct", "fresh_disco_direct_response")
 }
 
+// CheckIdentity checks only the retained management identity. Public SS2022
+// reachability is proven independently by its authenticated business probe;
+// management DERP/direct transport does not determine the data path.
+func (c *LinkChecker) CheckIdentity(ctx context.Context, expected PeerIdentity) LinkResult {
+	result := LinkResult{State: "unknown", Reason: "peer_identity_unavailable", StartedAt: time.Now().UTC()}
+	ctx, cancel := context.WithTimeout(ctx, CheckTimeout)
+	defer cancel()
+	var status localStatus
+	if expected.Validate() == nil && c.read(ctx, http.MethodGet, "/localapi/v0/status?peers=true", &status) == nil && status.BackendState == "Running" && status.Self != nil && status.Self.ID != expected.ID {
+		if peer := matchPeer(status, expected); peer != nil && peer.Online != nil && *peer.Online && ctx.Err() == nil {
+			result.State, result.Reason = "authenticated", "management_identity_verified"
+		}
+	}
+	result.CheckedAt = time.Now().UTC()
+	return result
+}
+
 func matchPeer(status localStatus, expected PeerIdentity) *localPeer {
 	var found *localPeer
 	for _, peer := range status.Peer {

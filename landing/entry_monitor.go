@@ -74,15 +74,19 @@ func (m *Monitor) Run(ctx context.Context) error {
 	var lastHealthy time.Time
 	var lastBusiness BusinessResult
 	var tracker availability
+	checkLink := m.Links.Check
+	if m.Gate.publicAddress != "" {
+		checkLink = m.Links.CheckIdentity
+	}
 	for {
 		started := time.Now()
 		status := MonitorStatus{Revision: m.Gate.revision, State: "blocked", LinkState: "unknown", Stage: "private_link_before", Reason: "check_failed", StartedAt: started.UTC(), LastHealthyAt: lastHealthy}
-		before := m.Links.Check(ctx, m.Gate.peer)
+		before := checkLink(ctx, m.Gate.peer)
 		status.LinkState, status.Reason = before.State, before.Reason
 		var business BusinessResult
 		var after LinkResult
 		var checkErr error
-		if before.State == "direct" {
+		if m.Gate.validLink(before, time.Now()) {
 			status.Stage = "business_check"
 			businessCtx, cancel := context.WithTimeout(ctx, businessCheckTimeout(m.TCPOnly))
 			business, checkErr = m.CheckBusiness(businessCtx, m.Gate.peer, m.Gate.revision)
@@ -96,14 +100,14 @@ func (m *Monitor) Run(ctx context.Context) error {
 			status.TCP, status.UDP = business.TCP, business.UDP
 			var network *NetworkFailure
 			if checkErr == nil || errors.As(checkErr, &network) {
-				after = m.Links.Check(ctx, m.Gate.peer)
+				after = checkLink(ctx, m.Gate.peer)
 				status.Stage, status.LinkState, status.Reason = "private_link_after", after.State, after.Reason
 			}
 		}
 		_, healthy := leaseDeadlineForTransport(m.Gate, before, business, after, time.Now(), m.TCPOnly)
 		healthy = healthy && business.ExitIP == m.ExpectedExit && checkErr == nil && ctx.Err() == nil
 		var network *NetworkFailure
-		transient := errors.As(checkErr, &network) && validDirectLink(before, time.Now()) && validDirectLink(after, time.Now()) &&
+		transient := errors.As(checkErr, &network) && m.Gate.validLink(before, time.Now()) && m.Gate.validLink(after, time.Now()) &&
 			business.Peer == m.Gate.peer && business.Revision == m.Gate.revision &&
 			!business.StartedAt.Before(before.CheckedAt) && !business.CheckedAt.Before(business.StartedAt) &&
 			!after.StartedAt.Before(business.CheckedAt) && ctx.Err() == nil
@@ -127,6 +131,9 @@ func (m *Monitor) Run(ctx context.Context) error {
 			confirmed, checkErr = m.Gate.renew(ctx, until)
 			if checkErr == nil {
 				status.State, status.Stage, status.Reason = "healthy", "complete", "direct_and_business_ready"
+				if m.Gate.publicAddress != "" {
+					status.Reason = "public_ss2022_and_business_ready"
+				}
 				status.TCP, status.UDP, status.ExitIP = lastBusiness.TCP, lastBusiness.UDP, lastBusiness.ExitIP
 				status.AllowedUntil = confirmed.UTC()
 				status.SecurityCheckedAt = after.StartedAt.UTC()
@@ -152,7 +159,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 			if healthy && checkErr == nil {
 				status.Stage, status.Reason = "recovery", "awaiting_second_success"
 			}
-			if !healthy && before.State == "direct" && checkErr == nil && after.State == "direct" {
+			if !healthy && m.Gate.validLink(before, time.Now()) && checkErr == nil && m.Gate.validLink(after, time.Now()) {
 				status.Stage, status.Reason = "verification", "evidence_invalid_or_expired"
 			}
 		}
@@ -184,9 +191,9 @@ func businessCheckTimeout(tcpOnly bool) time.Duration {
 }
 
 func leaseDeadlineForTransport(gate *TrafficGate, before LinkResult, business BusinessResult, after LinkResult, now time.Time, tcpOnly bool) (time.Time, bool) {
-	if !validDirectLink(before, now) || !validDirectLink(after, now) || business.Peer != gate.peer || business.Revision != gate.revision || !business.TCP ||
+	if !gate.validLink(before, now) || !gate.validLink(after, now) || business.Peer != gate.peer || business.Revision != gate.revision || !business.TCP ||
 		business.StartedAt.Before(before.CheckedAt) || business.CheckedAt.Before(business.StartedAt) || business.CheckedAt.Sub(business.StartedAt) > businessCheckTimeout(tcpOnly) ||
-		after.StartedAt.Before(business.CheckedAt) || (!tcpOnly && (!business.UDP || !validEntryUDPRelay(business.UDPRelay, gate.peer.Address))) {
+		after.StartedAt.Before(business.CheckedAt) || (!tcpOnly && (!business.UDP || !validEntryUDPRelay(business.UDPRelay, gate.endpoint()))) {
 		return time.Time{}, false
 	}
 	address, err := netip.ParseAddr(business.ExitIP)
@@ -195,6 +202,14 @@ func leaseDeadlineForTransport(gate *TrafficGate, before LinkResult, business Bu
 	}
 	deadline := before.StartedAt.Add(AllowLifetime)
 	return deadline, deadline.After(now.Add(nftTimeout + time.Second))
+}
+
+func (g *TrafficGate) validLink(result LinkResult, now time.Time) bool {
+	if g.publicAddress == "" {
+		return validDirectLink(result, now)
+	}
+	return result.State == "authenticated" && result.Reason == "management_identity_verified" && !result.StartedAt.IsZero() &&
+		!result.CheckedAt.Before(result.StartedAt) && result.CheckedAt.Sub(result.StartedAt) <= CheckTimeout && !result.CheckedAt.After(now) && now.Sub(result.CheckedAt) <= AllowLifetime
 }
 
 func validDirectLink(result LinkResult, now time.Time) bool {

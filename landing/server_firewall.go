@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	glivela "github.com/petauron/glivela"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 // members. The output chain runs after output DNAT, so post-resolution private
 // addresses (including DNS rebinding) cannot bypass the destination restriction.
 type ServerFirewall struct {
+	Public         bool     `json:"public,omitempty"`
 	EgressIP       string   `json:"egressIp,omitempty"`
 	Revision       uint64   `json:"revision"`
 	Address        string   `json:"address"`
@@ -35,12 +37,16 @@ func (policy ServerFirewall) validate() error {
 }
 
 func (policy ServerFirewall) validateIdentity() error {
-	if policy.Revision == 0 || !tailnetIPv4(policy.Address) || policy.UID == 0 || policy.UID == 65534 || !bridgeNamePattern.MatchString(policy.Interface) || len(policy.Sources) > 128 {
+	validAddress := tailnetIPv4
+	if policy.Public {
+		validAddress = glivela.PublicTransportIPv4
+	}
+	if policy.Revision == 0 || !validAddress(policy.Address) || policy.UID == 0 || policy.UID == 65534 || !bridgeNamePattern.MatchString(policy.Interface) || len(policy.Sources) > 128 {
 		return errors.New("landing: invalid native firewall identity")
 	}
 	seen := map[string]bool{}
 	for _, source := range policy.Sources {
-		if !tailnetIPv4(source) || source == policy.Address || seen[source] {
+		if !validAddress(source) || source == policy.Address || seen[source] {
 			return errors.New("landing: invalid native firewall source")
 		}
 		seen[source] = true

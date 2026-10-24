@@ -29,6 +29,14 @@ func TestEmptyTransportRetainsOriginalSerializedPolicy(t *testing.T) {
 }
 
 func TestPrivateTransportSwitchPreservesRetainedTraffic(t *testing.T) {
+	testTransportSwitchPreservesRetainedTraffic(t, false)
+}
+
+func TestPublicTransportSwitchPreservesRetainedTraffic(t *testing.T) {
+	testTransportSwitchPreservesRetainedTraffic(t, true)
+}
+
+func testTransportSwitchPreservesRetainedTraffic(t *testing.T, public bool) {
 	s := store(t)
 	q, d, started := quotaFixture(t)
 	q.TotalBytes = 1000000
@@ -52,6 +60,17 @@ func TestPrivateTransportSwitchPreservesRetainedTraffic(t *testing.T) {
 		land.ID:         {Revision: 1, ConfigSHA256: land.Desired.ConfigSHA256},
 		"entry-example": {Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, Traffic: receipt.Traffic.clone()},
 	}}
+	if public {
+		request.Transport.PublicAddress = "8.8.8.8"
+		bad := request
+		if s.SwitchPrivateTransport(bad) == nil {
+			t.Fatal("public listener accepted without exact sources")
+		}
+		request.PublicSources = map[string]string{}
+		for _, source := range land.Desired.Landing.Sources {
+			request.PublicSources[source.Address] = "1.1.1.1"
+		}
+	}
 	bad := request
 	bad.Expected = map[string]TransportCheckpoint{land.ID: request.Expected[land.ID]}
 	if s.SwitchPrivateTransport(bad) == nil {

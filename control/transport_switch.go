@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"math"
+	"net"
 	"reflect"
 	"time"
 
@@ -20,10 +21,12 @@ type TransportCheckpoint struct {
 }
 
 type TransportSwitch struct {
-	Recover   bool                           `json:"recover,omitempty"`
-	LandingID string                         `json:"landingId"`
-	Transport glivela.PrivateTransport       `json:"transport"`
-	Expected  map[string]TransportCheckpoint `json:"expected"`
+	// Exact retained private source identity -> observed public source address.
+	PublicSources map[string]string              `json:"publicSources,omitempty"`
+	Recover       bool                           `json:"recover,omitempty"`
+	LandingID     string                         `json:"landingId"`
+	Transport     glivela.PrivateTransport       `json:"transport"`
+	Expected      map[string]TransportCheckpoint `json:"expected"`
 }
 
 // SwitchPrivateTransport updates one landing and its retained entry policies
@@ -49,10 +52,24 @@ func (s *Store) SwitchPrivateTransport(request TransportSwitch) error {
 	}
 	landingNode := next[landingKey]
 	landingNode.Checks = maps.Clone(landingNode.Checks)
+	plan := *landingNode.Desired.clone().Landing
+	plan.Transport = request.Transport
+	if request.Transport.PublicAddress == "" && len(request.PublicSources) != 0 || request.Transport.PublicAddress != "" && len(request.PublicSources) != len(plan.Sources) {
+		return invalid
+	}
+	for i := range plan.Sources {
+		plan.Sources[i].PublicAddress = request.PublicSources[plan.Sources[i].Address]
+	}
+	if plan.Validate() != nil {
+		return invalid
+	}
 	if landingNode.Desired.Landing.Transport == request.Transport {
 		return invalid
 	}
 	if request.Recover && (landingNode.TransportPrevious == nil || landingNode.TransportPrevious.Landing == nil || landingNode.TransportPrevious.Landing.Transport != request.Transport) {
+		return invalid
+	}
+	if request.Recover && !reflect.DeepEqual(plan.Sources, landingNode.TransportPrevious.Landing.Sources) {
 		return invalid
 	}
 	changed := map[string]bool{landingNode.ID: true}
@@ -166,7 +183,6 @@ func (s *Store) SwitchPrivateTransport(request TransportSwitch) error {
 			return invalid
 		}
 	}
-	plan := *landingNode.Desired.clone().Landing
 	plan.Revision++
 	plan.Transport = request.Transport
 	desired, err := NewDesired(plan)
@@ -189,6 +205,7 @@ func (s *Store) SwitchPrivateTransport(request TransportSwitch) error {
 		check.Request.Revision = desired.Revision
 		check.Request.ConfigSHA256 = desired.ConfigSHA256
 		check.Request.Transport = request.Transport
+		check.Request.SOCKSAddress = net.JoinHostPort(request.Transport.Endpoint(plan.Address), "1080")
 		check.IssuedAt = now
 		check.Result = nil
 		check.ReceivedAt = time.Time{}

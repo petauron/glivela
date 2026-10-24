@@ -17,14 +17,22 @@ import (
 // a boot prerequisite before Docker can restore a saved landing route. This
 // type does not install that prerequisite itself.
 type TrafficGate struct {
-	mu       sync.Mutex
-	peer     PeerIdentity
-	bridge   string
-	gid      uint32
-	revision uint64
-	table    string
-	marker   string
-	run      func(context.Context, []byte, ...string) ([]byte, error)
+	mu            sync.Mutex
+	peer          PeerIdentity
+	publicAddress string
+	bridge        string
+	gid           uint32
+	revision      uint64
+	table         string
+	marker        string
+	run           func(context.Context, []byte, ...string) ([]byte, error)
+}
+
+func (g *TrafficGate) endpoint() string {
+	if g.publicAddress != "" {
+		return g.publicAddress
+	}
+	return g.peer.Address
 }
 
 func NewBridgeGate(peer PeerIdentity, bridge string, revision uint64) (*TrafficGate, error) {
@@ -73,8 +81,8 @@ func (g *TrafficGate) objects() []map[string]nftObject {
 	// dependencies. Its JSON read-back omits redundant explicit meta checks;
 	// emit the canonical form instead of weakening ownership comparison.
 	for _, protocol := range []string{"tcp", "udp"} {
-		outbound := []any{match(meta("iifname"), g.bridge), match(payload("ip", "daddr"), g.peer.Address)}
-		inbound := []any{match(meta("oifname"), g.bridge), match(payload("ip", "saddr"), g.peer.Address)}
+		outbound := []any{match(meta("iifname"), g.bridge), match(payload("ip", "daddr"), g.endpoint())}
+		inbound := []any{match(meta("oifname"), g.bridge), match(payload("ip", "saddr"), g.endpoint())}
 		if protocol == "tcp" {
 			outbound = append(outbound, match(payload("tcp", "dport"), SOCKSPort))
 			inbound = append(inbound, match(payload("tcp", "sport"), SOCKSPort))
@@ -209,7 +217,7 @@ func (g *TrafficGate) RemoveClosedConflicts(ctx context.Context) error {
 		if !g.validOwnership(name, marker) {
 			return errors.New("landing: conflicting gate ownership is unavailable")
 		}
-		candidate := &TrafficGate{peer: g.peer, bridge: g.bridge, gid: g.gid, revision: g.revision, table: name, marker: marker, run: g.run}
+		candidate := &TrafficGate{peer: g.peer, publicAddress: g.publicAddress, bridge: g.bridge, gid: g.gid, revision: g.revision, table: name, marker: marker, run: g.run}
 		if found, err := candidate.validate(document); err != nil || !found || len(candidate.elements(document)) != 0 {
 			return errors.Join(err, errors.New("landing: conflicting gate is not a closed managed policy"))
 		}
@@ -265,7 +273,7 @@ func (g *TrafficGate) matchesTarget(document nftDocument, table string) bool {
 			if meta, ok := left["meta"].(map[string]any); ok && (g.gid == 0 && meta["key"] == "iifname" && match["right"] == g.bridge || g.gid != 0 && meta["key"] == "skgid" && match["right"] == float64(g.gid)) {
 				bridge = true
 			}
-			if payload, ok := left["payload"].(map[string]any); ok && payload["protocol"] == "ip" && payload["field"] == "daddr" && match["right"] == g.peer.Address {
+			if payload, ok := left["payload"].(map[string]any); ok && payload["protocol"] == "ip" && payload["field"] == "daddr" && match["right"] == g.endpoint() {
 				address = true
 			}
 		}
@@ -314,7 +322,7 @@ func (g *TrafficGate) renew(ctx context.Context, until time.Time) (time.Time, er
 	// libnftables JSON timeouts are seconds. Reserve the command deadline so
 	// a delayed apply cannot extend the original proof's validity.
 	seconds := int((remaining - nftTimeout) / time.Second)
-	element := nftObject{"family": "inet", "table": g.table, "name": "allowed", "elem": []any{nftObject{"elem": nftObject{"val": g.peer.Address, "timeout": seconds}}}}
+	element := nftObject{"family": "inet", "table": g.table, "name": "allowed", "elem": []any{nftObject{"elem": nftObject{"val": g.endpoint(), "timeout": seconds}}}}
 	applyErr := g.apply(ctx, []any{g.flushAllowed(), nftObject{"add": nftObject{"element": element}}})
 	observedStart := time.Now()
 	document, err = g.snapshot(ctx)
@@ -394,7 +402,7 @@ func (g *TrafficGate) hasLiveLease(document nftDocument, until time.Time) bool {
 		return false
 	}
 	element, ok := wrapper["elem"].(map[string]any)
-	if !ok || element["val"] != g.peer.Address {
+	if !ok || element["val"] != g.endpoint() {
 		return false
 	}
 	timeout, _ := element["timeout"].(float64)
