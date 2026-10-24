@@ -94,6 +94,9 @@ func (g *TrafficGate) hostObjects() []map[string]nftObject {
 		if protocol == "tcp" {
 			outbound = append(outbound, match(payload("tcp", "dport"), SOCKSPort))
 			inbound = append(inbound, match(payload("tcp", "sport"), SOCKSPort))
+		} else if g.publicAddress != "" {
+			outbound = append(outbound, match(payload("udp", "dport"), SOCKSPort))
+			inbound = append(inbound, match(payload("udp", "sport"), SOCKSPort))
 		} else {
 			outbound = append(outbound, match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"))
 			inbound = append(inbound, match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"))

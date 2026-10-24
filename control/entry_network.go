@@ -53,6 +53,7 @@ func (n EntryNetwork) validate(plan glivela.XrayPlan) error {
 		configured[peer.EgressID] = peer
 	}
 	ids, keys, addresses := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	endpoints := map[string]bool{}
 	for _, peer := range n.Peers {
 		route, found := configured[peer.EgressID]
 		exit, err := netip.ParseAddr(peer.ExpectedExit)
@@ -64,6 +65,11 @@ func (n EntryNetwork) validate(plan glivela.XrayPlan) error {
 		if route.ExitFamily == glivela.EgressIPv4Only && !exit.Is4() || route.ExitFamily == glivela.EgressIPv6Only && !exit.Is6() {
 			return invalid
 		}
+		endpoint := route.Transport.Endpoint(route.Address)
+		if endpoints[endpoint] {
+			return invalid
+		}
+		endpoints[endpoint] = true
 		delete(used, peer.EgressID)
 		ids[peer.Identity.ID], keys[peer.Identity.PublicKey], addresses[peer.Identity.Address] = true, true, true
 	}

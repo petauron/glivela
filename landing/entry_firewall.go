@@ -96,7 +96,11 @@ func (p EntryFirewall) objects() []map[string]nftObject {
 	for _, address := range peers {
 		rule("destinations", match(payload("ip", "daddr"), address), match(payload("tcp", "dport"), SOCKSPort), nftObject{"return": nil})
 		// The landing independently retains its source-specific UDP policy.
-		rule("destinations", match(payload("ip", "daddr"), address), match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"), nftObject{"return": nil})
+		if glivela.PublicTransportIPv4(address) {
+			rule("destinations", match(payload("ip", "daddr"), address), match(payload("udp", "dport"), SOCKSPort), nftObject{"return": nil})
+		} else {
+			rule("destinations", match(payload("ip", "daddr"), address), match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"), nftObject{"return": nil})
+		}
 	}
 	for _, cidr := range blockedIPv4 {
 		prefix := netip.MustParsePrefix(cidr)

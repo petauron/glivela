@@ -130,6 +130,8 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy bool) []
 				expr = append(expr, match(payload("udp", "sport"), nftObject{"range": []int{1081, 1208}}))
 			} else if protocol == "tcp" {
 				expr = append(expr, match(payload("tcp", "sport"), SOCKSPort))
+			} else if policy.Public {
+				expr = append(expr, match(payload("udp", "sport"), SOCKSPort))
 			} else {
 				expr = append(expr, match(meta("l4proto"), "udp"))
 			}
