@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.45](https://github.com/petauron/glivela/compare/v0.1.0-alpha.44...v0.1.0-alpha.45) (2026-10-24)
+
+
+### Features
+
+* support source-restricted public SS2022 transport ([62dc54f](https://github.com/petauron/glivela/commit/62dc54f22950dd43c92de14ee94818ce9e0b3d02))
+
 ## [0.1.0-alpha.44](https://github.com/petauron/glivela/compare/v0.1.0-alpha.43...v0.1.0-alpha.44) (2026-10-23)
 
 
