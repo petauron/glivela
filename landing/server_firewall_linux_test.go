@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"reflect"
@@ -26,6 +27,7 @@ func TestKernelFirewallLifecycle(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	verifyPublicIngress(t, ctx)
 	if output, err := exec.CommandContext(ctx, "/usr/sbin/ip", "link", "add", "mesh-test", "type", "dummy").CombinedOutput(); err != nil {
 		t.Fatalf("isolated interface: %s %v", output, err)
 	}
@@ -54,6 +56,66 @@ func TestKernelFirewallLifecycle(t *testing.T) {
 	after, err := runNFT(ctx, nil, "--json", "list", "table", "inet", "glivela_fixture_unrelated")
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("unrelated firewall modified")
+	}
+}
+
+func verifyPublicIngress(t *testing.T, ctx context.Context) {
+	t.Helper()
+	if err := exec.CommandContext(ctx, "/usr/sbin/ip", "link", "set", "lo", "up").Run(); err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range []string{"8.8.8.8", "1.1.1.1", "9.9.9.9"} {
+		if err := exec.CommandContext(ctx, "/usr/sbin/ip", "address", "add", address+"/32", "dev", "lo").Run(); err != nil {
+			t.Fatal(err)
+		}
+		defer func(address string) {
+			_ = exec.Command("/usr/sbin/ip", "address", "del", address+"/32", "dev", "lo").Run()
+		}(address)
+	}
+	listener, err := net.Listen("tcp4", "8.8.8.8:1080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	policy := ServerFirewall{Public: true, Revision: 71, Address: "8.8.8.8", Sources: []string{"1.1.1.1"}, TCPOnlySources: []string{"1.1.1.1"}, Interface: "lo", UID: 12345, EgressIP: "8.8.8.8"}
+	if err := policy.Install(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := policy.Remove(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
+	dial := func(source string) error {
+		d := net.Dialer{Timeout: 200 * time.Millisecond, LocalAddr: &net.TCPAddr{IP: net.ParseIP(source)}}
+		conn, err := d.DialContext(ctx, "tcp4", listener.Addr().String())
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return err
+	}
+	if err := dial("1.1.1.1"); err != nil {
+		t.Fatal("authorized public source blocked", err)
+	}
+	if err := dial("9.9.9.9"); err == nil {
+		t.Fatal("unassigned public source reached listener")
+	}
+	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("8.8.8.8"), Port: 1080})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+	client, err := net.DialUDP("udp4", &net.UDPAddr{IP: net.ParseIP("1.1.1.1")}, udp.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := client.Write([]byte("anonymous-fixture")); err != nil {
+		t.Fatal(err)
+	}
+	_ = udp.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if _, _, err := udp.ReadFromUDP(make([]byte, 64)); err == nil {
+		t.Fatal("TCP-only source received UDP permission")
 	}
 }
 
