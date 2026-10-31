@@ -1,0 +1,24 @@
+# Private operational state and credentials
+/.env
+/.env.*
+/.credentials/
+/bootstrap*.json
+/nodes.json
+/business*.json
+/runtime/
+/state/
+/data/
+/backups/
+/tasks/
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+
+# Local dependencies and generated output
+/node_modules/
+/ui/node_modules/
+/ui/dist/
+/dist/
+*.log
+.DS_Store

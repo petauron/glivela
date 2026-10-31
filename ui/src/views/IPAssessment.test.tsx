@@ -1,0 +1,110 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, expect, it, vi } from "vitest";
+import type { IPQualityAssessment } from "../ip-quality-types";
+import { api } from "../api";
+import { AssessmentSummary, assessmentLabel } from "./IPAssessment";
+import { IPQualityComparison } from "./IPQualityComparison";
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+let root: Root | undefined;
+afterEach(() => {
+  if (root) act(() => root?.unmount());
+  root = undefined;
+  document.body.replaceChildren();
+  vi.restoreAllMocks();
+});
+
+function assessment(): IPQualityAssessment {
+  return {
+    version: "meridian-v5", status: "partial", min: 75, max: 100, grade: "unknown", ipType: "residential",
+    typeCandidates: ["residential"], typeEvidence: [{ source: "IPinfo", value: "ISP" }],
+    contributions: [{ id: "ippure", min: 0, max: 25, weight: 25, missing: ["IPPure"] }], missing: ["IPPure"],
+    advice: "recheck", reasons: ["incomplete"], requiredFailed: [], requiredUnknown: [],
+    preferences: { requiredServices: ["ChatGPT", "Netflix", "DisneyPlus"], targetRegion: "" },
+    validUntil: "2026-09-27T13:42:38Z",
+  };
+}
+
+it("keeps missing evidence as an interval and reveals policy only on expansion", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root?.render(<AssessmentSummary language="zh-CN" assessment={assessment()} />));
+  expect(container.textContent).toContain("数据不足");
+  expect(container.textContent).not.toContain("Glivela IPv4 评分 v5");
+  const trigger = container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  await act(async () => trigger.click());
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  expect(container.textContent).toContain("Glivela IPv4 评分 v5");
+  expect(container.textContent).toContain("IPPure");
+  expect(container.textContent).toContain("0～25 / 25");
+});
+
+it("labels an IPQS-only lower bound and explains its interval", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  const conservative: IPQualityAssessment = {
+    ...assessment(), status: "conservative", score: 63, min: 63, max: 73, grade: "good", ipType: "hosting",
+    contributions: [{ id: "sources", min: 14.3, max: 24.3, weight: 25, missing: ["IPQS"] }], missing: ["IPQS"], advice: "direct",
+  };
+  await act(async () => root?.render(<AssessmentSummary language="zh-CN" assessment={conservative} />));
+  expect(container.textContent).toContain("63");
+  expect(container.textContent).not.toContain("63 / 100");
+  expect(container.textContent).not.toContain("保守分");
+  expect(container.textContent).toContain("可直连");
+  await act(async () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+  expect(container.textContent).toContain("待确认：IPQS");
+  expect(container.textContent).toContain("按最低可能贡献计算 63 分");
+});
+
+it("retains historical scores while hiding changed-IP results", () => {
+  expect(assessmentLabel("zh-CN", { ...assessment(), validUntil: undefined })).toBe("待检测");
+  expect(assessmentLabel("zh-CN", { ...assessment(), status: "expired", score: 63 })).toBe("63");
+  expect(assessmentLabel("zh-CN", { ...assessment(), status: "ip_changed", score: 63 })).toBe("待检测");
+});
+
+it("loads comparisons on demand, separates partial rows, and only selects a form value", async () => {
+  const quality = vi.spyOn(api, "ipQuality").mockResolvedValue({ checks: [], targets: [], comparisons: [{
+    nodeId: "landing", name: "落地 A", address: "2001:db8::2", family: "ipv6", compatible: false, connectionVerified: false, recommended: false, reason: "connection_unverified", assessment: assessment(), services: [],
+  }] });
+  const mutate = vi.spyOn(api, "selectLanding");
+  const select = vi.fn();
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root?.render(<IPQualityComparison language="zh-CN" nodeId="entry" compareAddress="2001:db8::1" onSelect={select} />));
+  expect(quality).not.toHaveBeenCalled();
+  await act(async () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+  expect(quality).toHaveBeenCalledWith(expect.any(AbortSignal), expect.objectContaining({ targetRegion: "" }), "entry", "2001:db8::1");
+  expect(container.textContent).toContain("2001:db8::1");
+  expect(container.textContent).toContain("IPv6");
+  expect(container.textContent).toContain("暂评 / 待复测");
+  expect(container.textContent).toContain("连接待验证");
+  const choose = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "选择")!;
+  await act(async () => choose.click());
+  expect(select).toHaveBeenCalledWith("landing");
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+it("shows an IPv6 number with its own rule and no excluded providers", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  const ipv6: IPQualityAssessment = {
+    ...assessment(), version: "meridian-ipv6-v2", status: "conservative", score: 71, min: 71, max: 97,
+    grade: "good", missing: ["IPQS", "AbuseIPDB", "TikTok"], advice: "direct",
+    contributions: [{ id: "sources", min: 0, max: 25, weight: 25, missing: ["IPQS", "AbuseIPDB"] }],
+  };
+  await act(async () => root?.render(<AssessmentSummary language="zh-CN" assessment={ipv6} />));
+  expect(assessmentLabel("zh-CN", ipv6)).toBe("71");
+  expect(container.textContent).not.toContain("数据不足");
+  await act(async () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+  expect(container.textContent).toContain("Glivela IPv6 评分 v2");
+  expect(container.textContent).not.toContain("IPPure");
+  expect(container.textContent).not.toContain("SCAMALYTICS");
+  expect(container.textContent).toContain("0 / 25");
+});

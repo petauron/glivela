@@ -1,0 +1,11 @@
+--- a/internal/landing/server_firewall.go
++++ b/internal/landing/server_firewall.go
+@@ -140,7 +140,7 @@
+ 		for _, protocol := range []string{"tcp", "udp"} {
+ 			expr := []any{match(meta("nfproto"), "ipv4"), match(meta("l4proto"), protocol)}
+ 			if policy.EgressIP != "" {
+-				expr = append(expr, match(payload("ip", "saddr"), policy.EgressIP))
++				expr = []any{match(meta("l4proto"), protocol), match(payload("ip", "saddr"), policy.EgressIP)}
+ 			}
+ 			rule("destinations", append(expr, nftObject{"return": nil})...)
+ 		}

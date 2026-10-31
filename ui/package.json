@@ -1,0 +1,33 @@
+{
+  "name": "@petauron/glivela-ui",
+  "version": "0.1.0-alpha.98",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build && node scripts/check-bundle-styles.mjs",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.7.0",
+    "@tailwindcss/vite": "4.3.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "2.1.1",
+    "lucide-react": "1.40.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tailwindcss": "4.3.3",
+    "tailwind-merge": "3.6.0",
+    "tw-animate-css": "1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@vitejs/plugin-react": "6.1.1",
+    "jsdom": "30.0.1",
+    "typescript": "6.0.3",
+    "vite": "8.2.4",
+    "vitest": "4.1.11"
+  }
+}

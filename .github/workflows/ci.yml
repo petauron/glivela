@@ -1,0 +1,191 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native-package:
+    name: Native runtime distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install reviewed management UI dependencies
+        run: npm ci --prefix ui
+      - name: Build twice and compare immutable distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sh scripts/build-native-release.sh "$RUNNER_TEMP/native-first"
+          sh scripts/build-native-release.sh "$RUNNER_TEMP/native-second"
+          diff -r "$RUNNER_TEMP/native-first" "$RUNNER_TEMP/native-second"
+          cd "$RUNNER_TEMP/native-first"
+          sha256sum --check SHA256SUMS
+      - name: Exercise bundled official core over verified TLS
+        run: |
+          version=$(jq -er '.["."]' .release-please-manifest.json)
+          mkdir "$RUNNER_TEMP/native-runtime"
+          tar -xzf "$RUNNER_TEMP/native-first/glivela-$version-linux-amd64.tar.gz" -C "$RUNNER_TEMP/native-runtime"
+          "$RUNNER_TEMP/native-runtime/glivela" -help
+          GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" go test ./control -run '^TestOfficialXray(ValidationAndTLS|EntryPlanValidation)$' -count=1 -v
+          GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" go test ./landing -run '^TestOfficialLandingConfiguration$' -count=1 -v
+      - name: Verify bundled iperf3 authentication on loopback
+        run: |
+          set -eu
+          tool="$RUNNER_TEMP/native-runtime/iperf3"
+          "$tool" --version > "$RUNNER_TEMP/iperf-version"
+          grep -Eq '^iperf 3\.22([[:space:]]|$)' "$RUNNER_TEMP/iperf-version"
+          "$tool" --help > "$RUNNER_TEMP/iperf-help"
+          grep -Fq -- '--rsa-private-key-path' "$RUNNER_TEMP/iperf-help"
+          grep -Fq -- '--bind-dev' "$RUNNER_TEMP/iperf-help"
+          dir="$RUNNER_TEMP/iperf-auth"
+          mkdir -m 700 "$dir"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/private.pem" >/dev/null 2>&1
+          openssl pkey -in "$dir/private.pem" -pubout -out "$dir/public.pem" >/dev/null 2>&1
+          printf 'speed,%s\n' "$(printf '{speed}local-fixture' | sha256sum | cut -d ' ' -f 1)" > "$dir/users.csv"
+          "$tool" -s -1 -4 -B 127.0.0.1 -p 34271 --rsa-private-key-path "$dir/private.pem" --authorized-users-path "$dir/users.csv" > "$dir/server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if ss -H -ltn 'sport = :34271' | grep -q '127.0.0.1:34271'; then ready=true; break; fi
+            sleep 0.2
+          done
+          test "$ready" = true
+          IPERF3_PASSWORD=local-fixture timeout 15 "$tool" -c 127.0.0.1 -4 -p 34271 -n 32768 --username speed --rsa-public-key-path "$dir/public.pem" -J > "$dir/result.json"
+          jq -e '.end.sum_received.bytes > 0' "$dir/result.json" >/dev/null
+          wait "$server"
+      - name: Exercise actual landing DNS policy in isolated namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends dnsmasq-base iproute2 nftables
+          go test -c -o "$RUNNER_TEMP/glivela-dns.test" ./landing
+          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
+          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
+          sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDP$' -test.v -test.timeout 50s
+      - name: Verify actual entry account authentication in isolated namespace
+        run: |
+          go test -c -o "$RUNNER_TEMP/glivela-entry-auth.test" ./control
+          sudo env GLIVELA_ENTRY_AUTH_TEST=1 GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net --mount --propagation private "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestRenderedEntryAccountAuthentication$' -test.v -test.timeout 100s
+          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestEntry(StartupPeerIsolation|DriverDirectReadinessWithUnavailableLanding)$' -test.v -test.timeout 45s
+          sudo env GLIVELA_TEST_XRAY="$RUNNER_TEMP/native-runtime/xray" GLIVELA_TEST_TRANSPORT_FENCE=1 unshare --net sh -c 'ip link set lo up; exec "$1" -test.run "^TestSS2022ProbeWithOfficialCore$" -test.v -test.timeout 45s' sh "$RUNNER_TEMP/glivela-entry-auth.test"
+  selection-runtime:
+    name: Reviewed target-selection runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validate generated composite configuration with official Xray
+        env:
+          GLIVELA_XRAY_IMAGE: ghcr.io/xtls/xray-core:26.10.31@sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9
+        run: |
+          docker pull "$GLIVELA_XRAY_IMAGE"
+          go test -run '^TestCompositeOfficialCoreConfiguration$' -count=1 .
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Verify isolated offline migration tool
+        working-directory: tools/legacy-export
+        run: |
+          go mod verify
+          go vet ./...
+          go test ./... -count=1
+      - name: Keep SQLite out of runtime dependencies
+        run: |
+          go list -deps ./cmd/glivela > "$RUNNER_TEMP/glivela-runtime-deps"
+          if grep -q '^modernc.org/' "$RUNNER_TEMP/glivela-runtime-deps"; then
+            echo 'Offline-only dependencies leaked into the runtime'
+            exit 1
+          fi
+      - name: Verify native firewall in isolated network namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nftables iproute2
+          go test -c -o "$RUNNER_TEMP/glivela-landing.test" ./landing
+          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelFirewallLifecycle$' -test.v -test.timeout 30s
+          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelEntryGateLifecycle$' -test.v -test.timeout 45s
+          go test -c -o "$RUNNER_TEMP/glivela-entry-control.test" ./control
+          sudo env GLIVELA_ENTRY_RUNTIME_KERNEL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-entry-control.test" -test.run '^TestKernelEntryDriverBlockedPeerAndNodeResume$' -test.v -test.timeout 45s
+      - name: Run complete tests with version-based race policy
+        run: |
+          version=$(jq -er '.["."] | select(type == "string")' .release-please-manifest.json)
+          set --
+          case "$version" in
+            *-alpha|*-alpha.*) echo "Alpha CI: full tests, race disabled" ;;
+            *) set -- -race ;;
+          esac
+          go test "$@" ./... -count=1
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install reviewed UI dependencies
+        run: |
+          npm ci --prefix ui
+      - name: Audit application dependencies
+        run: npm audit --prefix ui --audit-level=high
+      - name: Verify app interface
+        run: |
+          npm run check --prefix ui
+          npm test --prefix ui
+      - name: Build independently delivered UI
+        id: ui_bundle
+        run: |
+          npm run build --prefix ui
+          version=$(jq -er .version ui/package.json)
+          bundle="ui/dist/ui-glivela-$version"
+          test -s "$bundle.js"
+          test -s "$bundle.css"
+          test "$(wc -c < "$bundle.js")" -le 4194304
+          test "$(wc -c < "$bundle.css")" -le 4194304
+          ! grep -Fq 'process.env.NODE_ENV' "$bundle.js"
+          echo "version=$version" >> "$GITHUB_OUTPUT"

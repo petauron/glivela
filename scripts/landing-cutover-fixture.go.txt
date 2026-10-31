@@ -1,0 +1,41 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"github.com/petauron/vastora/internal/agent"
+	"github.com/petauron/vastora/internal/landing"
+	"os"
+	"time"
+)
+
+// Disposable CT112 fixture. This invokes the retained production landing
+// implementation without enrolling a Center or starting an Agent writer.
+func main() {
+	if _, err := os.Stat("/run/glivela-54-disposable-lab"); err != nil {
+		panic("disposable lab marker required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	var err error
+	if len(os.Args) == 3 && os.Args[1] == "agent" && os.Args[2] == "landing-firewall" {
+		err = agent.RestoreLandingFirewall(ctx)
+	} else if len(os.Args) == 3 && os.Args[1] == "prepare" {
+		raw, readErr := os.ReadFile(os.Args[2])
+		if readErr != nil {
+			panic(readErr)
+		}
+		var plan landing.ServerPlan
+		if json.Unmarshal(raw, &plan) != nil {
+			panic("invalid synthetic plan")
+		}
+		err = agent.ApplyLanding(ctx, "node-example", plan)
+	} else {
+		panic("unsupported lab operation")
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

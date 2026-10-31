@@ -1,0 +1,81 @@
+syntax = "proto3";
+package glivela.control.v1;
+option go_package = "github.com/petauron/glivela/internal/controlpb";
+
+// Node-initiated stream. Identity is the existing enrolled mTLS certificate.
+service NodeControl { rpc Connect(stream NodeFrame) returns (stream ControllerFrame); }
+message Hello { uint32 version = 1; repeated string capabilities = 2; }
+message Welcome { uint32 version = 1; string session_id = 2; }
+message NodeFrame { oneof body { Hello hello = 1; Progress progress = 2; Result result = 3; } }
+message ControllerFrame { oneof body { Welcome welcome = 1; Assignment assignment = 2; Receipt receipt = 3; } }
+// Exact transport replacement for control.SpeedAssignment.
+// Authentication below is generated afresh for ONE bounded iperf task at
+// StartSpeed, not host/SSH/Agent identity. The private
+// receiver material is sent only to the same enrolled receiver as before
+// in SpeedExchange; never to browsers or another recipient.
+message Assignment {
+ string id = 1;
+ string role = 2;
+ uint64 revision = 3;
+ string config_sha256 = 4;
+ string entry_id = 5;
+ string landing_id = 6;
+ string address = 7;
+ string source = 8;
+ repeated string modes = 9;
+ int64 expires_at_unix_nano = 10;
+ string password = 11;
+ string ss_key = 12;
+ string private_key = 13;
+ string public_key = 14;
+}
+// A bounded per-second client measurement shares the existing task stream.
+message Progress {
+ string id = 1;
+ string role = 2;
+ string stage = 3;
+ string mode = 4;
+ string direction = 5;
+ uint32 sequence = 6; // zero means that the direction is warming up
+ double mbps = 7;
+ double seconds = 8;
+}
+// bytes is receiver data; sent_bytes is the separately reported sender total.
+message Sample { double mbps = 1; int64 bytes = 2; double seconds = 3; optional uint64 retransmits = 4; int64 sent_bytes = 5; }
+message Measurement {
+ Sample upload = 1;
+ Sample download = 2;
+ string error = 3; // mode-level setup failure
+ string upload_error = 4;
+ string download_error = 5;
+}
+message Result {
+ string id = 1;
+ string role = 2;
+ Measurement direct = 3;
+ Measurement ss2022 = 4;
+ string error = 5;
+ bool cleanup_confirmed = 6;
+ optional uint64 wire_bytes = 7;
+ int64 finished_at_unix_nano = 8;
+}
+message Receipt { string id = 1; string role = 2; bool accepted = 3; string error = 4; }
+
+// Fixed node-owned operations. Payloads preserve the existing strictly
+// validated domain documents; method names do not permit arbitrary dispatch.
+message NodeDocument { bytes json = 1; }
+message NodeWatchRequest { uint32 version = 1; }
+message NodeSignal { uint32 mask = 1; }
+service NodeOperations {
+ rpc Exchange(NodeDocument) returns (NodeDocument);
+ rpc CurrentDesired(NodeDocument) returns (NodeDocument);
+ rpc NetworkOptimization(NodeDocument) returns (NodeDocument);
+ rpc IPQuality(NodeDocument) returns (NodeDocument);
+ rpc RouteLatency(NodeDocument) returns (NodeDocument);
+ rpc RouteChecks(NodeDocument) returns (NodeDocument);
+ rpc LandingAcceptance(NodeDocument) returns (NodeDocument);
+ rpc RecordTransportTail(NodeDocument) returns (NodeDocument);
+ rpc CancelTransport(NodeDocument) returns (NodeDocument);
+ rpc ResumeTransport(NodeDocument) returns (NodeDocument);
+ rpc Watch(NodeWatchRequest) returns (stream NodeSignal);
+}
