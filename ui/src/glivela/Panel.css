@@ -456,3 +456,11 @@ tr[data-selected="true"] .gl-node-symbol{color:var(--gl-accent);}
 .gl-subscription-order-actions{display:flex;gap:4px;}
 .gl-subscription-order-actions>button{min-width:44px;min-height:44px;}
 .gl-subscription-order-footer{display:flex;gap:8px;flex-wrap:wrap;}
+.gl-path-mtu { display:flex; flex-direction:column; gap:8px; padding:16px 0; border-top:1px solid var(--border); }
+.gl-path-mtu-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.gl-path-mtu-heading h3 { margin:0; }
+.gl-path-mtu-controls { display:flex; flex-wrap:wrap; align-items:end; gap:8px; }
+.gl-path-mtu-controls > div { flex:1; min-width:80px; }
+.gl-path-mtu-controls label { display:block; margin-bottom:4px; font-size:12px; color:var(--muted-foreground); }
+.gl-path-mtu-address { overflow-wrap:anywhere; font-size:12px; color:var(--muted-foreground); }
+.gl-path-mtu-error { font-size:12px; color:var(--destructive); }
