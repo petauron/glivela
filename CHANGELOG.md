@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.100](https://github.com/petauron/glivela/compare/v0.1.0-alpha.99...v0.1.0-alpha.100) (2026-11-01)
+
+
+### Features
+
+* **subscription:** add manual proxy ordering ([#26](https://github.com/petauron/glivela/issues/26)) ([b313733](https://github.com/petauron/glivela/commit/b31373380c6bf5c1644adad7f6255476809017b4))
+
 ## [0.1.0-alpha.99](https://github.com/petauron/glivela/compare/v0.1.0-alpha.98...v0.1.0-alpha.99) (2026-11-01)
 
 
