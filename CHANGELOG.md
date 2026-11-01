@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.102](https://github.com/petauron/glivela/compare/v0.1.0-alpha.101...v0.1.0-alpha.102) (2026-11-01)
+
+
+### Features
+
+* **control:** configure path MTU per destination ([#30](https://github.com/petauron/glivela/issues/30)) ([e4997c2](https://github.com/petauron/glivela/commit/e4997c26567994dfd3211762b06b8ea9cb515d19))
+
 ## [0.1.0-alpha.101](https://github.com/petauron/glivela/compare/v0.1.0-alpha.100...v0.1.0-alpha.101) (2026-11-01)
 
 
