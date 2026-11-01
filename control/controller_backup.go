@@ -58,7 +58,7 @@ func openControllerBackup(raw, key []byte) (controllerBackup, error) {
 		return value, errors.New("control: controller backup authentication failed")
 	}
 	defer clear(plain)
-	if decode(bytes.NewReader(plain), &value) != nil || value.Version != 1 || value.CreatedAt.IsZero() || value.CreatedAt.After(time.Now().Add(5*time.Minute)) || len(value.Files) < 3 || len(value.Files) > 5 {
+	if decode(bytes.NewReader(plain), &value) != nil || value.Version != 1 || value.CreatedAt.IsZero() || value.CreatedAt.After(time.Now().Add(5*time.Minute)) || len(value.Files) < 3 || len(value.Files) > 6 {
 		return controllerBackup{}, errors.New("control: invalid controller backup contents")
 	}
 	for _, name := range []string{"nodes.json", "business.json", "business.adoption.json"} {
@@ -74,9 +74,14 @@ func openControllerBackup(raw, key []byte) (controllerBackup, error) {
 	}
 	for name := range value.Files {
 		switch name {
-		case "nodes.json", "business.json", "business.adoption.json", "availability.json", "quality.json":
+		case "nodes.json", "business.json", "business.adoption.json", "availability.json", "quality.json", subscriptionNamesFile:
 		default:
 			return controllerBackup{}, errors.New("control: unknown backup file")
+		}
+	}
+	if raw, ok := value.Files[subscriptionNamesFile]; ok {
+		if _, err := parseSubscriptionNames(raw); err != nil {
+			return controllerBackup{}, err
 		}
 	}
 	if raw, ok := value.Files["quality.json"]; ok {
@@ -108,6 +113,21 @@ func (s *Store) BackupController(now time.Time) error {
 		return errors.New("control: controller backup source changed")
 	}
 	value := controllerBackup{Version: 1, CreatedAt: now.UTC(), Files: map[string]json.RawMessage{}}
+	names, err := loadSubscriptionNames(directory, material)
+	if err != nil || !reflect.DeepEqual(names, s.subscriptionNames) {
+		return errors.New("control: issued names changed before backup")
+	}
+	if names != nil {
+		raw, err := privateBackupBytes(filepath.Join(directory, subscriptionNamesFile))
+		if err != nil {
+			return err
+		}
+		observed, err := parseSubscriptionNames(raw)
+		if err != nil || !reflect.DeepEqual(observed, names) {
+			return errors.New("control: issued names changed during backup")
+		}
+		value.Files[subscriptionNamesFile] = raw
+	}
 	availabilityRaw, err := json.Marshal(s.availability)
 	if err != nil || s.availability.validate() != nil {
 		return errors.New("control: invalid availability backup source")
@@ -287,6 +307,9 @@ func RestoreControllerBackup(source, keyPath, destination string) error {
 	}
 	if _, ok := value.Files["quality.json"]; ok {
 		names = append(names, "quality.json")
+	}
+	if _, ok := value.Files[subscriptionNamesFile]; ok {
+		names = append(names, subscriptionNamesFile)
 	}
 	for _, name := range names {
 		if err := writeNewBusinessFile(destination, name, value.Files[name]); err != nil {

@@ -59,6 +59,7 @@ type Store struct {
 	speedRevision       uint64
 	speedChanged        chan struct{}
 	speedFault          bool
+	subscriptionNames   map[string]string
 	subscriptionOrigin  string
 }
 

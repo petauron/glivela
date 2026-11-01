@@ -168,9 +168,13 @@ func (s *Store) subscription(ctx context.Context, token string, mihomo bool) (su
 			if name == "" {
 				name = m.References.Applications[credential.EntryID].Name
 			}
+			issued := s.subscriptionNames[credential.EntryID]
+			if issued != "" {
+				name = issued
+			}
 			// Preserve explicit issued labels; fill a missing region prefix from
 			// the service metadata without changing host or protocol identities.
-			if prefix := importedLandingRegionPrefix(service.RegionCode); prefix != service.RegionCode && !strings.ContainsAny(name, "|｜") && !strings.HasPrefix(name, prefix) && len([]rune(prefix+"｜"+name)) <= glivela.MaxDisplayNameLength {
+			if prefix := importedLandingRegionPrefix(service.RegionCode); issued == "" && prefix != service.RegionCode && !strings.ContainsAny(name, "|｜") && !strings.HasPrefix(name, prefix) && len([]rune(prefix+"｜"+name)) <= glivela.MaxDisplayNameLength {
 				name = prefix + "｜" + name
 			}
 			if endpoint.VLESSEnabled && realityNodeMatches(entry, endpoint) {

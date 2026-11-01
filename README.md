@@ -56,3 +56,6 @@ maintain a vendor-specific alias list.
 ## License
 
 Apache-2.0. Bundled third-party programs retain their own licenses and notices.
+
+Retaining issued subscription labels and an existing host guard during upgrades:
+[operator-owned configuration](docs/operator-configuration.md).
