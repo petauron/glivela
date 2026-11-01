@@ -43,6 +43,7 @@ var speedPorts = []struct {
 type speedSession struct {
 	mu                                        sync.Mutex
 	directory, binary, digest, dir, table, id string
+	hostGuardTable                            string
 	iperfBinary, iperfDigest                  string
 	processes                                 []*speedProcess
 	guards                                    []speedGuard
@@ -52,7 +53,7 @@ type speedSession struct {
 }
 
 func newSpeedSession(directory, binary, digest, iperfBinary, iperfDigest string) *speedSession {
-	return &speedSession{directory: directory, binary: binary, digest: digest, iperfBinary: iperfBinary, iperfDigest: iperfDigest}
+	return &speedSession{hostGuardTable: "host_guard", directory: directory, binary: binary, digest: digest, iperfBinary: iperfBinary, iperfDigest: iperfDigest}
 }
 func (s *speedSession) setProgress(fn func(string, SpeedPoint)) { s.progress = fn }
 func speedExec(ctx context.Context, binary string, args ...string) ([]byte, error) {
@@ -122,6 +123,9 @@ func (s *speedSession) remember() error {
 	return os.Rename(temp, filepath.Join(s.dir, "resources.json"))
 }
 func (s *speedSession) recover() error {
+	if err := s.loadHostGuard(); err != nil {
+		return err
+	}
 	dirs, err := filepath.Glob(filepath.Join(s.directory, "speed-*"))
 	if err != nil {
 		return err
@@ -165,7 +169,7 @@ func (s *speedSession) recover() error {
 			return errors.New("unsafe_speed_resources")
 		}
 		for _, g := range record.Guards {
-			if g.Family != "inet" || g.Table != "host_guard" || g.Chain != "input" || g.Set != "speed_"+suffix {
+			if g.Family != "inet" || g.Table != s.hostGuardTable || g.Chain != "input" || g.Set != "speed_"+suffix {
 				return errors.New("unsafe_speed_resources")
 			}
 		}
@@ -381,7 +385,7 @@ func (s *speedSession) firewall(ctx context.Context, p SpeedAssignment) error {
 		}
 		// Do not insert exceptions into Glivela or other applications' policy.
 		// Only the existing independently managed host guard is supported.
-		if c.Family != "inet" || c.Table != "host_guard" || c.Name != "input" {
+		if c.Family != "inet" || c.Table != s.hostGuardTable || c.Name != "input" {
 			return errors.New("host_firewall_requires_authorization")
 		}
 		set := "speed_" + suffix
@@ -871,4 +875,31 @@ func (s *speedSession) measure(parent context.Context, p SpeedAssignment, addres
 		return nil, errors.New(reason)
 	}
 	return sample, nil
+}
+
+// The operator identifies one existing independently managed DROP guard. This
+// never discovers a fallback table or authorizes a different hook/family.
+func (s *speedSession) loadHostGuard() error {
+	path := filepath.Join(s.directory, "host-firewall.json")
+	var raw json.RawMessage
+	if err := readControlState(path, &raw); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return errors.New("host_firewall_configuration_invalid")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return errors.New("host_firewall_configuration_invalid")
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	var v struct {
+		Version int    `json:"version"`
+		Table   string `json:"table"`
+	}
+	if !ok || owner.Uid != 0 || decode(bytes.NewReader(raw), &v) != nil || v.Version != 1 || !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`).MatchString(v.Table) || strings.HasPrefix(v.Table, "glivela_") {
+		return errors.New("host_firewall_configuration_invalid")
+	}
+	s.hostGuardTable = v.Table
+	return nil
 }

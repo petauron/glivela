@@ -12,6 +12,20 @@ a reviewed full SHA for Release Please. Actions must be allowed to create PRs.
 Generated version PRs need real CI checks on their exact head; dispatch the
 existing workflow only when those checks did not start.
 
+## First publication from a clean repository
+
+The tracked manifest retains the existing prerelease baseline. `bootstrap-sha`
+points only to this repository's clean root, so Release Please calculates its
+next version from newly reviewed releasable commits. Do not import historical
+refs or recreate an earlier version: the existing OCI namespace and tags remain
+immutable. The first authenticated image push must use this repository's normal
+GITHUB_TOKEN and existing package Write grant; no PAT is required.
+
+Before an authorized managed upgrade, retain issued subscription labels and any
+explicit existing host firewall selection as described in
+[operator-owned configuration](docs/operator-configuration.md). No installation
+identity, program storage, subscription origin or ledger is reinitialized.
+
 ## Required checks
 
 Preserve the existing CI jobs: backend verification, UI/dependency checks, native

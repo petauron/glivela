@@ -174,6 +174,10 @@ func (s *Store) LoadBusiness(keyPath string) error {
 	if err != nil {
 		return errors.New("control: business checkpoint unavailable or invalid")
 	}
+	names, err := loadSubscriptionNames(directory, material)
+	if err != nil {
+		return err
+	}
 	if material.Ownership != nil {
 		projected, changed, err := projectBusinessEntries(s.nodes, material, time.Now())
 		if err != nil {
@@ -185,6 +189,7 @@ func (s *Store) LoadBusiness(keyPath string) error {
 			}
 		}
 	}
+	s.subscriptionNames = names
 	s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key)}
 	return nil
 }
