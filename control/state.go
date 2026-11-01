@@ -130,13 +130,22 @@ func OpenStore(path string) (*Store, error) {
 		if node.Receipt != nil && validateEntryTraffic(node.Desired, node.Receipt.Traffic) != nil {
 			return nil, errors.New("control: invalid stored traffic observation")
 		}
+		staleChecks := false
 		for entry, check := range node.Checks {
-			if entry != check.Request.EntryID || !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
+			// An older, well-formed attempt cannot prove the current landing.
+			// Discard the complete inventory rather than reuse partial results;
+			// malformed, future and mismatched current attempts still fail closed.
+			outdated := node.Desired.Landing != nil && check.Request.LandingID == node.ID && check.Request.Revision < node.Desired.Revision && check.Request.ConfigSHA256 != node.Desired.ConfigSHA256
+			if entry != check.Request.EntryID || !outdated && !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
 				return nil, errors.New("control: invalid stored route check")
 			}
-			if len(node.Checks) > 64 || check.Request.Revision != node.Desired.Revision || check.Request.ConfigSHA256 != node.Desired.ConfigSHA256 || (check.Result == nil) != check.ReceivedAt.IsZero() {
+			if len(node.Checks) > 64 || !outdated && (check.Request.Revision != node.Desired.Revision || check.Request.ConfigSHA256 != node.Desired.ConfigSHA256) || (check.Result == nil) != check.ReceivedAt.IsZero() {
 				return nil, errors.New("control: inconsistent stored route check")
 			}
+			staleChecks = staleChecks || outdated
+		}
+		if staleChecks {
+			node.Checks = nil
 		}
 		seen[node.ID] = true
 		s.nodes[node.CertificateID] = node
