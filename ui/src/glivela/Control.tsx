@@ -41,7 +41,7 @@ export function GlivelaControl({standalone=false}: {standalone?:boolean}) {
     try {
       const result = await manage<{ state?: string; subscriptionToken?: string; subscriptionUrl?: string }>(operation, body);
       if (result.subscriptionUrl || result.subscriptionToken) { setToken(result.subscriptionUrl ?? result.subscriptionToken ?? ""); const subject=body&&typeof body==="object"?body as Record<string,unknown>:{};setTokenAccountId(typeof subject.accountId==="string"?subject.accountId:typeof subject.id==="string"?subject.id:""); }
-      setNotice(operation === "business" ? "状态已刷新" : operation === "account-subscription" ? "已读取订阅链接；请私下保存，不代表线路验证通过。" : operation === "retire-entry" ? "入口已从控制端退役；离线主机的停止与清理尚未验证。" : (operation === "routes" || operation === "client-chains") && body && typeof body === "object" && "delete" in body && body.delete === true ? "线路已删除，请刷新客户端订阅。" : "配置已保存；节点应用和真实线路验证仍须分别通过。");
+      setNotice(operation === "business" ? "状态已刷新" : operation === "subscription-order" ? "订阅顺序已保存，OpenClash 刷新订阅后生效。" : operation === "account-subscription" ? "已读取订阅链接；请私下保存，不代表线路验证通过。" : operation === "retire-entry" ? "入口已从控制端退役；离线主机的停止与清理尚未验证。" : (operation === "routes" || operation === "client-chains") && body && typeof body === "object" && "delete" in body && body.delete === true ? "线路已删除，请刷新客户端订阅。" : "配置已保存；节点应用和真实线路验证仍须分别通过。");
       await refresh();
       return true;
     } catch (failure) { setError(failure instanceof Error ? failure.message : "操作未确认"); return false; }
@@ -68,7 +68,7 @@ export function GlivelaControl({standalone=false}: {standalone?:boolean}) {
   {!inventory?<div className="gl-empty" role="status"><p>{error?"未能读取面板数据，请点击刷新状态重试。":"正在读取…"}</p></div>:<>
    {!owned?<Alert className="gl-message"><AlertDescription>当前状态：{inventory.state}。需要完成离线数据接管，管理操作尚不可用；不会初始化或覆盖已有数据。</AlertDescription></Alert>:null}
    <div className="gl-tab-body" hidden={page!=="nodes"}><NodeWorkspace inventory={inventory} names={names} quality={quality} network={network} disabled={disabled} onNetwork={setNetworkNode} onPause={id=>{setPauseNode(id);setDialog("availability");}} onRetire={id=>{const node=inventory.runtimes.find(n=>n.id===id);const availability=inventory.availability;if(node&&availability)void change("retire-entry",{id,expectedRevision:node.revision,expectedAvailabilityRevision:availability.revision});}}/></div>
-   <div className="gl-tab-body" hidden={page!=="accounts"}><AccountWorkspace inventory={inventory} disabled={disabled} save={change} token={token} tokenAccountId={tokenAccountId} createdAccountId={createdAccountId} onCreate={()=>setDialog("account")}/></div>
+   <div className="gl-tab-body" hidden={page!=="accounts"}><AccountWorkspace inventory={inventory} active={page==="accounts"} disabled={disabled} save={change} token={token} tokenAccountId={tokenAccountId} createdAccountId={createdAccountId} onCreate={()=>setDialog("account")}/></div>
    <div className="gl-tab-body" hidden={page!=="routes"}><RouteWorkspace inventory={inventory} names={names} disabled={disabled} save={change} latency={latency} loadSpeeds={loadSpeeds} active={page==="routes"}/></div>
    <div className="gl-tab-body gl-settings-body" hidden={page!=="quality"}><IPQuality control={quality} names={names}/></div>
    <div className="gl-tab-body gl-settings-body" hidden={page!=="diagnostics"}><div className="gl-settings-section"><AvailabilityEditor inventory={inventory} disabled={disabled} save={change}/></div></div>

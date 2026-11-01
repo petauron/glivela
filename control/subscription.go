@@ -21,6 +21,7 @@ var errSubscriptionMissing = errors.New("control: subscription unavailable")
 var errSubscriptionUnverified = errors.New("control: subscription not verified")
 
 type subscriptionContent struct {
+	items                 []glivela.SubscriptionItem
 	body                  []byte
 	contentType, userInfo string
 }
@@ -97,6 +98,23 @@ func SubscriptionHandler(store *Store) http.Handler {
 func (s *Store) subscription(ctx context.Context, token string, mihomo bool) (subscriptionContent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.business == nil {
+		return subscriptionContent{}, errSubscriptionMissing
+	}
+	m := s.business.material
+	fingerprint := glivela.SubscriptionTokenFingerprint(token)
+	accountID := ""
+	for _, item := range m.Plan.Accounts {
+		if subtle.ConstantTimeCompare([]byte(fingerprint), []byte(item.SubscriptionTokenFingerprint)) == 1 && subtle.ConstantTimeCompare([]byte(token), []byte(m.SubscriptionTokens[item.Account.ID])) == 1 {
+			accountID = item.Account.ID
+		}
+	}
+	return s.subscriptionAccountLocked(ctx, accountID, mihomo)
+}
+
+// Both the administrator's ordering view and public output use these exact
+// credential, availability, quota and runtime publication gates.
+func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string, mihomo bool) (subscriptionContent, error) {
 	if err := ctx.Err(); err != nil {
 		return subscriptionContent{}, err
 	}
@@ -107,12 +125,10 @@ func (s *Store) subscription(ctx context.Context, token string, mihomo bool) (su
 		return subscriptionContent{}, errSubscriptionMissing
 	}
 	m := s.business.material
-	fingerprint := glivela.SubscriptionTokenFingerprint(token)
 	var account *glivela.ImportAccount
 	for i := range m.Plan.Accounts {
-		item := &m.Plan.Accounts[i]
-		if subtle.ConstantTimeCompare([]byte(fingerprint), []byte(item.SubscriptionTokenFingerprint)) == 1 && subtle.ConstantTimeCompare([]byte(token), []byte(m.SubscriptionTokens[item.Account.ID])) == 1 {
-			account = item
+		if m.Plan.Accounts[i].Account.ID == accountID {
+			account = &m.Plan.Accounts[i]
 		}
 	}
 	now := time.Now().UTC()
@@ -266,10 +282,10 @@ func (s *Store) subscription(ctx context.Context, token string, mihomo bool) (su
 				}
 			}
 		}
-		result.body, err = glivela.RenderMihomo(entries, account.Account.ID, glivela.FixedMode, routes, chains...)
+		result.body, result.items, err = glivela.RenderMihomo(entries, account.Account.ID, glivela.FixedMode, routes, m.SubscriptionOrders[accountID].IDs, chains...)
 		result.contentType = "application/yaml; charset=utf-8"
 	} else {
-		result.body, err = glivela.RenderLinks(entries, account.Account.ID, glivela.FixedMode, routes, true)
+		result.body, err = glivela.RenderLinks(entries, account.Account.ID, glivela.FixedMode, routes, m.SubscriptionOrders[accountID].IDs, true)
 	}
 	if err != nil {
 		return subscriptionContent{}, errSubscriptionUnverified

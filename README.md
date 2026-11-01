@@ -27,6 +27,7 @@ outside the source checkout.
 - [Panel access](docs/panel-access.md)
 - [Entry and landing on one host](docs/node-pair.md)
 - [Client chains and composite routes](docs/composite-routes.md)
+- [Manual subscription order](docs/subscription-order.md)
 - [REALITY target changes](docs/reality-target-change.md)
 - [Startup readiness](docs/startup-readiness.md)
 

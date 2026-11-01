@@ -263,14 +263,14 @@ func TestCompositeSubscriptionIsOneStableIdentityAndOneQuotaMember(t *testing.T)
 	}
 	entries := []NativeEntry{{Material: plan.Credentials[0], Protocol: VLESSReality, Link: base}}
 	publication := PublishedRoute{Grant: grant, Protocol: VLESSReality, EntryName: "Entry", BaseLink: base, RouteLink: routed, BaseProtocolIdentity: grant.Base.Identity, RouteProtocolIdentity: grant.Route.Identity}
-	links, err := RenderLinks(entries, "account", FixedMode, []PublishedRoute{publication}, false)
+	links, err := RenderLinks(entries, "account", FixedMode, []PublishedRoute{publication}, nil, false)
 	if err != nil || len(strings.Split(strings.TrimSpace(string(links)), "\n")) != 2 {
 		t.Fatalf("one native plus one composite required: %v", err)
 	}
 	if !strings.Contains(string(links), "IPv6优先+IPv4") || strings.Count(string(links), plan.Credentials[1].ProtocolID) != 1 {
 		t.Fatal("composite split into multiple client identities")
 	}
-	if _, err := RenderMihomo(entries, "account", FixedMode, []PublishedRoute{publication}); err != nil {
+	if _, _, err := RenderMihomo(entries, "account", FixedMode, []PublishedRoute{publication}, nil); err != nil {
 		t.Fatal(err)
 	}
 	quota, err := ProjectQuota(AccountPlan{Enabled: true, TotalBytes: 1000}, []UsageMember{{CredentialID: grant.Base.ID, Observed: 100, Active: true}, {CredentialID: grant.Route.ID, Observed: 200, Active: true}})
@@ -315,7 +315,7 @@ func TestCompositePreservesNamedSingleExitSubscription(t *testing.T) {
 		t.Fatal("adding an IPv4 exit changed the configured home route name")
 	}
 	entries := []NativeEntry{{Material: plan.Credentials[0], Protocol: VLESSReality, Link: base}}
-	links, err := RenderLinks(entries, "account", FixedMode, []PublishedRoute{publication}, false)
+	links, err := RenderLinks(entries, "account", FixedMode, []PublishedRoute{publication}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestCompositePreservesNamedSingleExitSubscription(t *testing.T) {
 	if err != nil || link.Fragment != want || link.User.Username() != plan.Credentials[1].ProtocolID {
 		t.Fatal("converted home route name or credential changed")
 	}
-	mihomo, err := RenderMihomo(entries, "account", FixedMode, []PublishedRoute{publication})
+	mihomo, _, err := RenderMihomo(entries, "account", FixedMode, []PublishedRoute{publication}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
