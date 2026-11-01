@@ -41,6 +41,9 @@ export function PathMTU({ routeId, mode, landingId, landingName, disabled }: {
         expectedRevision: previous?.revision ?? "0", expected: previous?.snapshot?.fingerprint ?? "",
       }, controller.signal);
       if (!alive.current || controller.signal.aborted) return;
+      if (typeof next?.address !== "string" || !next.address || typeof next.revision !== "string" || typeof next.supported !== "boolean" || typeof next.online !== "boolean" || typeof next.pending !== "boolean") {
+        throw new Error("路径状态返回不完整，请重新检测。");
+      }
       setView(next); setError("");
       if (!initialized.current && next.snapshot && !next.pending) { syncForm(next); initialized.current = true; }
       return next;
