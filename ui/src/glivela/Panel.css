@@ -446,3 +446,13 @@ tr[data-selected="true"] .gl-node-symbol{color:var(--gl-accent);}
 .gl-overview-exit>summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:12px;cursor:pointer;min-height:44px;}
 .gl-overview-exit .gl-quality-detail{padding:0 12px 12px;}
 .gl-overview-exit summary .gl-quality-identity{flex-basis:260px;}
+
+.gl-subscription-order-list{list-style:none;margin:16px 0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.gl-subscription-order-list>li{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:8px;border-bottom:1px solid var(--gl-line);padding:8px 0;}
+.gl-subscription-position{color:var(--gl-muted);font-variant-numeric:tabular-nums;}
+.gl-subscription-label{min-width:0;}
+.gl-subscription-label strong{display:block;font-weight:500;overflow-wrap:anywhere;}
+.gl-subscription-label small{display:block;color:var(--gl-muted);margin-top:4px;}
+.gl-subscription-order-actions{display:flex;gap:4px;}
+.gl-subscription-order-actions>button{min-width:44px;min-height:44px;}
+.gl-subscription-order-footer{display:flex;gap:8px;flex-wrap:wrap;}

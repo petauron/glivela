@@ -15,6 +15,7 @@ import (
 // is immutable migration evidence/history, never a second live configuration
 // source. Do not send this material in a node receipt or publish it in logs.
 type ImportMaterial struct {
+	SubscriptionOrders map[string]SubscriptionOrder `json:"subscriptionOrders,omitempty"`
 	// Deleted entries remain disabled and retained for identity and accounting history.
 	DeletedRoutes       map[string]bool `json:"deletedRoutes,omitempty"`
 	DeletedClientChains map[string]bool `json:"deletedClientChains,omitempty"`
@@ -105,6 +106,18 @@ func (m ImportMaterial) Validate() error {
 	}
 	if err := m.validateAccountState(); err != nil {
 		return err
+	}
+	if len(m.SubscriptionOrders) > len(plan.Accounts) {
+		return errors.New("glivela: invalid subscription order accounts")
+	}
+	for id, order := range m.SubscriptionOrders {
+		found := false
+		for _, account := range plan.Accounts {
+			found = found || account.Account.ID == id
+		}
+		if !found || order.Validate() != nil {
+			return errors.New("glivela: invalid subscription order account")
+		}
 	}
 	credentials, hysteria := 0, 0
 	seenDeletedRoutes := make(map[string]bool, len(m.DeletedRoutes))

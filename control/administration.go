@@ -153,6 +153,19 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			_ = json.NewEncoder(w).Encode(struct {
 				BackedUp bool `json:"backedUp"`
 			}{true})
+		case "/v1/admin/subscription-order":
+			var request SubscriptionOrderChange
+			if decode(http.MaxBytesReader(w, r.Body, 1<<20), &request) != nil {
+				http.Error(w, "invalid subscription order request", http.StatusBadRequest)
+				return
+			}
+			view, err := store.ChangeSubscriptionOrder(r.Context(), request)
+			if err != nil {
+				http.Error(w, "subscription order or publication inventory changed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(view)
 		case "/v1/admin/account-subscription":
 			var request struct {
 				AccountID string `json:"accountId"`

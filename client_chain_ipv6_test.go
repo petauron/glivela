@@ -14,11 +14,11 @@ func TestIPv6ClientChainSubscription(t *testing.T) {
 	entry := NativeEntry{Material: CredentialMaterial{Credential: base, ProtocolID: secret}, Protocol: VLESSReality, Link: "vless://" + secret + "@entry.example.com:443?security=reality&type=tcp&sni=www.example.com&pbk=public&sid=abcd&fp=chrome&flow=xtls-rprx-vision#Entry"}
 	chain := ClientChain{ID: "chain-a", AccountID: "account-a", EntryID: "entry-a", EgressID: "egress-a", Name: "HK V6 → BGP", Port: 24001, Key: base64.StdEncoding.EncodeToString(make([]byte, 16)), Enabled: true, Transport: "ipv6-ss2022", SourceIPv6: "2001:4860:4860::8888", ServerIPv6: "2606:4700:4700::1111", EntryCertificateID: strings.Repeat("a", 64), LandingCertificateID: strings.Repeat("b", 64)}
 	publication := PublishedClientChain{Chain: chain, Base: entry, Server: chain.ServerIPv6}
-	before, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil)
+	before, _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, publication)
+	output, _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil, publication)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestIPv6ClientChainSubscription(t *testing.T) {
 	second := chain
 	second.ID, second.EgressID, second.Name, second.Port, second.ServerIPv6 = "chain-b", "egress-b", "Entry IPv6 → Landing IPv6", 24002, "2606:4700:4700::1001"
 	second.LandingCertificateID = strings.Repeat("c", 64)
-	two, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, publication, PublishedClientChain{Chain: second, Base: entry, Server: second.ServerIPv6})
+	two, _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil, publication, PublishedClientChain{Chain: second, Base: entry, Server: second.ServerIPv6})
 	if err != nil || yaml.Unmarshal(two, &result) != nil {
 		t.Fatal("two landing chains could not be rendered")
 	}
@@ -65,10 +65,10 @@ func TestIPv6ClientChainSubscription(t *testing.T) {
 		t.Fatal("landing names are missing or ambiguous")
 	}
 	publication.Server = "1.1.1.1"
-	if _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, publication); err == nil {
+	if _, _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil, publication); err == nil {
 		t.Fatal("unexpected server allowed an IPv4 fallback")
 	}
-	if _, err := RenderMihomo([]NativeEntry{entry}, "other-account", FixedMode, nil, PublishedClientChain{Chain: chain, Base: entry, Server: chain.ServerIPv6}); err == nil {
+	if _, _, err := RenderMihomo([]NativeEntry{entry}, "other-account", FixedMode, nil, nil, PublishedClientChain{Chain: chain, Base: entry, Server: chain.ServerIPv6}); err == nil {
 		t.Fatal("another account received the chain")
 	}
 	for _, mutate := range []func(*ClientChain){

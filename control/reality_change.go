@@ -201,7 +201,7 @@ func realityChangeView(node Node, endpoint glivela.ImportEndpoint, now time.Time
 		for _, c := range node.Desired.Entry.Credentials {
 			if c.Credential.Enabled && c.Credential.Kind == glivela.NativeCredential && c.Credential.EntryID == node.ID {
 				view.PreviewLink, _ = glivela.LinkForCredential(endpoint.Reality, c, "REALITY candidate")
-				preview, err := glivela.RenderMihomo([]glivela.NativeEntry{{Material: c, Protocol: glivela.VLESSReality, Link: view.PreviewLink}}, c.Credential.AccountID, glivela.FixedMode, nil)
+				preview, _, err := glivela.RenderMihomo([]glivela.NativeEntry{{Material: c, Protocol: glivela.VLESSReality, Link: view.PreviewLink}}, c.Credential.AccountID, glivela.FixedMode, nil, nil)
 				if err == nil {
 					view.PreviewMihomo = string(preview)
 				}

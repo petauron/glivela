@@ -22,7 +22,7 @@ func TestResolvedSubscriptionMatchesBothFormatsAndHiddenNative(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		links, err := RenderLinks(entries, "account-a", FixedMode, routes, false)
+		links, err := RenderLinks(entries, "account-a", FixedMode, routes, nil, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -34,7 +34,7 @@ func TestResolvedSubscriptionMatchesBothFormatsAndHiddenNative(t *testing.T) {
 			}
 			names = append(names, parsed.Fragment)
 		}
-		mihomo, err := RenderMihomo(entries, "account-a", FixedMode, routes)
+		mihomo, _, err := RenderMihomo(entries, "account-a", FixedMode, routes, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,11 +96,11 @@ func TestResolvedCompositeIsOneSharedIdentityInBothFormats(t *testing.T) {
 		if len(items) != want {
 			t.Fatal("composite was split or native duplicated", items)
 		}
-		links, err := RenderLinks(entries, "account", FixedMode, routes, false)
+		links, err := RenderLinks(entries, "account", FixedMode, routes, nil, false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		mihomo, err := RenderMihomo(entries, "account", FixedMode, routes)
+		mihomo, _, err := RenderMihomo(entries, "account", FixedMode, routes, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

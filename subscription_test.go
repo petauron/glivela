@@ -19,7 +19,7 @@ func TestRenderLinksReplacesEntryRegionWithLandingRegion(t *testing.T) {
 	}
 	baseMaterial := CredentialMaterial{Credential: grant.Base, ProtocolID: baseSecret}
 	entries := []NativeEntry{{Material: baseMaterial, Protocol: VLESSReality, Link: baseLink}}
-	result, err := RenderLinks(entries, "account-a", FixedMode, []PublishedRoute{{Grant: grant, Protocol: VLESSReality, EntryName: "🇺🇸 美国｜Entry-Alpha", EgressRegionPrefix: "🇹🇼 台湾", BaseLink: baseLink, RouteLink: routeLink, BaseProtocolIdentity: grant.Base.Identity, RouteProtocolIdentity: grant.Route.Identity}}, true)
+	result, err := RenderLinks(entries, "account-a", FixedMode, []PublishedRoute{{Grant: grant, Protocol: VLESSReality, EntryName: "🇺🇸 美国｜Entry-Alpha", EgressRegionPrefix: "🇹🇼 台湾", BaseLink: baseLink, RouteLink: routeLink, BaseProtocolIdentity: grant.Base.Identity, RouteProtocolIdentity: grant.Route.Identity}}, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestRenderLinksSupportsNativeOnlyAccount(t *testing.T) {
 	secret := "11111111-1111-4111-8111-111111111111"
 	link := "vless://" + secret + "@entry.example.com:443?security=reality&type=tcp&sni=www.example.com&pbk=public&sid=abcd&fp=chrome&flow=xtls-rprx-vision#🇺🇸｜Entry-Alpha"
 	credential := Credential{ID: "native-a", AccountID: "account-a", Kind: NativeCredential, User: "Phone", Identity: Identity(secret), EntryID: "entry-a", Enabled: true}
-	result, err := RenderLinks([]NativeEntry{{Material: CredentialMaterial{Credential: credential, ProtocolID: secret}, Protocol: VLESSReality, Link: link}}, "account-a", FixedMode, nil, false)
+	result, err := RenderLinks([]NativeEntry{{Material: CredentialMaterial{Credential: credential, ProtocolID: secret}, Protocol: VLESSReality, Link: link}}, "account-a", FixedMode, nil, nil, false)
 	if err != nil || string(result) != link+"\n" {
 		t.Fatalf("native subscription = %q, err=%v", string(result), err)
 	}
@@ -62,7 +62,7 @@ func TestRenderLinksKeepsAuthorizedRouteWithoutHealthReceipt(t *testing.T) {
 		Route: Credential{ID: "route-a", AccountID: "account-a", Kind: RouteCredential, User: RouteUser("grant-a"), Identity: Identity(routeSecret), EntryID: "entry-a", EgressID: "egress-a", Enabled: true},
 		Mode:  FixedMode, Enabled: true, DesiredRev: 2, AppliedRev: 1,
 	}
-	result, err := RenderLinks([]NativeEntry{{Material: CredentialMaterial{Credential: base, ProtocolID: secret}, Protocol: VLESSReality, Link: link}}, "account-a", FixedMode, []PublishedRoute{{Grant: grant, Protocol: VLESSReality, EntryName: "Entry-Alpha", BaseLink: link, RouteLink: strings.Replace(link, secret, routeSecret, 1), BaseProtocolIdentity: base.Identity, RouteProtocolIdentity: grant.Route.Identity}}, false)
+	result, err := RenderLinks([]NativeEntry{{Material: CredentialMaterial{Credential: base, ProtocolID: secret}, Protocol: VLESSReality, Link: link}}, "account-a", FixedMode, []PublishedRoute{{Grant: grant, Protocol: VLESSReality, EntryName: "Entry-Alpha", BaseLink: link, RouteLink: strings.Replace(link, secret, routeSecret, 1), BaseProtocolIdentity: base.Identity, RouteProtocolIdentity: grant.Route.Identity}}, nil, false)
 	if err != nil || !strings.Contains(string(result), routeSecret) || !strings.Contains(string(result), secret) {
 		t.Fatalf("authorized route result = %q, err=%v", string(result), err)
 	}
@@ -82,10 +82,10 @@ func TestRenderSubscriptionsRejectRoutedHysteria(t *testing.T) {
 	grant := RouteGrant{ID: "grant-a", AccountID: "account-a", EntryID: "entry", EgressID: "egress-a", InboundTag: "meridian-entry", Base: base, Route: route, Mode: FixedMode, Enabled: true, DesiredRev: 2, AppliedRev: 2, RuntimeGood: true}
 	routes := []PublishedRoute{{Grant: grant, Protocol: Hysteria2, EntryName: "｜Entry", EgressRegionPrefix: "🇹🇼 台湾", BaseLink: baseLink, RouteLink: baseLink, BaseProtocolIdentity: baseMaterial.HysteriaIdentity, RouteProtocolIdentity: baseMaterial.HysteriaIdentity}}
 	entries := []NativeEntry{{Material: baseMaterial, Protocol: Hysteria2, Link: baseLink}}
-	if _, err := RenderLinks(entries, "account-a", FixedMode, routes, false); err == nil {
+	if _, err := RenderLinks(entries, "account-a", FixedMode, routes, nil, false); err == nil {
 		t.Fatal("routed Hysteria link subscription was accepted")
 	}
-	if _, err := RenderMihomo(entries, "account-a", FixedMode, routes); err == nil {
+	if _, _, err := RenderMihomo(entries, "account-a", FixedMode, routes, nil); err == nil {
 		t.Fatal("routed Hysteria Mihomo subscription was accepted")
 	}
 }
