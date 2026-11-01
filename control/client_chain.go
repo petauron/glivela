@@ -298,6 +298,7 @@ func projectClientLandings(nodes map[string]Node, m glivela.ImportMaterial, now 
 			return false, err
 		}
 		n.Desired, n.Receipt, n.ReportedAt = desired, nil, time.Time{}
+		n.Checks = nil
 		nodes[cert] = n
 		changed = true
 	}
