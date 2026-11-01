@@ -36,6 +36,7 @@ outside the source checkout.
 - [IP quality and unlock details](docs/ip-quality.md)
 - [Node-to-node speed tests](docs/link-speed.md)
 - [Network optimization](docs/network-optimization.md)
+- [Path MTU](docs/path-mtu.md)
 - [Public egress policy](docs/public-egress.md)
 - [Temporary availability](docs/temporary-availability.md)
 

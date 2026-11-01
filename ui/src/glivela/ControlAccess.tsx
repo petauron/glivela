@@ -14,6 +14,7 @@ function client(applicationId?: string): Request {
     if (!response.ok && operation === "link-speeds" && response.status === 409) { const code = (await response.text()).trim(); throw new Error(/^[a-z0-9_]{1,64}$/.test(code) ? code : "测速请求未确认，请刷新后再试。"); }
     if (!response.ok) {
       if (response.status === 409 && operation === "subscription-order") throw new Error("排序或可发布代理已变化，请重新读取后调整；未覆盖其他更改。");
+      if (response.status === 409 && operation === "path-mtu") { const reason = (await response.text()).trim(); throw new Error(reason && reason.length <= 256 ? reason : "路径 MTU 操作未确认，请重新检测。"); }
       if (response.status === 409 && operation === "retire-entry") throw new Error("退役未确认：请检查入口是否离线、已暂停，链式监听是否已撤销并应用，以及是否有配置变更待处理。");
       if (response.status === 409 && (operation === "routes" || operation === "client-chains") && body && typeof body === "object" && "delete" in body && body.delete === true) throw new Error("删除未确认：请先停用线路，等待相关节点应用后再试。");
       if (response.status === 401) throw new Error("登录已过期，请重新登录 Vastora 后重试。");

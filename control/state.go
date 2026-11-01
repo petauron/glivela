@@ -53,6 +53,8 @@ type Store struct {
 	latencyHistory      *latencyHistoryState
 	latencyHistoryFault bool
 	networkReports      map[string]NetworkSnapshot
+	pathMTUNodes        map[string]time.Time
+	pathMTUReports      map[string]map[string]PathMTUObservation
 	speedJobs           map[string]*speedRecord
 	nodeEvents          *nodeEventHub
 	speedHub            *speedHub

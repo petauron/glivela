@@ -188,7 +188,7 @@ func (s *nodeOperationsServer) NetworkOptimization(ctx context.Context, in *pb.N
 	var request struct {
 		Report *NetworkReport `json:"report"`
 	}
-	if err = nodeDocument(in, &request, 16<<10); err != nil {
+	if err = nodeDocument(in, &request, 64<<10); err != nil {
 		return nil, err
 	}
 	command, err := s.store.exchangeNetwork(cert, request.Report)

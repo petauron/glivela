@@ -6,6 +6,7 @@ import { LatencyCell, latencyKey, type RouteLatency } from "./RouteLatency";
 import { LinkSpeed, RouteSpeedSummary, speedKey, useLinkSpeed, type SpeedBody, type SpeedList } from "./LinkSpeed";
 import { routeLabels } from "./control-format";
 import type { Inventory } from "./control-types";
+import { PathMTU } from "./PathMTU";
 
 export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds,active}: {
  inventory:Inventory; names:Map<string,string>; disabled:boolean; save:(operation:string,body:unknown)=>Promise<boolean>;
@@ -100,6 +101,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  {current.mode==="client"?<p className="gl-context-copy">仅 TCP · 落地端口 {current.port}{current.shared?" · 共享凭据":""}。停用或配置变更后，请刷新客户端订阅并验证。</p>:null}
  <details className="gl-context-details gl-route-verification"><summary>查看验证信息</summary><p>{state(current)}</p></details>
  <section className="gl-route-latencies"><h3>TCP 连接记录</h3>{landingIds(current).map(landingId=><div className="gl-route-latency-detail" key={landingId}><p>{nodeName(landingId)}</p><LatencyCell value={latency.values.get(latencyKey(current.entryId,landingId,current.port))} now={latency.now} failed={!!latency.error}/></div>)}</section>
+ {landingIds(current).map(landingId=><PathMTU key={`mtu/${current.mode}/${current.id}/${landingId}`} routeId={current.id} mode={current.mode} landingId={landingId} landingName={nodeName(landingId)} disabled={disabled}/>)}
  {landingIds(current).map(landingId=><LinkSpeed key={`${current.id}/${landingId}`} entryId={current.entryId} entryName={nodeName(current.entryId)} landingId={landingId} landingName={nodeName(landingId)} reason={reason(current,landingId)} disabled={disabled} control={speed}/>)}
  <section>{current.mode==="client"&&!current.shared?<Button className="gl-wide" variant="outline" disabled={disabled} onClick={()=>shareLanding(current)}>落地统一 24000</Button>:null}<Button className="gl-wide" variant="outline" disabled={disabled||!inventory.accounts.some(a=>a.account.id===current.accountId)} onClick={()=>toggle(current)}>{current.enabled?(listState(current).enabled?"停用线路":"关闭线路开关"):"启用线路"}</Button>
   {deleteKey===selected?<div className="gl-route-delete-confirm" role="group" aria-label="确认删除线路"><p>删除后线路将从列表和新订阅中移除，历史流量保留。{current.ipv4EgressId?"这条线路的两个落地会一并删除。":""}</p><div><Button variant="outline" disabled={disabled} onClick={()=>setDeleteKey("")}>取消</Button><Button variant="destructive" disabled={disabled||current.enabled} onClick={()=>void remove(current)}>确认删除</Button></div></div>:<Button className="gl-wide gl-route-delete-button" variant="ghost" disabled={disabled||current.enabled} onClick={()=>setDeleteKey(selected)}>删除线路</Button>}

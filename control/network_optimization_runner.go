@@ -16,18 +16,29 @@ func RunNetworkOptimization(ctx context.Context, client *Client, directory strin
 	for ctx.Err() == nil {
 		step, stop := context.WithTimeout(ctx, 30*time.Second)
 		if report == nil && time.Since(last) >= time.Minute {
-			report = &NetworkReport{Snapshot: inspectNetwork(step, directory)}
+			if desired, err := client.currentDesired(step); err == nil {
+				resumePathMTUs(step, directory, desired)
+			}
+			value := pathNetworkReport(step, directory)
+			report = &value
 			last = time.Now()
 		}
 		if report != nil && time.Since(report.Snapshot.CheckedAt) > time.Minute {
 			report.Snapshot = inspectNetwork(step, directory)
+			report.Paths = observePathMTUs(step, directory)
 			last = time.Now()
 		}
 		command, err := client.networkExchange(step, report)
 		if err == nil {
 			report = nil
 			if command != nil {
-				value := executeNetwork(step, directory, *command)
+				var value NetworkReport
+				if command.PathMTU != nil {
+					value = runPathMTU(step, client, directory, *command)
+				} else {
+					value = executeNetwork(step, directory, *command)
+				}
+				value.PathMTUSupported = true
 				report = &value
 				last = time.Now()
 				stop()

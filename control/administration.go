@@ -104,6 +104,8 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			store.manageQuality(w, r)
 		case "/v1/admin/network-optimization":
 			store.manageNetwork(w, r)
+		case "/v1/admin/path-mtu":
+			store.managePathMTU(w, r)
 		case "/v1/admin/retire-entry":
 			var input RetireEntryChange
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {

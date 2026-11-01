@@ -39,12 +39,13 @@ type NetworkSnapshot struct {
 	Reason           string    `json:"reason,omitempty"`
 }
 type NetworkCommand struct {
-	ID          string    `json:"id"`
-	Action      string    `json:"action"`
-	Expected    string    `json:"expected"`
-	BufferBytes int64     `json:"bufferBytes"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-	Actor       string    `json:"actor"`
+	PathMTU     *PathMTUCommand `json:"pathMtu,omitempty"`
+	ID          string          `json:"id"`
+	Action      string          `json:"action"`
+	Expected    string          `json:"expected"`
+	BufferBytes int64           `json:"bufferBytes"`
+	ExpiresAt   time.Time       `json:"expiresAt"`
+	Actor       string          `json:"actor"`
 }
 type NetworkResult struct {
 	ID      string `json:"id"`
@@ -52,6 +53,7 @@ type NetworkResult struct {
 	Message string `json:"message"`
 }
 type NetworkSettings struct {
+	Paths map[string]PathMTUObservation `json:"paths,omitempty"`
 	// Preserve prior settings in persisted state; buffer calculation uses memory only.
 	BandwidthMbps   int             `json:"bandwidthMbps"`
 	ManualRTTMillis float64         `json:"manualRttMs,omitempty"`
@@ -62,8 +64,10 @@ type NetworkSettings struct {
 	Result          *NetworkResult  `json:"result,omitempty"`
 }
 type NetworkReport struct {
-	Snapshot NetworkSnapshot `json:"snapshot"`
-	Result   *NetworkResult  `json:"result,omitempty"`
+	PathMTUSupported bool                 `json:"pathMtuSupported,omitempty"`
+	Paths            []PathMTUObservation `json:"paths,omitempty"`
+	Snapshot         NetworkSnapshot      `json:"snapshot"`
+	Result           *NetworkResult       `json:"result,omitempty"`
 }
 type NetworkView struct {
 	NodeID          string           `json:"nodeId"`
@@ -224,6 +228,9 @@ func (s *Store) exchangeNetwork(cert string, report *NetworkReport) (*NetworkCom
 		return nil, errors.New("node not enrolled")
 	}
 	if report != nil {
+		if err := s.acceptPathMTUReport(cert, n, report); err != nil {
+			return nil, err
+		}
 		v := report.Snapshot
 		if len(v.Reason) > 512 || len(v.Interface) > 64 || len(v.Scope) > 80 || len(v.Available) > 32 || len(v.Fingerprint) != 64 {
 			return nil, errors.New("invalid network observation")
@@ -242,6 +249,7 @@ func (s *Store) exchangeNetwork(cert string, report *NetworkReport) (*NetworkCom
 			// Late receipts from expired/replaced commands must not wedge this channel.
 			if n.Network != nil && n.Network.Command != nil && result.ID == n.Network.Command.ID && n.Network.Result == nil {
 				settings := *n.Network
+				recordPathMTU(&settings, report)
 				settings.Result = result
 				n.Network = &settings
 				next := s.copy()
@@ -264,7 +272,7 @@ func (c *Client) networkExchange(ctx context.Context, report *NetworkReport) (*N
 	}
 	if err := c.nodeCall(ctx, pb.NewNodeOperationsClient(c.grpc).NetworkOptimization, struct {
 		Report *NetworkReport `json:"report"`
-	}{report}, &out, 16<<10, 8192); err != nil {
+	}{report}, &out, 64<<10, 8192); err != nil {
 		return nil, err
 	}
 	return out.Command, nil
