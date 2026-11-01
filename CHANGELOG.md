@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.101](https://github.com/petauron/glivela/compare/v0.1.0-alpha.100...v0.1.0-alpha.101) (2026-11-01)
+
+
+### Bug Fixes
+
+* **control:** expire obsolete landing route checks ([#28](https://github.com/petauron/glivela/issues/28)) ([03de2d9](https://github.com/petauron/glivela/commit/03de2d93611d1bb8436dc350cea64870d1718767))
+
 ## [0.1.0-alpha.100](https://github.com/petauron/glivela/compare/v0.1.0-alpha.99...v0.1.0-alpha.100) (2026-11-01)
 
 
