@@ -35,3 +35,12 @@ Verify actual public TCP 22 and another former blocked port, private-target
 rejection, existing HTTPS/subscription access, and continuous account counters
 before accepting deployment. Never restore a traffic ledger to revert a failed
 program update; use the retained configuration with a new forward revision.
+
+## Retained landing address changes
+
+A removed public IP does not authorize re-enrollment or runtime journal edits.
+Update the existing landing plan with an advancing revision. The native driver
+validates every new local bind as usual, and removes only exact retained firewall
+policies reconstructed on local interfaces with full ownership/rule readback.
+The old IP need not remain assigned for cleanup or an authenticated pending retry;
+unknown or changed rules are retained and the operation fails closed.
