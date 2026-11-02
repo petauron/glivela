@@ -304,6 +304,37 @@ func (d SystemdDriver) landingFirewall(plan landing.Plan) (landing.ServerFirewal
 	return plan.Firewall(d.WorkerUID, iface)
 }
 
+// Removal reconstructs only the exact retained policy on local interfaces.
+// Its old public address need not still be assigned: full table ownership and
+// rule readback remain mandatory, while activation still validates new binds.
+func (d SystemdDriver) removeLandingFirewall(ctx context.Context, plan landing.Plan) error {
+	if err := plan.Validate(); err != nil {
+		return err
+	}
+	interfaces := []string{d.Interface}
+	if plan.Transport.PublicAddress != "" {
+		local, err := net.Interfaces()
+		if err != nil {
+			return err
+		}
+		for _, iface := range local {
+			if iface.Name != d.Interface {
+				interfaces = append(interfaces, iface.Name)
+			}
+		}
+	}
+	for _, iface := range interfaces {
+		policy, err := plan.Firewall(d.WorkerUID, iface)
+		if err != nil {
+			return err
+		}
+		if err := policy.Remove(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d SystemdDriver) Activate(ctx context.Context, desired Desired, previous *Desired) error {
 	if previous != nil && (previous.Landing == nil || previous.Entry != nil) {
 		return errors.New("control: previous runtime has a different role")
@@ -321,11 +352,7 @@ func (d SystemdDriver) Activate(ctx context.Context, desired Desired, previous *
 		return err
 	}
 	if previous != nil && previous.Revision != desired.Revision {
-		old, err := d.landingFirewall(*previous.Landing)
-		if err != nil {
-			return err
-		}
-		if err = old.Remove(ctx); err != nil {
+		if err = d.removeLandingFirewall(ctx, *previous.Landing); err != nil {
 			return err
 		}
 	}
@@ -355,11 +382,7 @@ func (d SystemdDriver) Stop(ctx context.Context, desired Desired) error {
 	if err := d.stopOwned(ctx); err != nil {
 		return err
 	}
-	policy, err := d.landingFirewall(*desired.Landing)
-	if err != nil {
-		return err
-	}
-	return policy.Remove(ctx)
+	return d.removeLandingFirewall(ctx, *desired.Landing)
 }
 
 // Confirm the loaded owned unit has no process before removing its firewall.
