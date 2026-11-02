@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.103](https://github.com/petauron/glivela/compare/v0.1.0-alpha.102...v0.1.0-alpha.103) (2026-11-02)
+
+
+### Bug Fixes
+
+* recover landing firewall after public IP changes ([#34](https://github.com/petauron/glivela/issues/34)) ([461cfb6](https://github.com/petauron/glivela/commit/461cfb674d166de8211cede36b415a33f12e83d3))
+
 ## [0.1.0-alpha.102](https://github.com/petauron/glivela/compare/v0.1.0-alpha.101...v0.1.0-alpha.102) (2026-11-01)
 
 
