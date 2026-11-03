@@ -333,6 +333,13 @@ func (s *Store) Business() BusinessInventory {
 		if entryRetired(m, node.ID) {
 			continue
 		}
+		hostID := runtimeHostID(m, node)
+		if _, referenced := m.References.Nodes[node.ID]; hostID == "" && !referenced {
+			// A freshly enrolled runtime may not yet be referenced by the
+			// imported business inventory. Keep its own stable runtime ID as
+			// a display-only association target; never add it to the ledger.
+			view.Nodes = append(view.Nodes, BusinessNode{ID: node.ID, Name: node.ID, CenterAgentID: s.hostBindings[node.ID]})
+		}
 		role := "landing"
 		peers := []string{}
 		if node.Desired.Entry != nil {
@@ -342,8 +349,9 @@ func (s *Store) Business() BusinessInventory {
 			}
 		}
 		slices.Sort(peers)
-		view.Runtimes = append(view.Runtimes, BusinessRuntime{HostID: runtimeHostID(m, node), ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+		view.Runtimes = append(view.Runtimes, BusinessRuntime{HostID: hostID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
 	}
+	slices.SortFunc(view.Nodes, func(a, b BusinessNode) int { return strings.Compare(a.ID, b.ID) })
 	slices.SortFunc(view.Runtimes, func(a, b BusinessRuntime) int { return strings.Compare(a.ID, b.ID) })
 	slices.SortFunc(view.Routes, func(a, b BusinessRoute) int { return strings.Compare(a.ID, b.ID) })
 	return view
