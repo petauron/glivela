@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.108](https://github.com/petauron/glivela/compare/v0.1.0-alpha.107...v0.1.0-alpha.108) (2026-11-03)
+
+
+### Bug Fixes
+
+* **control:** reopen partial entry inventories after restart ([#46](https://github.com/petauron/glivela/issues/46)) ([ef0f40a](https://github.com/petauron/glivela/commit/ef0f40a4a575f7cc9d653b249fd9d98240c7d919))
+
 ## [0.1.0-alpha.107](https://github.com/petauron/glivela/compare/v0.1.0-alpha.106...v0.1.0-alpha.107) (2026-11-03)
 
 
