@@ -334,7 +334,7 @@ func (s *Store) Business() BusinessInventory {
 			continue
 		}
 		hostID := runtimeHostID(m, node)
-		if hostID == "" {
+		if _, referenced := m.References.Nodes[node.ID]; hostID == "" && !referenced {
 			// A freshly enrolled runtime may not yet be referenced by the
 			// imported business inventory. Keep its own stable runtime ID as
 			// a display-only association target; never add it to the ledger.
