@@ -65,6 +65,26 @@ func (s *Store) RegisterEndpoint(ctx context.Context, input EndpointRegistration
 		if old.Reality.EntryID != entry || !reflect.DeepEqual(old.Reality, e.Reality) || old.ServiceID != service || old.Retired || old.TotalBytes != e.TotalBytes || old.ResetDay != e.ResetDay || old.TargetIP != e.TargetIP || old.VLESSEnabled != e.VLESSEnabled || !reflect.DeepEqual(next.References.Nodes[input.NodeID], input.Node) || next.References.Applications[entry] != input.Application || next.References.Services[service] != input.Service {
 			return invalid
 		}
+		if old.QuotaAppliedEnabled != e.QuotaAppliedEnabled {
+			// Correct only an unused, unlimited initial registration. A retry
+			// must never reopen an exhausted quota or change an active entry.
+			if !e.QuotaAppliedEnabled || old.TotalBytes != 0 || old.UsedBytes != 0 || old.ResetDay != 0 || old.DesiredRevision != 1 || old.AppliedRevision != 0 || old.PreviousStatus != "pending" || old.HistoricalHealthy || old.LegacyRetired || old.RuntimeCertificateID != "" || old.RuntimeConfigSHA256 != "" {
+				return invalid
+			}
+			for _, account := range next.Plan.Accounts {
+				for _, credential := range account.Credentials {
+					if credential.EntryID != entry {
+						continue
+					}
+					counter := next.TrafficCounters[credential.ID]
+					if counter.UploadBytes != 0 || counter.DownloadBytes != 0 || counter.RawUploadBytes != 0 || counter.RawDownloadBytes != 0 {
+						return invalid
+					}
+				}
+			}
+			next.Endpoints = slices.Clone(next.Endpoints)
+			next.Endpoints[index].QuotaAppliedEnabled = true
+		}
 	} else {
 		if _, exists := next.References.Applications[entry]; exists {
 			return invalid
