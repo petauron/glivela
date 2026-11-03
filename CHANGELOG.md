@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.107](https://github.com/petauron/glivela/compare/v0.1.0-alpha.106...v0.1.0-alpha.107) (2026-11-03)
+
+
+### Bug Fixes
+
+* **control:** recognize systemd-resolved ownership during entry staging ([f72fe6c](https://github.com/petauron/glivela/commit/f72fe6cdaa694dcd8d6064df9bcc882244124b0c))
+
 ## [0.1.0-alpha.106](https://github.com/petauron/glivela/compare/v0.1.0-alpha.105...v0.1.0-alpha.106) (2026-11-03)
 
 
