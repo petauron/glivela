@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.106](https://github.com/petauron/glivela/compare/v0.1.0-alpha.105...v0.1.0-alpha.106) (2026-11-03)
+
+
+### Bug Fixes
+
+* 支持独立落地节点关联主机名称 ([00b39a1](https://github.com/petauron/glivela/commit/00b39a182a9a388efaf3546580fa4b75c8d2a9b4))
+
 ## [0.1.0-alpha.105](https://github.com/petauron/glivela/compare/v0.1.0-alpha.104...v0.1.0-alpha.105) (2026-11-03)
 
 
