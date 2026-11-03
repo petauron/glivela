@@ -178,6 +178,10 @@ func OpenStore(path string) (*Store, error) {
 // Stable node identity survives configuration changes. Certificate rotation
 // requires the same node ID and atomically revokes the previous certificate.
 func (s *Store) Put(node Node) error {
+	return s.put(node, "")
+}
+
+func (s *Store) put(node Node, previousVerifierCertificate string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.entryRetiredLocked(node.ID) {
@@ -197,6 +201,11 @@ func (s *Store) Put(node Node) error {
 		return errors.New("control: invalid enrollment")
 	}
 	next := s.copy()
+	if previousVerifierCertificate != "" {
+		if err := s.retireLegacyVerifierReferences(next, node, previousVerifierCertificate); err != nil {
+			return err
+		}
+	}
 	if existing, ok := next[node.CertificateID]; ok && existing.ID != node.ID {
 		return errors.New("control: certificate already assigned")
 	}
@@ -256,6 +265,13 @@ func (s *Store) Put(node Node) error {
 			return err
 		}
 		next = projected
+	}
+	if previousVerifierCertificate != "" {
+		for certificate, before := range s.nodes {
+			if after, ok := next[certificate]; !ok || !reflect.DeepEqual(before.Desired, after.Desired) {
+				return errors.New("control: verifier handover would change another runtime")
+			}
+		}
 	}
 	return s.commit(next)
 }

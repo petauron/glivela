@@ -402,13 +402,14 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			w.WriteHeader(http.StatusAccepted)
 		case "/v1/admin/entries":
 			var request struct {
-				ID            string           `json:"id"`
-				CertificateID string           `json:"certificateId"`
-				Plan          glivela.XrayPlan `json:"plan"`
-				Network       *EntryNetwork    `json:"network"`
-				Quota         *EntryQuotaSeed  `json:"quota,omitempty"`
+				PreviousVerifierCertificateID string           `json:"previousVerifierCertificateId,omitempty"`
+				ID                            string           `json:"id"`
+				CertificateID                 string           `json:"certificateId"`
+				Plan                          glivela.XrayPlan `json:"plan"`
+				Network                       *EntryNetwork    `json:"network"`
+				Quota                         *EntryQuotaSeed  `json:"quota,omitempty"`
 			}
-			if decode(http.MaxBytesReader(w, r.Body, maxMessage), &request) != nil || request.Network == nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] {
+			if decode(http.MaxBytesReader(w, r.Body, maxMessage), &request) != nil || request.Network == nil || !glivela.ValidIdentifier(request.ID) || !glivela.ValidIdentity(request.CertificateID) || admins[request.CertificateID] || admins[request.PreviousVerifierCertificateID] {
 				http.Error(w, "invalid entry identity or plan", http.StatusBadRequest)
 				return
 			}
@@ -425,7 +426,7 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 					return
 				}
 			}
-			if err := store.Put(Node{ID: request.ID, CertificateID: request.CertificateID, Desired: desired, EntryQuota: quota}); err != nil {
+			if err := store.put(Node{ID: request.ID, CertificateID: request.CertificateID, Desired: desired, EntryQuota: quota}, request.PreviousVerifierCertificateID); err != nil {
 				http.Error(w, "entry update refused", http.StatusConflict)
 				return
 			}

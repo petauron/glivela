@@ -26,6 +26,10 @@ type legacyEntrySnapshot struct {
 	Configuration []byte              `json:"configuration"`
 }
 
+// The retired container is a migration source, not the new worker. Retain the
+// reviewed immutable source pin even when the bundled target core advances.
+const legacyEntryImageReference = "ghcr.io/xtls/xray-core:26.7.28@sha256:b697cda1588faca696ab7f7755dd1161f60862af3ff6026300e44cff6aedd558"
+
 const legacyEntryLabels = `{"application":{{json (index .Config.Labels "io.vastora.application")}},"id":{{json (index .Config.Labels "io.vastora.application.id")}},"managed":{{json (index .Config.Labels "io.vastora.managed")}},"component":{{json (index .Config.Labels "io.vastora.component")}},"runtime":{{json (index .Config.Labels "io.vastora.proxy-runtime")}}}`
 
 func readLegacyEntry(ctx context.Context, id, application string) (legacyEntrySnapshot, error) {
@@ -44,7 +48,7 @@ func readLegacyEntry(ctx context.Context, id, application string) (legacyEntrySn
 	}
 	state, err := decodeEntryContainer(raw)
 	canonicalizeLegacyEntryMounts(&state)
-	if err != nil || state.ID != id || state.Config.Image != entryImageReference || !slices.Equal(state.Config.Entrypoint, []string{"/usr/local/bin/xray"}) || !slices.Equal(state.Config.Cmd, []string{"run", "-c", "/etc/vastora/config.json"}) || state.Host.Privileged || !state.Host.ReadonlyRootfs || state.Host.AutoRemove || state.State.Restarting || state.State.Paused || state.State.Dead || !legacyEntryMountsValid(state) {
+	if err != nil || state.ID != id || (state.Config.Image != legacyEntryImageReference && state.Config.Image != entryImageReference) || !slices.Equal(state.Config.Entrypoint, []string{"/usr/local/bin/xray"}) || !slices.Equal(state.Config.Cmd, []string{"run", "-c", "/etc/vastora/config.json"}) || state.Host.Privileged || !state.Host.ReadonlyRootfs || state.Host.AutoRemove || state.State.Restarting || state.State.Paused || state.State.Dead || !legacyEntryMountsValid(state) {
 		return legacyEntrySnapshot{}, invalid
 	}
 	switch state.Host.Restart {

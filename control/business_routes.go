@@ -183,7 +183,11 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 				}
 			}
 			for _, grant := range account.Grants {
-				if grant.EntryID == entryID {
+				// Deletion itself does not change a running entry. Preserve a
+				// retained disabled grant until explicit resource retirement,
+				// but never reintroduce it after native handover omitted it.
+				retained := slices.ContainsFunc(node.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return current.ID == grant.ID })
+				if grant.EntryID == entryID && (!material.DeletedRoutes[grant.ID] || retained) {
 					plan.Grants = append(plan.Grants, grants[grant.ID])
 				}
 			}
