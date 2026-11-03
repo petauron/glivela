@@ -114,6 +114,7 @@ func TestExpiredPreparationCancellationPreservesLedger(t *testing.T) {
 	driver := &transportDriverFixture{driverFixture: base}
 	r.Driver = driver
 	q, old, started := quotaFixture(t)
+	q.ResetDay, q.Timezone, q.NextResetAt = 0, "", time.Time{}
 	q.TotalBytes = 1000000
 	ctx := context.Background()
 	if err := r.Apply(ctx, old); err != nil {

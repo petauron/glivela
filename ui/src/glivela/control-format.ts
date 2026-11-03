@@ -13,8 +13,9 @@ export const routeLabels: Record<string,string> = { verified: "当前验证通�
 
 // Entry runtime IDs identify application instances; node IDs identify hosts.
 // Resolve the explicit binding before displaying a runtime or route name.
-export function hostNames(inventory: { nodes: { id: string; name: string }[]; endpoints: { entryId: string; nodeId: string }[] }) {
- const hosts = new Map(inventory.nodes.map(node => [node.id, node.name]));
+export function hostNames(inventory: { nodes: { id: string; name: string; centerAgentId?: string }[]; endpoints: { entryId: string; nodeId: string }[] }, agents: { id: string; name: string }[] = []) {
+ const agentNames = new Map(agents.map(agent => [agent.id, agent.name]));
+ const hosts = new Map(inventory.nodes.map(node => [node.id, agentNames.get(node.centerAgentId ?? node.id) ?? node.name]));
  const names = new Map(hosts);
  for (const endpoint of inventory.endpoints) names.set(endpoint.entryId, hosts.get(endpoint.nodeId) ?? endpoint.entryId);
  return names;

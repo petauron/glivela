@@ -18,7 +18,7 @@ import { AvailabilityEditor, CreateAccount, CreateRoute } from "./ControlForms";
 import { IPQuality, useIPQuality } from "./IPQuality";
 import "./Panel.css";
 
-export function GlivelaControl({standalone=false}: {standalone?:boolean}) {
+export function GlivelaControl({standalone=false, agents=[]}: {standalone?:boolean; agents?: {id: string; name: string}[]}) {
   const manage = useControlRequest();
   const loadSpeeds = useCallback((body: SpeedBody, signal?: AbortSignal) => manage<SpeedList>("link-speeds", body, signal), [manage]);
   const loadRouteLatencies = useCallback((body: { refresh: boolean; force: boolean }, signal: AbortSignal) => manage<{ latencies: RouteLatency[] }>("route-latencies", body, signal), [manage]);
@@ -47,7 +47,7 @@ export function GlivelaControl({standalone=false}: {standalone?:boolean}) {
     } catch (failure) { setError(failure instanceof Error ? failure.message : "操作未确认"); return false; }
     finally { pending.current = false; setBusy(false); }
   };
-  const names = useMemo(()=>inventory ? hostNames(inventory) : new Map<string,string>(),[inventory]);
+  const names = useMemo(()=>inventory ? hostNames(inventory, agents) : new Map<string,string>(),[inventory, agents]);
   const owned = inventory?.state === "owned";
   const latency = useRouteLatencies(owned, loadRouteLatencies);
   const network = useNetworkOptimization(!!inventory);
@@ -67,7 +67,7 @@ export function GlivelaControl({standalone=false}: {standalone?:boolean}) {
   {notice?<p role="status" className="gl-message gl-notice">{notice}</p>:null}
   {!inventory?<div className="gl-empty" role="status"><p>{error?"未能读取面板数据，请点击刷新状态重试。":"正在读取…"}</p></div>:<>
    {!owned?<Alert className="gl-message"><AlertDescription>当前状态：{inventory.state}。需要完成离线数据接管，管理操作尚不可用；不会初始化或覆盖已有数据。</AlertDescription></Alert>:null}
-   <div className="gl-tab-body" hidden={page!=="nodes"}><NodeWorkspace inventory={inventory} names={names} quality={quality} network={network} disabled={disabled} onNetwork={setNetworkNode} onPause={id=>{setPauseNode(id);setDialog("availability");}} onRetire={id=>{const node=inventory.runtimes.find(n=>n.id===id);const availability=inventory.availability;if(node&&availability)void change("retire-entry",{id,expectedRevision:node.revision,expectedAvailabilityRevision:availability.revision});}}/></div>
+   <div className="gl-tab-body" hidden={page!=="nodes"}><NodeWorkspace inventory={inventory} names={names} agents={agents} onBind={(nodeId,expectedAgentId,agentId)=>change("host-binding",{nodeId,expectedAgentId,agentId})} quality={quality} network={network} disabled={disabled} onNetwork={setNetworkNode} onPause={id=>{setPauseNode(id);setDialog("availability");}} onRetire={id=>{const node=inventory.runtimes.find(n=>n.id===id);const availability=inventory.availability;if(node&&availability)void change("retire-entry",{id,expectedRevision:node.revision,expectedAvailabilityRevision:availability.revision});}}/></div>
    <div className="gl-tab-body" hidden={page!=="accounts"}><AccountWorkspace inventory={inventory} active={page==="accounts"} disabled={disabled} save={change} token={token} tokenAccountId={tokenAccountId} createdAccountId={createdAccountId} onCreate={()=>setDialog("account")}/></div>
    <div className="gl-tab-body" hidden={page!=="routes"}><RouteWorkspace inventory={inventory} names={names} disabled={disabled} save={change} latency={latency} loadSpeeds={loadSpeeds} active={page==="routes"}/></div>
    <div className="gl-tab-body gl-settings-body" hidden={page!=="quality"}><IPQuality control={quality} names={names}/></div>
