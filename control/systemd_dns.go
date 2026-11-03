@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -50,6 +52,39 @@ func (d SystemdDriver) verifyDNSOverride(ctx context.Context, raw string) (strin
 }
 
 func readRootDNSFile(path string) ([]byte, error) {
+	return readOwnedDNSFile(path, 0)
+}
+
+// systemd-resolved legitimately owns its runtime resolver files. Trust that
+// named OS principal only at these exact locations, not arbitrary user files.
+// The configured resolver is still read without changing DNS or the unit.
+func readExistingEntryDNSFile(path string) ([]byte, error) {
+	var resolverUID uint32
+	if path == "/run/systemd/resolve/stub-resolv.conf" || path == "/run/systemd/resolve/resolv.conf" {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, err
+		}
+		owner, err := entryFileUID(info)
+		if err != nil {
+			return nil, err
+		}
+		if owner != 0 {
+			principal, err := user.Lookup("systemd-resolve")
+			if err != nil {
+				return nil, errors.New("control: system resolver owner unavailable")
+			}
+			uid, err := strconv.ParseUint(principal.Uid, 10, 32)
+			if err != nil || uid == 0 || uint64(owner) != uid {
+				return nil, errors.New("control: system resolver owner differs")
+			}
+			resolverUID = uint32(uid)
+		}
+	}
+	return readOwnedDNSFile(path, resolverUID)
+}
+
+func readOwnedDNSFile(path string, resolverUID uint32) ([]byte, error) {
 	invalid := errors.New("control: unsafe service DNS file")
 	for current := path; ; current = filepath.Dir(current) {
 		info, err := os.Lstat(current)
@@ -57,7 +92,8 @@ func readRootDNSFile(path string) ([]byte, error) {
 			return nil, invalid
 		}
 		uid, err := entryFileUID(info)
-		if err != nil || uid != 0 || current != path && !info.IsDir() {
+		resolvedOwner := resolverUID != 0 && uid == resolverUID && (current == path || current == "/run/systemd/resolve")
+		if err != nil || uid != 0 && !resolvedOwner || current != path && !info.IsDir() {
 			return nil, invalid
 		}
 		if current == path && (!info.Mode().IsRegular() || info.Size() > 65536) {

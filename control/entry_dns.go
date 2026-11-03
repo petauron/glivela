@@ -28,7 +28,7 @@ func (d *NativeEntryDriver) existingEntryDNS() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := readRootDNSFile(path)
+	raw, err := readExistingEntryDNSFile(path)
 	if err != nil {
 		return nil, err
 	}
