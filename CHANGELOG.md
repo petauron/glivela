@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.105](https://github.com/petauron/glivela/compare/v0.1.0-alpha.104...v0.1.0-alpha.105) (2026-11-03)
+
+
+### Bug Fixes
+
+* **control:** preserve owned identity during legacy entry handover ([fa42792](https://github.com/petauron/glivela/commit/fa42792d0270127e32beb80dcbd99b8b9cb80125))
+
 ## [0.1.0-alpha.104](https://github.com/petauron/glivela/compare/v0.1.0-alpha.103...v0.1.0-alpha.104) (2026-11-03)
 
 
