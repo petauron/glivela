@@ -15,7 +15,7 @@ export function GlivelaLauncher({ data, applications, language, onManage, onUpgr
   const controllers = applications.filter(application => data.services.some(service => service.applicationId === application.id && service.name === "controller" && service.protocol === "https"));
   if (controllers.length === 1 && controllers[0].status === "running") {
     const application = controllers[0];
-    return <ControlAccessProvider key={application.id} applicationId={application.id}><GlivelaControl /></ControlAccessProvider>;
+    return <ControlAccessProvider key={application.id} applicationId={application.id}><GlivelaControl agents={data.agents} /></ControlAccessProvider>;
   }
   return <section className="flex flex-col gap-3 p-4" data-app-workspace="vastora-official/meridian">
     <h1 className="text-xl font-semibold">Glivela</h1>

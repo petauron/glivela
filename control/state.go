@@ -62,6 +62,7 @@ type Store struct {
 	speedChanged        chan struct{}
 	speedFault          bool
 	subscriptionNames   map[string]string
+	hostBindings        map[string]string
 	subscriptionOrigin  string
 }
 
@@ -76,6 +77,9 @@ func OpenStore(path string) (*Store, error) {
 		}
 	}
 	s := &Store{path: path, nodes: map[string]Node{}, speedHub: newSpeedHub(), nodeEvents: newNodeEventHub(), speedChanged: make(chan struct{})}
+	if err := s.loadHostBindings(); err != nil {
+		return nil, err
+	}
 	if err := s.loadAvailability(); err != nil {
 		return nil, err
 	}

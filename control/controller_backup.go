@@ -58,7 +58,7 @@ func openControllerBackup(raw, key []byte) (controllerBackup, error) {
 		return value, errors.New("control: controller backup authentication failed")
 	}
 	defer clear(plain)
-	if decode(bytes.NewReader(plain), &value) != nil || value.Version != 1 || value.CreatedAt.IsZero() || value.CreatedAt.After(time.Now().Add(5*time.Minute)) || len(value.Files) < 3 || len(value.Files) > 6 {
+	if decode(bytes.NewReader(plain), &value) != nil || value.Version != 1 || value.CreatedAt.IsZero() || value.CreatedAt.After(time.Now().Add(5*time.Minute)) || len(value.Files) < 3 || len(value.Files) > 7 {
 		return controllerBackup{}, errors.New("control: invalid controller backup contents")
 	}
 	for _, name := range []string{"nodes.json", "business.json", "business.adoption.json"} {
@@ -74,9 +74,15 @@ func openControllerBackup(raw, key []byte) (controllerBackup, error) {
 	}
 	for name := range value.Files {
 		switch name {
-		case "nodes.json", "business.json", "business.adoption.json", "availability.json", "quality.json", subscriptionNamesFile:
+		case "nodes.json", "business.json", "business.adoption.json", "availability.json", "quality.json", subscriptionNamesFile, hostBindingsFile:
 		default:
 			return controllerBackup{}, errors.New("control: unknown backup file")
+		}
+	}
+	if raw, ok := value.Files[hostBindingsFile]; ok {
+		var state hostBindingState
+		if decode(bytes.NewReader(raw), &state) != nil || state.validate() != nil {
+			return controllerBackup{}, errors.New("control: invalid host binding backup")
 		}
 	}
 	if raw, ok := value.Files[subscriptionNamesFile]; ok {
@@ -113,6 +119,18 @@ func (s *Store) BackupController(now time.Time) error {
 		return errors.New("control: controller backup source changed")
 	}
 	value := controllerBackup{Version: 1, CreatedAt: now.UTC(), Files: map[string]json.RawMessage{}}
+	if len(s.hostBindings) > 0 {
+		var bindings hostBindingState
+		path := filepath.Join(directory, hostBindingsFile)
+		if readControlState(path, &bindings) != nil || bindings.validate() != nil || !reflect.DeepEqual(bindings.Bindings, s.hostBindings) {
+			return errors.New("control: host bindings changed before backup")
+		}
+		raw, err := privateBackupBytes(path)
+		if err != nil {
+			return err
+		}
+		value.Files[hostBindingsFile] = raw
+	}
 	names, err := loadSubscriptionNames(directory, material)
 	if err != nil || !reflect.DeepEqual(names, s.subscriptionNames) {
 		return errors.New("control: issued names changed before backup")
@@ -310,6 +328,9 @@ func RestoreControllerBackup(source, keyPath, destination string) error {
 	}
 	if _, ok := value.Files[subscriptionNamesFile]; ok {
 		names = append(names, subscriptionNamesFile)
+	}
+	if _, ok := value.Files[hostBindingsFile]; ok {
+		names = append(names, hostBindingsFile)
 	}
 	for _, name := range names {
 		if err := writeNewBusinessFile(destination, name, value.Files[name]); err != nil {

@@ -11,7 +11,7 @@ import { qualityHistory, qualityStates, serviceResult, unlockSummary, type Quali
 import type { Inventory, Runtime } from "./control-types";
 
 const columns = 5;
-type Props = { inventory: Inventory; names: Map<string, string>; quality: QualityControl; network: NetworkControl; disabled: boolean; onNetwork: (id: string) => void; onPause: (id: string) => void; onRetire: (id: string) => void };
+type Props = { inventory: Inventory; names: Map<string, string>; agents?: {id:string; name:string}[]; onBind?: (nodeId:string, expectedAgentId:string, agentId:string)=>Promise<boolean>; quality: QualityControl; network: NetworkControl; disabled: boolean; onNetwork: (id: string) => void; onPause: (id: string) => void; onRetire: (id: string) => void };
 type OverviewNode = { id: string; runtimes: Runtime[]; records: QualityRecord[] };
 const rolesLabel = (nodes: Runtime[]) => nodes.length > 1 ? "线路＋落地" : nodes[0]?.role === "entry" ? "线路机" : "落地机";
 const range = (values: number[]) => Math.min(...values) === Math.max(...values) ? String(Math.min(...values)) : `${Math.min(...values)}–${Math.max(...values)}`;
@@ -87,8 +87,10 @@ export function NodeWorkspace(props: Props) {
   </div>;
 }
 
-function NodeRow({ node, name, inventory, quality, ...props }: Props & { node: OverviewNode; name: string }) {
+function NodeRow({ node, name, inventory, quality, agents = [], onBind, ...props }: Props & { node: OverviewNode; name: string }) {
   const [open, setOpen] = useState(false);
+  const binding = inventory.nodes.find(item => item.id === node.id);
+  const [selectedAgent, setSelectedAgent] = useState(binding?.centerAgentId ?? "");
   const detailId = useId();
   const summary = qualitySummary(node.records);
   const unlocks = summary.reports.map(record => unlockSummary(record.check?.report));
@@ -109,6 +111,7 @@ function NodeRow({ node, name, inventory, quality, ...props }: Props & { node: O
     </TableRow>
     {open ? <TableRow className="gl-overview-expanded"><TableCell colSpan={columns}><div id={detailId} className="gl-overview-detail" role="region" aria-label={`${name} 详情`}>
       <header><div><h2>{name}</h2><p className="gl-secondary">{rolesLabel(node.runtimes)}{node.runtimes.length > 1 ? " · 同机入口与落地分别显示应用状态" : ""}</p></div><Button variant="ghost" onClick={() => setOpen(false)}>收起详情</Button></header>
+      {binding && agents.length > 0 && onBind ? <section className="gl-overview-runtime"><h3>关联 Vastora 主机</h3><p className="gl-secondary">选择实际对应的主机；关联后使用主机当前名称，仅影响面板显示。</p>{binding.centerAgentId && !agents.some(agent=>agent.id===binding.centerAgentId) ? <p role="status">已关联的主机不存在或不可见，请核对后重新选择。</p> : null}<SelectControl aria-label={`${name} 关联的 Vastora 主机`} value={selectedAgent || "unbound"} onValueChange={value => setSelectedAgent(value === "unbound" ? "" : value)} options={[{value:"unbound",label:"未关联"},...(selectedAgent && !agents.some(agent=>agent.id===selectedAgent)?[{value:selectedAgent,label:"已关联主机不可见",disabled:true}]:[]),...agents.map(agent=>({value:agent.id,label:agent.name}))]}/><Button variant="outline" disabled={props.disabled || selectedAgent === (binding.centerAgentId ?? "")} onClick={()=>void onBind(node.id,binding.centerAgentId ?? "",selectedAgent)}>保存关联</Button></section> : null}
       <section className="gl-overview-exits"><h3>出口质量与解锁</h3>{node.records.length ? node.records.map(record => <details key={`${record.nodeId}/${record.address}`} className="gl-overview-exit"><summary><span className="gl-quality-identity"><strong>{record.address.includes(":") ? "IPv6" : "IPv4"} · {record.address}</strong><span className="gl-secondary">{record.check ? qualityStates[record.check.state] ?? "待确认" : "尚未检测"}{record.check?.checkedAt ? ` · ${new Date(record.check.checkedAt).toLocaleString("zh-CN")}` : ""}</span></span><AssessmentBadge language="zh-CN" assessment={record.check?.assessment}/><UnlockSummary record={record}/></summary><QualityRecordDetails record={record} control={quality}/></details>) : <p className="gl-secondary">当前节点暂无可匹配的出口检测记录，不推测评分和解锁状态。</p>}</section>
       {node.runtimes.map(runtime => <RuntimeDetails key={runtime.id} node={runtime} inventory={inventory} {...props}/>)}
     </div></TableCell></TableRow> : null}

@@ -100,6 +100,24 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/admin/host-binding":
+			var request struct {
+				NodeID          string `json:"nodeId"`
+				ExpectedAgentID string `json:"expectedAgentId"`
+				AgentID         string `json:"agentId"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil {
+				http.Error(w, "invalid host binding", http.StatusBadRequest)
+				return
+			}
+			if store.BindHost(r.Context(), request.NodeID, request.ExpectedAgentID, request.AgentID) != nil {
+				http.Error(w, "host binding changed or unavailable", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				Saved bool `json:"saved"`
+			}{true})
 		case "/v1/admin/ip-quality":
 			store.manageQuality(w, r)
 		case "/v1/admin/network-optimization":

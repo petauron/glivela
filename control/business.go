@@ -113,8 +113,9 @@ type BusinessRuntime struct {
 }
 
 type BusinessNode struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	CenterAgentID string `json:"centerAgentId,omitempty"`
 }
 
 type BusinessEndpoint struct {
@@ -284,7 +285,7 @@ func (s *Store) Business() BusinessInventory {
 		view.State = "storage-unverified"
 	}
 	for id, node := range m.References.Nodes {
-		view.Nodes = append(view.Nodes, BusinessNode{ID: id, Name: node.Name})
+		view.Nodes = append(view.Nodes, BusinessNode{ID: id, Name: node.Name, CenterAgentID: s.hostBindings[id]})
 	}
 	slices.SortFunc(view.Nodes, func(a, b BusinessNode) int { return strings.Compare(a.ID, b.ID) })
 	for _, endpoint := range m.Endpoints {
