@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.104](https://github.com/petauron/glivela/compare/v0.1.0-alpha.103...v0.1.0-alpha.104) (2026-11-03)
+
+
+### Bug Fixes
+
+* sync managed host display names ([b67e286](https://github.com/petauron/glivela/commit/b67e28603aa38a80f80f660dbbc99de2d0be1d62)), closes [#36](https://github.com/petauron/glivela/issues/36)
+
 ## [0.1.0-alpha.103](https://github.com/petauron/glivela/compare/v0.1.0-alpha.102...v0.1.0-alpha.103) (2026-11-02)
 
 
