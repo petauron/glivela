@@ -337,7 +337,7 @@ func (s *Store) accountChangeResult(id string, now time.Time) AccountChangeResul
 					}
 				}
 				for _, g := range account.Grants {
-					if g.EntryID == id && !slices.ContainsFunc(node.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grants[g.ID]) }) {
+					if g.EntryID == id && !s.business.material.DeletedRoutes[g.ID] && !slices.ContainsFunc(node.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grants[g.ID]) }) {
 						found = false
 					}
 				}

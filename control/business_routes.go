@@ -183,7 +183,7 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 				}
 			}
 			for _, grant := range account.Grants {
-				if grant.EntryID == entryID {
+				if grant.EntryID == entryID && !material.DeletedRoutes[grant.ID] {
 					plan.Grants = append(plan.Grants, grants[grant.ID])
 				}
 			}
