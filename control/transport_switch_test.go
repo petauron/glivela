@@ -202,6 +202,7 @@ func TestUnlimitedTransportTailPreservesExistingCounterOrigin(t *testing.T) {
 func TestFailedTransportActivationAccountsRetainedWorkerWithoutPublishingHealth(t *testing.T) {
 	s := store(t)
 	q, old, started := quotaFixture(t)
+	q.ResetDay, q.Timezone, q.NextResetAt = 0, "", time.Time{}
 	q.TotalBytes = 1000000
 	cert, landCert := strings.Repeat("a", 64), strings.Repeat("b", 64)
 	land := artifact(1)
@@ -260,6 +261,7 @@ func TestFailedTransportActivationAccountsRetainedWorkerWithoutPublishingHealth(
 func TestTransportTailIsDurableIdempotentAndNotHealth(t *testing.T) {
 	s := store(t)
 	q, d, started := quotaFixture(t)
+	q.ResetDay, q.Timezone, q.NextResetAt = 0, "", time.Time{}
 	q.TotalBytes = 1000000
 	cert := strings.Repeat("a", 64)
 	if err := s.Put(Node{ID: "entry-example", CertificateID: cert, Desired: d, EntryQuota: q}); err != nil {
