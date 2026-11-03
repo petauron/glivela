@@ -49,6 +49,12 @@ func stageNativeEntryCommand(parent context.Context, args []string, output io.Wr
 	if err != nil {
 		return err
 	}
+	// Staging calls the driver directly, before NativeRuntime resolves its
+	// dedicated worker. Bind the same installed non-root UID/GID first.
+	installed, err = installed.ResolveWorker()
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	driver := &control.NativeEntryDriver{SystemdDriver: installed, Directory: cfg.Directory}
