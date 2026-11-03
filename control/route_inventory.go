@@ -18,12 +18,13 @@ func validateRouteEntries(node Node) error {
 		return errors.New("control: landing plan required for route inventory")
 	}
 	// A landing may be provisioned before its entry enrollment is complete,
-	// but no route checks or successful acceptance are allowed in that state.
+	// including a partially enrolled inventory. No successful route acceptance
+	// is allowed until every authorized source has its exact identity binding.
 	if len(node.RouteEntries) == 0 {
 		return nil
 	}
-	if len(node.RouteEntries) != len(node.Desired.Landing.Sources) || len(node.RouteEntries) > 64 {
-		return errors.New("control: complete authorized entry inventory required")
+	if len(node.RouteEntries) > len(node.Desired.Landing.Sources) || len(node.RouteEntries) > 64 {
+		return errors.New("control: entry inventory exceeds authorized sources")
 	}
 	sources := map[string]bool{}
 	for _, source := range node.Desired.Landing.Sources {
@@ -45,7 +46,7 @@ func completeRouteInventory(node Node, checks map[string]RouteCheck, deferred ..
 	if len(deferred) == 1 {
 		skip = deferred[0]
 	}
-	if len(node.RouteEntries) == 0 || validateRouteEntries(node) != nil || len(checks) > len(node.RouteEntries) {
+	if len(node.RouteEntries) == 0 || node.Desired.Landing == nil || len(node.RouteEntries) != len(node.Desired.Landing.Sources) || validateRouteEntries(node) != nil || len(checks) > len(node.RouteEntries) {
 		return false
 	}
 	for id, entry := range node.RouteEntries {

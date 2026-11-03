@@ -150,6 +150,11 @@ func OpenStore(path string) (*Store, error) {
 			}
 			staleChecks = staleChecks || outdated
 		}
+		// Enrollment can durably retain only some authorized source bindings.
+		// Preserve that configuration, but never reuse partial health proof.
+		if node.Desired.Landing != nil && len(node.RouteEntries) != len(node.Desired.Landing.Sources) {
+			staleChecks = true
+		}
 		if staleChecks {
 			node.Checks = nil
 		}
