@@ -53,7 +53,16 @@ func (s *Store) BindHost(ctx context.Context, nodeID, expectedAgentID, agentID s
 	if ctx.Err() != nil || !glivela.ValidIdentifier(nodeID) || agentID != "" && !glivela.ValidIdentifier(agentID) || s.business == nil || s.business.faulted || s.business.material.Ownership == nil {
 		return invalid
 	}
-	if _, ok := s.business.material.References.Nodes[nodeID]; !ok || s.hostBindings[nodeID] != expectedAgentID {
+	_, known := s.business.material.References.Nodes[nodeID]
+	if !known {
+		for _, node := range s.nodes {
+			if node.ID == nodeID && !s.entryRetiredLocked(node.ID) && runtimeHostID(s.business.material, node) == "" {
+				known = true
+				break
+			}
+		}
+	}
+	if !known || s.hostBindings[nodeID] != expectedAgentID {
 		return invalid
 	}
 	if s.hostBindings[nodeID] == agentID {
