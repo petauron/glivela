@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.109](https://github.com/petauron/glivela/compare/v0.1.0-alpha.108...v0.1.0-alpha.109) (2026-11-04)
+
+
+### Bug Fixes
+
+* **control:** allow activation retry for an unused fresh endpoint ([#48](https://github.com/petauron/glivela/issues/48)) ([9570096](https://github.com/petauron/glivela/commit/95700962a7cc8f27513efbda538122848b1b81c3))
+
 ## [0.1.0-alpha.108](https://github.com/petauron/glivela/compare/v0.1.0-alpha.107...v0.1.0-alpha.108) (2026-11-03)
 
 
