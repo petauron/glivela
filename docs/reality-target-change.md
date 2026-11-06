@@ -61,6 +61,49 @@ runtime-file tampering is not silently adopted or repaired by this operation.
 No changes are made to UDP policies. The fixed local TLS exception applies only
 to the native worker with that explicit target; it does not permit a subnet.
 
+## Correct an invalid first local-origin registration
+
+Fresh registration rejects target addresses or ports that the native worker
+cannot use. Existing imported endpoints are not silently rewritten.
+
+The panel exposes **Correct first registration port** only for an initial,
+unlimited, unused native VLESS entry with one exact SNI and a wrong port pinned
+to loopback. The entry must have no applied/historical runtime, traffic samples
+or watermarks, previous target changes, forwarding routes or client chains. The
+only allowed correction retains the original hostname/SNI and changes the local
+TLS target to `127.0.0.1:24483`. Existing healthy entries still use normal changes.
+
+These controller fields alone do **not** prove the worker never ran. Before
+correction, the administrator must use an authenticated connection to the exact
+host, verify its installed native worker and certificate/configuration identity,
+stop its Glivela management process, and inspect the existing activation state
+under its exclusive lock. There must be no Current or in-flight activation or
+recovery journal, active core process, or proxy listener. A rejected standalone
+candidate configuration is not an applied runtime and must not be fabricated or
+removed to pass this check. Keep this node stopped until the correction is
+confirmed. Do not stop or change any other node.
+
+Retain the full evidence privately, without keys or subscription URLs, and submit
+its SHA256 and actual verification time (at most 15 minutes old). The panel binds
+this **operator attestation** to the inspected node certificate, desired config
+hash and expected revision. The API action is `repair-initial`, with
+`initialRepair: {certificateId, configSha256, evidenceSha256, verifiedAt}` and the
+usual `entryId`/`expectedRevision`. It does not accept a general replacement
+address, credentials or configuration. A stale identity, revision or hash fails
+closed; refresh and recheck instead of repeating an uncertain submission.
+
+The encrypted target history retains this attestation separately from subsequent
+public-client acceptance. The ordinary forward revision/projection recovery path
+is reused, so an interrupted projection write can recover the exact committed
+change. Resume the worker only after reading back the recorded correction. A
+lost response requires inspection first; do not restore a database backup over
+live accounting. The invalid old port cannot be restored through `revert`.
+
+Node TLS, certificate, configuration and authenticated proxy checks remain
+mandatory. Use the existing private candidate, formal public-ingress checks and
+actual HTTPS client acceptance before `accept` enables subscription publication.
+A correction or administrative attestation does not assert a working node.
+
 Source delivery and CI are separate from publication and production acceptance.
 Existing required CI remains the source verification gate. Deployment must still
 verify a real authenticated client and retained identities/accounting before

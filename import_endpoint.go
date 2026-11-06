@@ -3,6 +3,7 @@ package glivela
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/netip"
 	"time"
 )
@@ -51,7 +52,15 @@ func (e ImportEndpoint) Validate() error {
 	if len(e.RealityChanges) > 32 {
 		return errors.New("glivela: REALITY change history limit")
 	}
-	for _, c := range e.RealityChanges {
+	for i, c := range e.RealityChanges {
+		if proof := c.InitialRepair; proof != nil {
+			host, port, err := net.SplitHostPort(c.PreviousTarget)
+			verified, timeErr := time.Parse(time.RFC3339Nano, proof.VerifiedAt)
+			changed, changeErr := time.Parse(time.RFC3339Nano, c.ChangedAt)
+			if i != 0 || err != nil || port == "24483" || c.PreviousTargetIP != "127.0.0.1" || len(c.PreviousServerNames) != 1 || c.PreviousServerNames[0] != host || c.ServerName != host || c.Target != net.JoinHostPort(host, "24483") || c.TargetIP != "127.0.0.1" || c.State != "pending" && c.State != "accepted" || !ValidIdentity(proof.CertificateID) || !ValidIdentity(proof.ConfigSHA256) || !ValidIdentity(proof.EvidenceSHA256) || timeErr != nil || changeErr != nil || verified.After(changed) || changed.Sub(verified) > 15*time.Minute {
+				return errors.New("glivela: invalid initial target repair evidence")
+			}
+		}
 		if len(c.Reason) > 256 || (c.State == "reverting" || c.State == "reverted") && (c.Reason == "" || c.RevertedAt == "" || !validImportTime(c.RevertedAt)) {
 			return errors.New("glivela: invalid target recovery record")
 		}
@@ -189,19 +198,29 @@ func (material ImportMaterial) validateEndpoints() error {
 	return nil
 }
 
-// RealityTargetChange retains only endpoint fields needed for a forward-revision
-// cancellation. It never snapshots account secrets, quotas or traffic ledgers.
+// RealityInitialRepair records an administrator attestation, not a node receipt
+// or public-client acceptance. The full evidence stays outside business state.
+type RealityInitialRepair struct {
+	CertificateID  string `json:"certificateId"`
+	ConfigSHA256   string `json:"configSha256"`
+	EvidenceSHA256 string `json:"evidenceSha256"`
+	VerifiedAt     string `json:"verifiedAt"`
+}
+
+// RealityTargetChange retains only fields needed for forward recovery. It never
+// snapshots account secrets, quotas or traffic ledgers.
 type RealityTargetChange struct {
-	RevertedAt          string   `json:"revertedAt,omitempty"`
-	Reason              string   `json:"reason,omitempty"`
-	PreviousTarget      string   `json:"previousTarget"`
-	PreviousTargetIP    string   `json:"previousTargetIp"`
-	PreviousServerNames []string `json:"previousServerNames"`
-	Target              string   `json:"target"`
-	TargetIP            string   `json:"targetIp"`
-	ServerName          string   `json:"serverName"`
-	State               string   `json:"state"`
-	ChangedAt           string   `json:"changedAt"`
-	EvidenceSHA256      string   `json:"evidenceSha256,omitempty"`
-	VerifiedAt          string   `json:"verifiedAt,omitempty"`
+	InitialRepair       *RealityInitialRepair `json:"initialRepair,omitempty"`
+	RevertedAt          string                `json:"revertedAt,omitempty"`
+	Reason              string                `json:"reason,omitempty"`
+	PreviousTarget      string                `json:"previousTarget"`
+	PreviousTargetIP    string                `json:"previousTargetIp"`
+	PreviousServerNames []string              `json:"previousServerNames"`
+	Target              string                `json:"target"`
+	TargetIP            string                `json:"targetIp"`
+	ServerName          string                `json:"serverName"`
+	State               string                `json:"state"`
+	ChangedAt           string                `json:"changedAt"`
+	EvidenceSHA256      string                `json:"evidenceSha256,omitempty"`
+	VerifiedAt          string                `json:"verifiedAt,omitempty"`
 }

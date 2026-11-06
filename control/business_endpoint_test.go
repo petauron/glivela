@@ -27,6 +27,10 @@ func registrationFixture(t *testing.T, s *Store) EndpointRegistration {
 	e.RuntimeCertificateID = ""
 	e.RuntimeConfigSHA256 = ""
 	e.PreviousStatus = "pending"
+	// Fresh registration now rejects documentation IP pins before persistence.
+	e.Reality.Target = "site.example.net:24483"
+	e.Reality.ServerNames = []string{"site.example.net"}
+	e.TargetIP = "127.0.0.1"
 	e.RealityChanges = nil
 	e.Hysteria = nil
 	e.HysteriaEnabled = false
