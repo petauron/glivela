@@ -56,7 +56,7 @@ export function SubscriptionOrderEditor({ accountId, active, disabled, onDirtyCh
   };
   return <section className="gl-subscription-order" aria-label="订阅排序">
     <h3>订阅排序</h3>
-    <p>调整本账户代理顺序并保存，OpenClash 刷新订阅后生效。仅列出当前可发布代理；暂不可发布项保留已保存的位置，新代理追加到末尾。</p>
+    <p>调整本账户代理顺序并保存，OpenClash 刷新订阅后生效。仅列出当前可发布代理；暂不可发布项保留已保存的位置。新增直连排在现有直连之后；没有现有直连时排在最前，其他新增代理排在末尾。</p>
     {error ? <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert> : null}
     {loading ? <p role="status">正在读取订阅代理…</p> : view && !view.available ? <p>暂无可排序的已发布代理，请核对账户和线路状态后重新读取。</p> : null}
     <ol className="gl-subscription-order-list" aria-label="OpenClash 代理顺序" aria-busy={loading}>

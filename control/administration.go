@@ -204,6 +204,23 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(view)
+		case "/v1/admin/subscription-names":
+			var request struct {
+				Expected map[string]string `json:"expected"`
+				Names    map[string]string `json:"names"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 1<<20), &request) != nil {
+				http.Error(w, "invalid subscription names request", http.StatusBadRequest)
+				return
+			}
+			if store.ChangeSubscriptionNames(r.Context(), request.Expected, request.Names) != nil {
+				http.Error(w, "subscription names changed or unavailable", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				Saved bool `json:"saved"`
+			}{true})
 		case "/v1/admin/account-subscription":
 			var request struct {
 				AccountID string `json:"accountId"`

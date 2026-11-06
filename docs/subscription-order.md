@@ -22,7 +22,10 @@ changed publication inventories, duplicates and foreign IDs are refused.
 
 Existing quota, availability, authorization and runtime publication gates are
 unchanged. Temporarily unavailable IDs retain their saved positions but never
-become publishable because they appear in the order. Newly publishable proxies
-without a saved position append in the existing default order. An absent order
-keeps the current default. Re-read explicitly after a conflict; saving does not
+become publishable because they appear in the order. Newly publishable native proxies
+without a saved position follow the last currently visible saved native proxy;
+if none is visible, they precede the saved items. Their own default relative
+order is preserved, and saved items never move relative to one another. Other
+new proxies still append in their existing default order. An absent order keeps
+the current default. Re-read explicitly after a conflict; saving does not
 silently overwrite another administrator's changes.
