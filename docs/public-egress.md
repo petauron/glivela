@@ -66,3 +66,31 @@ route, listener and probe updates. Install compatible node programs before the
 controller, then select the new format through an explicit managed entry update
 with an advancing revision. Updating the controller alone does not enable this
 policy on retained entries; never send format 7 to an older node program.
+
+## Node-detail exit selection
+
+Expand a node in the independent panel to read and edit each runtime's exit
+configuration. Entry roles offer IPv4-only, IPv6-only and automatic selection;
+the initial selection is the retained policy, including automatic for a legacy
+empty value. Reading the page never changes a policy. Ordinary IPv4-only exits
+and explicitly selected IPv6 exits remain distinct from the client's ingress
+address family.
+
+The panel submits only the changed exit fields with the inspected revision.
+It preserves identities, routes, credentials, counters, availability and the
+existing artifact format. Conflicting enabled IPv4/IPv6 client chains disable
+the corresponding option; the controller enforces the same constraint before
+projection. No full runtime configuration or private key is sent to the browser.
+
+Landing roles show their local binding and, when present, the exact public exit
+expected by server routes. NAT bindings and public exits are not interchangeable.
+An unbound landing can change its local address subject to existing address,
+UDP and runtime checks. A landing with server-route verifiers can only change
+its binding while retaining the same public exit and family; this editor refuses
+cross-node public-exit migrations instead of issuing unordered updates. It does
+not alter source grants or silently narrow UDP access.
+
+Saving confirms controller persistence, not node application or client access.
+Use the panel's readback to check the actual application state, then perform
+separately authorized real-path verification. This operation does not upgrade a
+retained renderer to the newer automatic-family fallback format.

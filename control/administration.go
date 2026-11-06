@@ -120,6 +120,24 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			}{true})
 		case "/v1/admin/ip-quality":
 			store.manageQuality(w, r)
+		case "/v1/admin/node-egress":
+			var input NodeEgressChange
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
+				http.Error(w, "egress_invalid_policy", http.StatusBadRequest)
+				return
+			}
+			view, err := store.ChangeNodeEgress(r.Context(), input)
+			if err != nil {
+				var reason nodeEgressError
+				if errors.As(err, &reason) {
+					http.Error(w, string(reason), http.StatusConflict)
+				} else {
+					http.Error(w, "egress_unavailable", http.StatusConflict)
+				}
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(view)
 		case "/v1/admin/network-optimization":
 			store.manageNetwork(w, r)
 		case "/v1/admin/path-mtu":

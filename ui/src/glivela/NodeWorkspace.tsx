@@ -5,13 +5,14 @@ import { SelectControl } from "@/components/SelectControl";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AssessmentBadge } from "@/views/IPAssessment";
 import { NetworkCell, type NetworkControl } from "./NetworkOptimization";
+import { NodeEgress } from "./NodeEgress";
 import { reported } from "./control-format";
 import { QualityRecordDetails, UnlockSummary, type QualityControl } from "./IPQuality";
 import { qualityHistory, qualityStates, serviceResult, unlockSummary, type QualityRecord } from "./quality-model";
 import type { Inventory, Runtime } from "./control-types";
 
 const columns = 5;
-type Props = { inventory: Inventory; names: Map<string, string>; agents?: {id:string; name:string}[]; onBind?: (nodeId:string, expectedAgentId:string, agentId:string)=>Promise<boolean>; quality: QualityControl; network: NetworkControl; disabled: boolean; onNetwork: (id: string) => void; onPause: (id: string) => void; onRetire: (id: string) => void };
+type Props = { onEgressSaved: () => Promise<void>; inventory: Inventory; names: Map<string, string>; agents?: {id:string; name:string}[]; onBind?: (nodeId:string, expectedAgentId:string, agentId:string)=>Promise<boolean>; quality: QualityControl; network: NetworkControl; disabled: boolean; onNetwork: (id: string) => void; onPause: (id: string) => void; onRetire: (id: string) => void };
 type OverviewNode = { id: string; runtimes: Runtime[]; records: QualityRecord[] };
 const rolesLabel = (nodes: Runtime[]) => nodes.length > 1 ? "线路＋落地" : nodes[0]?.role === "entry" ? "线路机" : "落地机";
 const range = (values: number[]) => Math.min(...values) === Math.max(...values) ? String(Math.min(...values)) : `${Math.min(...values)}–${Math.max(...values)}`;
@@ -118,9 +119,10 @@ function NodeRow({ node, name, inventory, quality, agents = [], onBind, ...props
   </>;
 }
 
-function RuntimeDetails({ node, inventory, network, disabled, onNetwork, onPause, onRetire }: Pick<Props, "inventory" | "network" | "disabled" | "onNetwork" | "onPause" | "onRetire"> & { node: Runtime }) {
+function RuntimeDetails({ node, inventory, network, disabled, onNetwork, onPause, onRetire, onEgressSaved }: Pick<Props, "inventory" | "network" | "disabled" | "onNetwork" | "onPause" | "onRetire" | "onEgressSaved"> & { node: Runtime }) {
   const pause = inventory.availability?.nodes[node.id];
   return <section className="gl-overview-runtime" data-runtime-id={node.id}><h3>{node.role === "entry" ? "线路端" : "落地端"} · <span className="gl-status" data-tone={pause ? "muted" : node.runtimeReady ? "good" : "warning"}>{pause ? "已停用" : node.runtimeReady ? "已应用" : "待核验"}</span></h3><p className="gl-secondary">配置修订 {node.revision} · 最后上报 {reported(node.reportedAt)}。应用回执不等于完整线路验证。</p><NetworkCell summary nodeId={node.id} control={network} onOpen={() => onNetwork(node.id)}/><div className="gl-overview-actions"><Button variant="outline" onClick={() => onNetwork(node.id)}>查看网络优化</Button><Button variant="outline" onClick={() => onPause(node.id)}>临时停用与恢复…</Button></div><details className="gl-context-details gl-identity"><summary>节点标识</summary><code>{node.id}</code></details>
+    <NodeEgress node={node} disabled={disabled} onSaved={onEgressSaved}/>
     {node.role === "entry" && pause?.reason === "maintenance" && (!pause.resumeAt || pause.resumeAt.startsWith("0001-")) ? <details className="gl-context-details"><summary>退役入口…</summary><p>将该离线入口及其线路移出当前列表和订阅，保留身份、配置、流量与历史。入口须至少 5 分钟未上报，且关联客户端链式监听已停用并应用；此操作不会停止或清理离线主机。</p><Button variant="outline" disabled={disabled} onClick={() => onRetire(node.id)}>确认退役</Button></details> : null}
   </section>;
 }
