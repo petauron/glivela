@@ -12,6 +12,10 @@ function client(applicationId?: string): Request {
     }
     const response = await fetch(`${base}/${operation}`, { method: "POST", credentials: "same-origin", cache: "no-store", headers, body: JSON.stringify(body), signal });
     if (!response.ok && operation === "link-speeds" && response.status === 409) { const code = (await response.text()).trim(); throw new Error(/^[a-z0-9_]{1,64}$/.test(code) ? code : "测速请求未确认，请刷新后再试。"); }
+    if (!response.ok && operation === "node-egress") {
+      const code = (await response.text()).trim();
+      if (/^egress_[a-z_]{1,64}$/.test(code)) throw new Error(code);
+    }
     if (!response.ok) {
       if (response.status === 409 && operation === "subscription-order") throw new Error("排序或可发布代理已变化，请重新读取后调整；未覆盖其他更改。");
       if (response.status === 409 && operation === "path-mtu") { const reason = (await response.text()).trim(); throw new Error(reason && reason.length <= 256 ? reason : "路径 MTU 操作未确认，请重新检测。"); }

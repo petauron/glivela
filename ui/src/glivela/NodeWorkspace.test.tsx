@@ -14,7 +14,7 @@ it("shows one same-host row while preserving each role's readiness",async()=>{
  const div=document.createElement("div");document.body.append(div);const root=createRoot(div);
  try {
   const names=new Map([["entry","Shared host"],["host","Shared host"]]);
-  await act(async()=>root.render(<NodeWorkspace inventory={inventory} names={names} quality={{results:{targets:[],checks:[]},records:[],error:"",busy:false,startCheck:vi.fn(),reload:vi.fn()}} network={{nodes:new Map(),error:"",busy:false,now:Date.now(),run:vi.fn(async()=>true)}} disabled={false} onNetwork={vi.fn()} onPause={vi.fn()} onRetire={vi.fn()}/>));
+  await act(async()=>root.render(<NodeWorkspace onEgressSaved={vi.fn(async()=>{})} inventory={inventory} names={names} quality={{results:{targets:[],checks:[]},records:[],error:"",busy:false,startCheck:vi.fn(),reload:vi.fn()}} network={{nodes:new Map(),error:"",busy:false,now:Date.now(),run:vi.fn(async()=>true)}} disabled={false} onNetwork={vi.fn()} onPause={vi.fn()} onRetire={vi.fn()}/>));
   const rows=div.querySelectorAll("tr[data-node-id]");
   expect(rows).toHaveLength(1);
   expect(rows[0].textContent).toContain("1/2 已应用");
