@@ -24,6 +24,7 @@ subscription. Keep bootstrap files, certificates, protocol credentials and state
 outside the source checkout.
 
 - [Fresh installation](docs/fresh-install.md)
+- [Native init adapters](docs/native-init.md)
 - [Panel access](docs/panel-access.md)
 - [Entry and landing on one host](docs/node-pair.md)
 - [Client chains and composite routes](docs/composite-routes.md)

@@ -62,7 +62,7 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 	defer cancel()
 	ip := func(args ...string) {
 		t.Helper()
-		if err := exec.CommandContext(ctx, "/usr/sbin/ip", args...).Run(); err != nil {
+		if err := exec.CommandContext(ctx, "ip", args...).Run(); err != nil {
 			t.Fatal("isolated interface setup failed", err)
 		}
 	}

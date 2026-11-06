@@ -69,3 +69,25 @@ func TestInstallationIdentityCannotBeEncodedInBootstrap(t *testing.T) {
 		t.Fatal("derived service identity leaked into bootstrap")
 	}
 }
+
+func TestOpenRCInstallationSelectsOnlyLocalInitMetadata(t *testing.T) {
+	inventory := nativeInstallationInventory{Version: 2, InitSystem: "openrc"}
+	if !inventory.supported() {
+		t.Fatal("OpenRC installation rejected")
+	}
+	for _, kind := range []string{"systemd", "", "arbitrary"} {
+		inventory.InitSystem = kind
+		if inventory.supported() {
+			t.Fatal("invalid v2 installation accepted")
+		}
+	}
+	d := SystemdDriver{InitSystem: "openrc", Unit: "owned-worker.service", WorkerUser: "owned-worker"}
+	path, err := d.installationNames()
+	if err != nil || path != "/etc/init.d/owned-worker" {
+		t.Fatal("OpenRC adapter selected a systemd path", err)
+	}
+	raw, err := json.Marshal(d)
+	if err != nil || strings.Contains(string(raw), "openrc") {
+		t.Fatal("remote bootstrap may not choose init backend", err)
+	}
+}

@@ -28,6 +28,7 @@ import (
 // The package installer must provision the matching unit and its firewall
 // dependency; this adapter refuses unowned/replaced installation files.
 type SystemdDriver struct {
+	InitSystem   string `json:"-"`
 	Distribution string `json:"-"`
 	Installation string `json:"installation"`
 	Service      string `json:"service"`
@@ -68,6 +69,12 @@ func (d SystemdDriver) installationNames() (string, error) {
 	if !strings.HasSuffix(d.Unit, ".service") || !valid(strings.TrimSuffix(d.Unit, ".service")) ||
 		!valid(d.WorkerUser) || len(d.WorkerUser) > 32 || d.WorkerUser == "root" {
 		return "", errors.New("control: explicit dedicated service and worker identity required")
+	}
+	if d.InitSystem == "openrc" {
+		return filepath.Join("/etc/init.d", strings.TrimSuffix(d.Unit, ".service")), nil
+	}
+	if d.InitSystem != "" && d.InitSystem != "systemd" {
+		return "", errors.New("control: unsupported installation init system")
 	}
 	return filepath.Join("/etc/systemd/system", d.Unit), nil
 }
@@ -159,6 +166,9 @@ func (d SystemdDriver) service(ctx context.Context, action string) error {
 			return err
 		}
 	}
+	if d.InitSystem == "openrc" {
+		return d.openRCService(ctx, action)
+	}
 	if exec.CommandContext(ctx, "/usr/bin/systemctl", action, d.Unit).Run() != nil {
 		return errors.New("control: Xray service operation failed")
 	}
@@ -168,6 +178,9 @@ func (d SystemdDriver) service(ctx context.Context, action string) error {
 func (d SystemdDriver) verifyLoadedService(ctx context.Context) error {
 	if d.WorkerUID == 0 {
 		return errors.New("control: worker identity has not been resolved")
+	}
+	if d.InitSystem == "openrc" {
+		return d.verifyOpenRCService()
 	}
 	unitPath, err := d.installationNames()
 	if err != nil {

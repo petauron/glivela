@@ -30,7 +30,7 @@ func TestKernelFirewallLifecycle(t *testing.T) {
 	defer cancel()
 	verifyPublicIngress(t, ctx)
 	verifyIPv6ClientIngress(t, ctx)
-	if output, err := exec.CommandContext(ctx, "/usr/sbin/ip", "link", "add", "mesh-test", "type", "dummy").CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(ctx, "ip", "link", "add", "mesh-test", "type", "dummy").CombinedOutput(); err != nil {
 		t.Fatalf("isolated interface: %s %v", output, err)
 	}
 	foreign := []byte(`{"nftables":[{"add":{"table":{"family":"inet","name":"glivela_fixture_unrelated"}}},{"add":{"chain":{"family":"inet","table":"glivela_fixture_unrelated","name":"guard","type":"filter","hook":"input","prio":50,"policy":"drop"}}}]}`)
@@ -67,11 +67,11 @@ func verifyIPv6ClientIngress(t *testing.T, ctx context.Context) {
 	const allowed = "2001:4860:4860::8888"
 	const denied = "2606:4700:4700::1001"
 	for _, address := range []string{destination, allowed, denied} {
-		if err := exec.CommandContext(ctx, "/usr/sbin/ip", "-6", "address", "add", address+"/128", "dev", "lo", "nodad").Run(); err != nil {
+		if err := exec.CommandContext(ctx, "ip", "-6", "address", "add", address+"/128", "dev", "lo", "nodad").Run(); err != nil {
 			t.Fatal("synthetic IPv6 setup", err)
 		}
 		defer func(address string) {
-			_ = exec.Command("/usr/sbin/ip", "-6", "address", "del", address+"/128", "dev", "lo").Run()
+			_ = exec.Command("ip", "-6", "address", "del", address+"/128", "dev", "lo").Run()
 		}(address)
 	}
 	listener, err := net.Listen("tcp6", net.JoinHostPort(destination, "24001"))
@@ -109,15 +109,15 @@ func verifyIPv6ClientIngress(t *testing.T, ctx context.Context) {
 
 func verifyPublicIngress(t *testing.T, ctx context.Context) {
 	t.Helper()
-	if err := exec.CommandContext(ctx, "/usr/sbin/ip", "link", "set", "lo", "up").Run(); err != nil {
+	if err := exec.CommandContext(ctx, "ip", "link", "set", "lo", "up").Run(); err != nil {
 		t.Fatal(err)
 	}
 	for _, address := range []string{"8.8.8.8", "1.1.1.1", "9.9.9.9"} {
-		if err := exec.CommandContext(ctx, "/usr/sbin/ip", "address", "add", address+"/32", "dev", "lo").Run(); err != nil {
+		if err := exec.CommandContext(ctx, "ip", "address", "add", address+"/32", "dev", "lo").Run(); err != nil {
 			t.Fatal(err)
 		}
 		defer func(address string) {
-			_ = exec.Command("/usr/sbin/ip", "address", "del", address+"/32", "dev", "lo").Run()
+			_ = exec.Command("ip", "address", "del", address+"/32", "dev", "lo").Run()
 		}(address)
 	}
 	listener, err := net.Listen("tcp4", "8.8.8.8:1080")

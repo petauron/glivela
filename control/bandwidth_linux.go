@@ -495,7 +495,7 @@ func speedListening(ctx context.Context, port int, p *speedProcess) error {
 			return errors.New("temporary_listener_failed")
 		default:
 		}
-		raw, err := speedExec(ctx, "/usr/bin/ss", "-H", "-lntp", "sport = :"+strconv.Itoa(port))
+		raw, err := speedExec(ctx, "ss", "-H", "-lntp", "sport = :"+strconv.Itoa(port))
 		if err == nil && bytes.Contains(raw, []byte("pid="+strconv.Itoa(p.cmd.Process.Pid)+",")) {
 			return nil
 		}
@@ -652,7 +652,7 @@ func (s *speedSession) execute(parent context.Context, p SpeedAssignment) SpeedR
 		routeArgs[1] = "-6"
 		routeArgs = append(routeArgs, "from", p.Source)
 	}
-	raw, e := speedExec(step, "/usr/sbin/ip", routeArgs...)
+	raw, e := speedExec(step, "ip", routeArgs...)
 	var routes []struct {
 		Dev string `json:"dev"`
 	}
