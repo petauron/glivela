@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.0-alpha.110](https://github.com/petauron/glivela/compare/v0.1.0-alpha.109...v0.1.0-alpha.110) (2026-11-06)
+
+
+### Features
+
+* **panel:** restore node egress controls ([#57](https://github.com/petauron/glivela/issues/57)) ([821cba5](https://github.com/petauron/glivela/commit/821cba5efb3f204d03d6455bdb3bebc59fe12869))
+* **runtime:** support OpenRC native nodes ([#55](https://github.com/petauron/glivela/issues/55)) ([50447b6](https://github.com/petauron/glivela/commit/50447b6b4e30d2165f3c145caa1e8e09a2f23fd5))
+
+
+### Bug Fixes
+
+* **control:** correct IPv6 client-chain latency and route labels ([#52](https://github.com/petauron/glivela/issues/52)) ([7949578](https://github.com/petauron/glivela/commit/79495781948d41046513f07cdbfabe04d7a7ad66))
+* **control:** recover invalid initial local REALITY targets ([#59](https://github.com/petauron/glivela/issues/59)) ([7dcd307](https://github.com/petauron/glivela/commit/7dcd3079756e409909cc667460410c257201b81d))
+* **egress:** handle unreachable IP families in automatic TCP dialing ([#54](https://github.com/petauron/glivela/issues/54)) ([e1b3224](https://github.com/petauron/glivela/commit/e1b32241acbedfb05609a49745fdd1fd9171123e))
+
 ## [0.1.0-alpha.109](https://github.com/petauron/glivela/compare/v0.1.0-alpha.108...v0.1.0-alpha.109) (2026-11-04)
 
 
