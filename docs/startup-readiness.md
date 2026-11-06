@@ -44,6 +44,12 @@ process/listener ownership verification. Published host ports may not support
 self-connections (NAT reflection or Docker hairpinning). The installed plan and
 advertised addresses are unchanged; deployment acceptance verifies public ingress
 from an external client. Startup still authenticates REALITY and target HTTPS and
-retains all fixed-route exit and peer checks. There is no runtime probe or fallback.
+retains all fixed-route exit and peer checks. There is no periodic runtime probe or automatic configuration fallback.
 
 IPv4 worker listeners require PROXY v2. The temporary readiness client uses the bundled Xray Freedom transport dialer to send that header before REALITY; IPv6 listeners retain their direct transport. No extra dependency, relay service or production listener is introduced.
+
+The authenticated native HTTPS response must contain a public observed exit.
+For explicit `ipv4_only` or `ipv6_only`, its address family must match the plan.
+For `auto`, acceptance proves a working exit, not that both IPv4 and IPv6 work;
+the new TCP dialer handles unavailable address candidates during actual requests.
+This adds no periodic connectivity probe or node capability cache.

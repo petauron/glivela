@@ -83,8 +83,15 @@ func TestNativeBusinessDNSAndFinalDestinationPolicyAreExplicit(t *testing.T) {
 		if policy == EgressIPv6Only {
 			strategy = "ForceIPv6"
 		}
-		if settings["domainStrategy"] != strategy || direct["streamSettings"] != nil {
+		if settings["domainStrategy"] != strategy {
 			t.Fatal("Freedom preflight still resolves through system/socket strategy")
+		}
+		var stream any
+		if policy == EgressAuto {
+			stream = map[string]any{"sockopt": map[string]any{"happyEyeballs": map[string]any{"tryDelayMs": float64(250)}}}
+		}
+		if !reflect.DeepEqual(direct["streamSettings"], stream) {
+			t.Fatal("automatic TCP fallback or explicit exit-family policy changed")
 		}
 		rules := settings["finalRules"].([]any)
 		if len(rules) != 1 || rules[0].(map[string]any)["action"] != "block" {

@@ -34,6 +34,9 @@ func NewDesired(plan landing.Plan) (Desired, error) {
 	return Desired{DesiredArtifact: a, LandingRenderVersion: landing.RenderVersion, Landing: &plan}, nil
 }
 
+// NewEntryDesired selects the current format for new enrollment or an explicit
+// managed update after the node has a compatible program. Routine projections
+// retain EntryRenderVersion through newEntryDesiredVersion.
 func NewEntryDesired(plan glivela.XrayPlan, network EntryNetwork) (Desired, error) {
 	return newEntryDesiredVersion(plan, network, glivela.XrayRenderVersion)
 }

@@ -86,7 +86,7 @@ func (s *Store) RebindEntry(ctx context.Context, change EntryRebind) error {
 		return invalid
 	}
 	desired.Entry.Revision++
-	node.Desired, err = NewEntryDesired(*desired.Entry, *desired.EntryNetwork)
+	node.Desired, err = newEntryDesiredVersion(*desired.Entry, *desired.EntryNetwork, desired.EntryRenderVersion)
 	if err != nil {
 		return err
 	}

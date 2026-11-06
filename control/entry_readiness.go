@@ -78,7 +78,7 @@ func probeEntryReadiness(ctx context.Context, binary, digest string, plan glivel
 			continue
 		}
 		for _, sni := range endpoint.ServerNames {
-			if err := probeRealityClient(ctx, binary, endpoint, *material, sni, "https://www.cloudflare.com/cdn-cgi/trace", nil, localListener && net.ParseIP(endpoint.ListenAddress).To4() != nil); err != nil {
+			if err := probeRealityClient(ctx, binary, endpoint, *material, sni, "https://www.cloudflare.com/cdn-cgi/trace", nil, localListener && net.ParseIP(endpoint.ListenAddress).To4() != nil, plan.NativeEgress); err != nil {
 				return err
 			}
 		}
@@ -89,7 +89,7 @@ func probeEntryReadiness(ctx context.Context, binary, digest string, plan glivel
 // Uses the installed verified Xray, never downloads a different core. Secrets
 // travel on stdin; only loopback is exposed. The caller selects the listener
 // after verifying its runtime ownership; REALITY, SNI and target TLS stay checked.
-func probeRealityClient(parent context.Context, binary string, endpoint glivela.RealityEndpoint, material glivela.CredentialMaterial, sni, target string, roots *x509.CertPool, proxyProtocol bool) error {
+func probeRealityClient(parent context.Context, binary string, endpoint glivela.RealityEndpoint, material glivela.CredentialMaterial, sni, target string, roots *x509.CertPool, proxyProtocol bool, policy glivela.EgressPolicy) error {
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -147,14 +147,14 @@ func probeRealityClient(parent context.Context, binary string, endpoint glivela.
 		if i == 1 {
 			budget = 4 * time.Second
 		}
-		if err := readinessHTTPS(ctx, address, username, password, target, roots, budget); err != nil {
+		if err := readinessHTTPS(ctx, address, username, password, target, roots, budget, policy); err != nil {
 			return fmt.Errorf("control: REALITY readiness request %d failed", i+1)
 		}
 	}
 	return verifyReadinessListener(cmd.Process.Pid, port)
 }
 
-func readinessHTTPS(parent context.Context, address, username, password, target string, roots *x509.CertPool, budget time.Duration) error {
+func readinessHTTPS(parent context.Context, address, username, password, target string, roots *x509.CertPool, budget time.Duration, policy glivela.EgressPolicy) error {
 	ctx, cancel := context.WithTimeout(parent, budget)
 	defer cancel()
 	// Retry listener startup only. A completed business failure is not hidden.
@@ -194,6 +194,9 @@ func readinessHTTPS(parent context.Context, address, username, password, target 
 		if bytes.HasPrefix(line, []byte("ip=")) {
 			ip := net.ParseIP(string(bytes.TrimPrefix(line, []byte("ip="))))
 			if ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() {
+				if policy == glivela.EgressIPv4Only && ip.To4() == nil || policy == glivela.EgressIPv6Only && ip.To4() != nil {
+					return errors.New("control: readiness exit does not match native egress family")
+				}
 				return nil
 			}
 		}

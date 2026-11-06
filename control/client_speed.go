@@ -85,7 +85,7 @@ func projectClientSpeedPeers(nodes map[string]Node, m glivela.ImportMaterial, cr
 		}
 		d.Entry.Revision++
 		d.EntryNetwork.SpeedPeers = peers
-		d, err := NewEntryDesired(*d.Entry, *d.EntryNetwork)
+		d, err := newEntryDesiredVersion(*d.Entry, *d.EntryNetwork, d.EntryRenderVersion)
 		if err != nil {
 			return false, err
 		}

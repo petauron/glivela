@@ -51,7 +51,7 @@ func newEntryQuota(seed EntryQuotaSeed, base Desired) (*EntryQuota, Desired, err
 	if err := q.validate(); err != nil {
 		return nil, Desired{}, err
 	}
-	desired, err := NewEntryDesired(*q.plan(base.Revision), *base.EntryNetwork)
+	desired, err := newEntryDesiredVersion(*q.plan(base.Revision), *base.EntryNetwork, base.EntryRenderVersion)
 	return q, desired, err
 }
 
@@ -212,7 +212,7 @@ func advanceEntryQuotaWithTransportRecovery(current *EntryQuota, desired Desired
 		return nil, Desired{}, errors.New("control: quota revision exhausted")
 	}
 	plan.Revision++
-	next, err := NewEntryDesired(*plan, *q.Base.EntryNetwork)
+	next, err := newEntryDesiredVersion(*plan, *q.Base.EntryNetwork, desired.EntryRenderVersion)
 	return q, next, err
 }
 

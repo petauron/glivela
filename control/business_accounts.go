@@ -149,7 +149,7 @@ func projectAccountCreation(nodes map[string]Node, material glivela.ImportMateri
 			return nil, errors.New("control: entry revision exhausted")
 		}
 		desired.Entry.Revision++
-		desired, err = NewEntryDesired(*desired.Entry, *desired.EntryNetwork)
+		desired, err = newEntryDesiredVersion(*desired.Entry, *desired.EntryNetwork, desired.EntryRenderVersion)
 		if err != nil {
 			return nil, err
 		}

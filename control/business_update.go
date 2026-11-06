@@ -268,7 +268,7 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 			return nil, false, errors.New("control: entry revision exhausted")
 		}
 		plan.Revision++
-		desired, err = NewEntryDesired(*plan, *desired.EntryNetwork)
+		desired, err = newEntryDesiredVersion(*plan, *desired.EntryNetwork, desired.EntryRenderVersion)
 		if err != nil {
 			return nil, false, err
 		}
