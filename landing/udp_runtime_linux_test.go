@@ -49,7 +49,7 @@ func TestRenderedLandingUDP(t *testing.T) {
 	}
 	ip := func(args ...string) {
 		t.Helper()
-		if out, err := exec.CommandContext(ctx, "/usr/sbin/ip", args...).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, "ip", args...).CombinedOutput(); err != nil {
 			t.Fatalf("isolated UDP interface: %s %v", out, err)
 		}
 	}

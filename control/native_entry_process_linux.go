@@ -32,6 +32,9 @@ func nativeEntryCommand(ctx context.Context, binary string, arguments ...string)
 
 func inspectNativeEntry(ctx context.Context, driver SystemdDriver) (nativeEntryProcess, error) {
 	var result nativeEntryProcess
+	if driver.InitSystem == "openrc" {
+		return inspectOpenRCEntry(ctx, driver)
+	}
 	if _, err := driver.installationNames(); err != nil {
 		return result, err
 	}

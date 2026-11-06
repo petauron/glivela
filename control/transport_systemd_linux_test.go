@@ -73,9 +73,9 @@ func TestInstalledTransportFailureRecovery(t *testing.T) {
 			t.Fatalf("fixture %s failed: %v", name, err)
 		}
 	}
-	command("/usr/sbin/ip", "link", "set", "lo", "up")
+	command("ip", "link", "set", "lo", "up")
 	for _, addr := range []string{"100.64.0.3/32", "93.184.216.34/32"} {
-		command("/usr/sbin/ip", "addr", "add", addr, "dev", "lo")
+		command("ip", "addr", "add", addr, "dev", "lo")
 	}
 	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
 	target.Listener.Close()

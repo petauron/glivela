@@ -21,8 +21,9 @@ type installedNativeService struct {
 }
 
 type nativeInstallationInventory struct {
-	Version  int                               `json:"version"`
-	Services map[string]installedNativeService `json:"services"`
+	InitSystem string                            `json:"initSystem,omitempty"`
+	Version    int                               `json:"version"`
+	Services   map[string]installedNativeService `json:"services"`
 }
 
 // resolveService consumes the local installer's immutable resource inventory.
@@ -49,7 +50,7 @@ func (d SystemdDriver) resolveService() (SystemdDriver, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var extra any
-	if decoder.Decode(&inventory) != nil || decoder.Decode(&extra) != io.EOF || inventory.Version != 1 {
+	if decoder.Decode(&inventory) != nil || decoder.Decode(&extra) != io.EOF || !inventory.supported() {
 		return SystemdDriver{}, errors.New("control: unsupported installation inventory")
 	}
 	service, ok := inventory.Services[d.Service]
@@ -58,6 +59,7 @@ func (d SystemdDriver) resolveService() (SystemdDriver, error) {
 		return SystemdDriver{}, errors.New("control: installed service identity missing")
 	}
 	d.Unit, d.WorkerUser, d.UnitSHA256 = service.Unit, service.User, service.SHA256
+	d.InitSystem = inventory.InitSystem
 	if _, err := d.installationNames(); err != nil {
 		return SystemdDriver{}, err
 	}
@@ -93,7 +95,7 @@ func InstalledMaintenanceFiles(installation, logical string) (string, map[string
 	}
 	raw, err := os.ReadFile(installation)
 	var inventory nativeInstallationInventory
-	if err != nil || decode(bytes.NewReader(raw), &inventory) != nil || inventory.Version != 1 {
+	if err != nil || decode(bytes.NewReader(raw), &inventory) != nil || !inventory.supported() {
 		return "", nil, "", invalid
 	}
 	service, ok := inventory.Services[logical]
@@ -102,6 +104,9 @@ func InstalledMaintenanceFiles(installation, logical string) (string, map[string
 		return "", nil, "", invalid
 	}
 	unit := filepath.Join("/etc/systemd/system", service.Unit)
+	if inventory.InitSystem == "openrc" {
+		unit = filepath.Join("/etc/init.d", name)
+	}
 	info, err = os.Lstat(unit)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || info.Size() > 1<<20 {
 		return "", nil, "", invalid
@@ -147,4 +152,8 @@ func validMaintenanceName(name string) bool {
 		}
 	}
 	return true
+}
+
+func (i nativeInstallationInventory) supported() bool {
+	return i.Version == 1 && i.InitSystem == "" || i.Version == 2 && i.InitSystem == "openrc"
 }
