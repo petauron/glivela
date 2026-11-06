@@ -15,20 +15,24 @@ import (
 // RealityChangeInput edits only an owned endpoint's target and exact SNI.
 // Public ingress acceptance is operator-attested, separately from node readiness.
 type RealityChangeInput struct {
-	Reason             string    `json:"reason"`
-	EntryID            string    `json:"entryId"`
-	ExpectedRevision   uint64    `json:"expectedRevision,string"`
-	Action             string    `json:"action"`
-	TargetHost         string    `json:"targetHost"`
-	TargetIP           string    `json:"targetIp"`
-	LocalTLSOrigin     bool      `json:"localTlsOrigin"`
-	ServerName         string    `json:"serverName"`
-	EvidenceSHA256     string    `json:"evidenceSha256"`
-	VerifiedAt         time.Time `json:"verifiedAt"`
-	PublicationChecked bool      `json:"publicationChecked"`
+	InitialRepair      *glivela.RealityInitialRepair `json:"initialRepair,omitempty"`
+	Reason             string                        `json:"reason"`
+	EntryID            string                        `json:"entryId"`
+	ExpectedRevision   uint64                        `json:"expectedRevision,string"`
+	Action             string                        `json:"action"`
+	TargetHost         string                        `json:"targetHost"`
+	TargetIP           string                        `json:"targetIp"`
+	LocalTLSOrigin     bool                          `json:"localTlsOrigin"`
+	ServerName         string                        `json:"serverName"`
+	EvidenceSHA256     string                        `json:"evidenceSha256"`
+	VerifiedAt         time.Time                     `json:"verifiedAt"`
+	PublicationChecked bool                          `json:"publicationChecked"`
 }
 
 type RealityChangeView struct {
+	RepairInitial bool                          `json:"repairInitial"`
+	CertificateID string                        `json:"certificateId"`
+	ConfigSHA256  string                        `json:"configSha256"`
 	PreviewMihomo string                        `json:"previewMihomo,omitempty"`
 	PreviewLink   string                        `json:"previewLink,omitempty"`
 	EntryID       string                        `json:"entryId"`
@@ -67,7 +71,9 @@ func (s *Store) ChangeRealityTarget(ctx context.Context, input RealityChangeInpu
 	}
 	now := time.Now().UTC()
 	if input.Action == "inspect" {
-		return realityChangeView(node, material.Endpoints[index], now), nil
+		view := realityChangeView(node, material.Endpoints[index], now)
+		view.RepairInitial = s.initialRealityTargetRepairable(node, material.Endpoints[index], now)
+		return view, nil
 	}
 	material.Endpoints = slices.Clone(material.Endpoints)
 	endpoint := &material.Endpoints[index]
@@ -76,9 +82,29 @@ func (s *Store) ChangeRealityTarget(ctx context.Context, input RealityChangeInpu
 	if len(endpoint.RealityChanges) > 0 {
 		last = &endpoint.RealityChanges[len(endpoint.RealityChanges)-1]
 	}
+	if input.InitialRepair != nil && input.Action != "repair-initial" {
+		return RealityChangeView{}, invalid
+	}
 	switch input.Action {
-	case "apply":
-		if !s.realityTargetRuntimeReady(node, *endpoint, now) || !realityNodeReady(node, *endpoint, now) || len(endpoint.RealityChanges) >= 32 || last != nil && (last.State == "pending" || last.State == "reverting") {
+	case "apply", "repair-initial":
+		if input.Action == "repair-initial" {
+			proof := input.InitialRepair
+			if s.speedHub != nil && s.speedHub.online(certificate) || !s.initialRealityTargetRepairable(node, *endpoint, now) || proof == nil || proof.CertificateID != certificate || proof.ConfigSHA256 != node.Desired.ConfigSHA256 {
+				return RealityChangeView{}, invalid
+			}
+			verified, err := time.Parse(time.RFC3339Nano, proof.VerifiedAt)
+			created, createdErr := time.Parse(time.RFC3339Nano, endpoint.CreatedAt)
+			if createdErr != nil || verified.Before(created) || err != nil || verified.After(now) || now.Sub(verified) > 15*time.Minute || !glivela.ValidIdentity(proof.EvidenceSHA256) {
+				return RealityChangeView{}, invalid
+			}
+			// Only the wrong port can change. The administrator attests that the
+			// identified worker is stopped and has never activated a runtime.
+			input.TargetHost, input.ServerName = endpoint.Reality.ServerNames[0], endpoint.Reality.ServerNames[0]
+			input.TargetIP, input.LocalTLSOrigin = "", true
+		} else if !s.realityTargetRuntimeReady(node, *endpoint, now) || !realityNodeReady(node, *endpoint, now) {
+			return RealityChangeView{}, invalid
+		}
+		if len(endpoint.RealityChanges) >= 32 || last != nil && (last.State == "pending" || last.State == "reverting") {
 			return RealityChangeView{}, invalid
 		}
 		enabled := slices.ContainsFunc(node.Desired.Entry.Credentials, func(c glivela.CredentialMaterial) bool {
@@ -101,10 +127,14 @@ func (s *Store) ChangeRealityTarget(ctx context.Context, input RealityChangeInpu
 			return RealityChangeView{}, invalid
 		}
 		endpoint.RealityChanges = append(endpoint.RealityChanges, glivela.RealityTargetChange{PreviousTarget: endpoint.Reality.Target, PreviousTargetIP: endpoint.TargetIP, PreviousServerNames: slices.Clone(endpoint.Reality.ServerNames), Target: candidate.Target, TargetIP: input.TargetIP, ServerName: input.ServerName, State: "pending", ChangedAt: now.Format(time.RFC3339Nano)})
+		if input.InitialRepair != nil {
+			proof := *input.InitialRepair
+			endpoint.RealityChanges[len(endpoint.RealityChanges)-1].InitialRepair = &proof
+		}
 		endpoint.Reality = candidate
 		endpoint.TargetIP = input.TargetIP
 	case "revert":
-		if last == nil || last.State != "pending" || len(input.Reason) == 0 || len(input.Reason) > 256 {
+		if last == nil || last.InitialRepair != nil || last.State != "pending" || len(input.Reason) == 0 || len(input.Reason) > 256 {
 			return RealityChangeView{}, invalid
 		}
 		endpoint.Reality.Target = last.PreviousTarget
@@ -179,6 +209,13 @@ func (s *Store) ChangeRealityTarget(ctx context.Context, input RealityChangeInpu
 	if err != nil {
 		return RealityChangeView{}, err
 	}
+	if input.Action == "repair-initial" {
+		for key, other := range s.nodes {
+			if key != certificate && !reflect.DeepEqual(projected[key], other) {
+				return RealityChangeView{}, invalid
+			}
+		}
+	}
 	if err = s.saveOwnedBusinessLocked(material); err != nil {
 		return RealityChangeView{}, err
 	}
@@ -194,7 +231,7 @@ func realityChangeView(node Node, endpoint glivela.ImportEndpoint, now time.Time
 		state = endpoint.RealityChanges[len(endpoint.RealityChanges)-1].State
 	}
 	ready := realityNodeReady(node, endpoint, now)
-	view := RealityChangeView{EntryID: node.ID, Revision: node.Desired.Revision, Target: endpoint.Reality.Target, ServerNames: slices.Clone(endpoint.Reality.ServerNames), State: state, RuntimeReady: ready, History: append([]glivela.RealityTargetChange{}, endpoint.RealityChanges...)}
+	view := RealityChangeView{CertificateID: node.CertificateID, ConfigSHA256: node.Desired.ConfigSHA256, EntryID: node.ID, Revision: node.Desired.Revision, Target: endpoint.Reality.Target, ServerNames: slices.Clone(endpoint.Reality.ServerNames), State: state, RuntimeReady: ready, History: append([]glivela.RealityTargetChange{}, endpoint.RealityChanges...)}
 	// A private candidate link allows actual client acceptance while the official
 	// subscription remains fenced. It reuses an enabled identity, never mints one.
 	if ready && (state == "pending" || state == "reverting") {

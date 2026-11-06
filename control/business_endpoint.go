@@ -6,13 +6,35 @@ import (
 	"errors"
 	"maps"
 	"math"
+	"net"
+	"net/netip"
 	"reflect"
 	"slices"
 	"time"
 
 	"github.com/google/uuid"
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
+
+// validFreshEndpointTarget rejects pinned destinations that the native
+// runtime cannot safely dial. Unpinned DNS names remain supported and are
+// resolved and checked against the public-address policy by the runtime.
+func validFreshEndpointTarget(e glivela.ImportEndpoint) bool {
+	if e.TargetIP != "" {
+		return glivela.ValidRealityTargetPin(e.Reality.Target, e.TargetIP)
+	}
+	host, port, err := net.SplitHostPort(e.Reality.Target)
+	if err != nil || port != "443" {
+		return false
+	}
+	if address, err := netip.ParseAddr(host); err == nil {
+		return address.Zone() == "" && landing.PublicIP(address.Unmap())
+	}
+	// Endpoint validation already verifies the hostname syntax. Reachability
+	// and each selected destination are still checked at runtime before dialing.
+	return true
+}
 
 // EndpointRegistration adds a fresh entry to the owned business. It is an
 // authenticated administrator operation, not a node-supplied topology update.
@@ -86,6 +108,9 @@ func (s *Store) RegisterEndpoint(ctx context.Context, input EndpointRegistration
 			next.Endpoints[index].QuotaAppliedEnabled = true
 		}
 	} else {
+		if !validFreshEndpointTarget(e) {
+			return invalid
+		}
 		if _, exists := next.References.Applications[entry]; exists {
 			return invalid
 		}
