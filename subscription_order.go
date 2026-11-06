@@ -30,10 +30,27 @@ func (o SubscriptionOrder) Validate() error {
 
 type subscriptionRank map[string]int
 
-func subscriptionRanks(ids []string) subscriptionRank {
+func subscriptionRanks(ids []string, entries []resolvedSubscriptionEntry) subscriptionRank {
 	ranks := make(subscriptionRank, len(ids))
 	for index, id := range ids {
-		ranks[id] = index
+		ranks[id] = 2 * index
+	}
+	if len(ids) == 0 {
+		return ranks
+	}
+	// Leave gaps between saved ranks so new native proxies can follow the last
+	// visible saved native without reordering any saved routes or chains.
+	// With no visible saved native, place new natives before the saved items.
+	position := -1
+	for _, entry := range entries {
+		if rank, saved := ranks[entry.ID]; entry.Kind == "native" && saved {
+			position = max(position, rank+1)
+		}
+	}
+	for _, entry := range entries {
+		if _, saved := ranks[entry.ID]; entry.Kind == "native" && !saved {
+			ranks[entry.ID] = position
+		}
 	}
 	return ranks
 }
@@ -42,5 +59,5 @@ func (r subscriptionRank) position(id string) int {
 	if position, exists := r[id]; exists {
 		return position
 	}
-	return len(r)
+	return 2 * len(r)
 }

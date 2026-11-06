@@ -255,6 +255,9 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 			if chainErr != nil {
 				return subscriptionContent{}, errSubscriptionUnverified
 			}
+			if issued := s.subscriptionNames[chain.ID]; issued != "" {
+				chain.Name = issued
+			}
 			if !chain.Enabled || chain.AccountID != account.Account.ID {
 				continue
 			}
@@ -351,6 +354,10 @@ func (s *Store) subscriptionPeerReady(entry Node, landingID string, now time.Tim
 // not change. Other codes and explicit display prefixes remain untouched.
 func importedLandingRegionPrefix(region string) string {
 	switch region {
+	case "HK":
+		return "🇭🇰 香港"
+	case "JP":
+		return "🇯🇵 日本"
 	case "US":
 		return "🇺🇸 美国"
 	case "TW":

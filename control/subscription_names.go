@@ -2,10 +2,14 @@ package control
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -52,10 +56,120 @@ func loadSubscriptionNames(directory string, m glivela.ImportMaterial) (map[stri
 	for _, endpoint := range m.Endpoints {
 		known[endpoint.Reality.EntryID] = true
 	}
+	for _, chain := range m.ClientChains {
+		if chain.Transport != "ipv6-ss2022" {
+			continue
+		}
+		if known[chain.ID] && names[chain.ID] != "" {
+			return nil, errors.New("control: ambiguous issued name identity")
+		}
+		known[chain.ID] = true
+	}
 	for id := range names {
 		if !known[id] {
-			return nil, errors.New("control: issued name has no retained endpoint")
+			return nil, errors.New("control: issued name has no retained endpoint or chain")
 		}
 	}
 	return names, nil
+}
+
+// ChangeSubscriptionNames changes presentation only. It does not rewrite the
+// business ledger or project a node configuration. Expectations fence stale
+// operator edits, and every currently available subscription is rendered before
+// the private file is atomically replaced.
+func (s *Store) ChangeSubscriptionNames(ctx context.Context, expected, updates map[string]string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	invalid := errors.New("control: subscription names changed or unavailable")
+	if ctx.Err() != nil || s.business == nil || s.business.faulted || s.business.material.Ownership == nil || len(updates) == 0 || len(updates) > 1024 || len(expected) != len(updates) {
+		return invalid
+	}
+	directory := filepath.Dir(s.path)
+	current, err := loadSubscriptionNames(directory, s.business.material)
+	if err != nil || !reflect.DeepEqual(current, s.subscriptionNames) {
+		return invalid
+	}
+	next := maps.Clone(current)
+	if next == nil {
+		next = map[string]string{}
+	}
+	for id, name := range updates {
+		old, present := expected[id]
+		if !present || old != current[id] || name == "" {
+			return invalid
+		}
+		next[id] = name
+	}
+	state := struct {
+		Version int               `json:"version"`
+		Names   map[string]string `json:"names"`
+	}{1, next}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return invalid
+	}
+	if _, err = parseSubscriptionNames(raw); err != nil {
+		return invalid
+	}
+	known := map[string]bool{}
+	for _, endpoint := range s.business.material.Endpoints {
+		known[endpoint.Reality.EntryID] = true
+	}
+	for _, chain := range s.business.material.ClientChains {
+		if chain.Transport != "ipv6-ss2022" {
+			continue
+		}
+		if known[chain.ID] && next[chain.ID] != "" {
+			return invalid
+		}
+		known[chain.ID] = true
+	}
+	for id := range next {
+		if !known[id] {
+			return invalid
+		}
+	}
+
+	// Validate generated names and retain each selectable identity and order.
+	before := map[string][]glivela.SubscriptionItem{}
+	for _, account := range s.business.material.Plan.Accounts {
+		content, err := s.subscriptionAccountLocked(ctx, account.Account.ID, true)
+		if errors.Is(err, errSubscriptionMissing) {
+			continue
+		}
+		if err != nil {
+			return invalid
+		}
+		before[account.Account.ID] = content.items
+	}
+	if len(before) == 0 {
+		return invalid
+	}
+	s.subscriptionNames = next
+	for id, items := range before {
+		content, err := s.subscriptionAccountLocked(ctx, id, true)
+		if err != nil || !slices.EqualFunc(items, content.items, func(a, b glivela.SubscriptionItem) bool {
+			return a.ID == b.ID && a.Kind == b.Kind && a.Protocol == b.Protocol
+		}) {
+			s.subscriptionNames = current
+			return invalid
+		}
+		if _, err = s.subscriptionAccountLocked(ctx, id, false); err != nil {
+			s.subscriptionNames = current
+			return invalid
+		}
+	}
+	s.subscriptionNames = current
+	path := filepath.Join(directory, subscriptionNamesFile)
+	writeErr := writeControlState(path, state)
+	observed, readErr := loadSubscriptionNames(directory, s.business.material)
+	if readErr == nil && reflect.DeepEqual(observed, next) {
+		s.subscriptionNames = observed
+		return writeErr
+	}
+	if readErr == nil && reflect.DeepEqual(observed, current) && writeErr != nil {
+		return writeErr
+	}
+	s.business.faulted = true
+	return invalid
 }

@@ -24,6 +24,17 @@ belong in this file. The program validates entries, unique labels and private
 file permissions before binding subscriptions; malformed input stops startup.
 There is no vendor-name inference, alternative endpoint or direct fallback.
 
+An authenticated administrator can update existing entry labels and explicit
+IPv6 client-chain labels without editing the business ledger through
+`POST /v1/admin/subscription-names`. Send `expected` and `names` maps keyed by
+retained entry or IPv6 chain ID; use an empty expected value when no override exists.
+The controller validates ownership, stale values, uniqueness and generated
+subscriptions before atomically saving. Explicit names are presentation only;
+clients using names in saved policies may need to select the renamed entry again.
+An older controller that does not support chain labels requires the prior names
+file from the pre-change recovery point before rollback; never restore an old
+business ledger merely to undo names.
+
 The controller's encrypted consistent backups include this optional file, and
 reject a file changed behind the running controller. Restore only to an offline
 new private destination. Configuration recovery never restores an old ledger.

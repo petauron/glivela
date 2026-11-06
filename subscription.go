@@ -98,7 +98,7 @@ func RenderLinks(entries []NativeEntry, accountID string, mode PublishingMode, r
 	if err != nil {
 		return nil, err
 	}
-	ranks := subscriptionRanks(order)
+	ranks := subscriptionRanks(order, resolved)
 	slices.SortStableFunc(resolved, func(a, b resolvedSubscriptionEntry) int {
 		return cmp.Compare(ranks.position(a.ID), ranks.position(b.ID))
 	})
@@ -195,7 +195,7 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 		}
 		values = append(values, proxyEntry{SubscriptionItem: SubscriptionItem{ID: "chain/" + c.ID, Name: name, Kind: "chain", Protocol: ProtocolKind("shadowsocks")}, helper: helper, value: map[string]any{"name": name, "type": "ss", "server": published.Server, "port": c.Port, "cipher": cipher, "password": c.Key, "udp": false, "dialer-proxy": helper}})
 	}
-	ranks := subscriptionRanks(order)
+	ranks := subscriptionRanks(order, resolved)
 	slices.SortStableFunc(values, func(a, b proxyEntry) int { return cmp.Compare(ranks.position(a.ID), ranks.position(b.ID)) })
 	proxies := make([]any, 0, len(values)+len(helperValues))
 	items := make([]SubscriptionItem, 0, len(values))
