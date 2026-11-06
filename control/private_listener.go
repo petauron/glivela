@@ -107,7 +107,7 @@ func (s *Store) ChangePrivateListener(ctx context.Context, input PrivateListener
 	desired.Entry.RealityEndpoints[0].ListenPort = input.Port
 	desired.Entry.Revision++
 	var err error
-	node.Desired, err = NewEntryDesired(*desired.Entry, *desired.EntryNetwork)
+	node.Desired, err = newEntryDesiredVersion(*desired.Entry, *desired.EntryNetwork, desired.EntryRenderVersion)
 	if err != nil {
 		return PrivateListenerView{}, invalid
 	}

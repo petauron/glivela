@@ -26,7 +26,7 @@ func (p EgressPolicy) Validate() error {
 	}
 }
 
-func nativeXrayOutbound(policy EgressPolicy) map[string]any {
+func nativeXrayOutbound(policy EgressPolicy, happyEyeballs bool) map[string]any {
 	strategy, blockedFamily := "ForceIP", ""
 	switch policy {
 	case EgressIPv4Only:
@@ -41,5 +41,11 @@ func nativeXrayOutbound(policy EgressPolicy) map[string]any {
 	// 26.7.28 supports Freedom's own strategy and post-resolution finalRules.
 	// Setting only a socket strategy leaves Freedom's AsIs preflight using
 	// the system resolver. Do not add an allow rule that bypasses its guards.
-	return map[string]any{"protocol": "freedom", "tag": "direct", "settings": map[string]any{"domainStrategy": strategy, "finalRules": []any{map[string]any{"action": "block", "ip": blocked}}}}
+	outbound := map[string]any{"protocol": "freedom", "tag": "direct", "settings": map[string]any{"domainStrategy": strategy, "finalRules": []any{map[string]any{"action": "block", "ip": blocked}}}}
+	if happyEyeballs && (policy == "" || policy == EgressAuto) {
+		// The bundled core tries another TCP address when a family cannot dial.
+		// Keep Freedom's resolution guards and explicit single-family policies.
+		outbound["streamSettings"] = map[string]any{"sockopt": map[string]any{"happyEyeballs": map[string]any{"tryDelayMs": 250}}}
+	}
+	return outbound
 }

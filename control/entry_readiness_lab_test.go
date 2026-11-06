@@ -93,7 +93,7 @@ func TestEntryReadinessLab(t *testing.T) {
 			generation := fmt.Sprintf("%d:%d:config", round, command.Process.Pid)
 			identity := func() (string, error) { return generation, nil }
 			probe := func(ctx context.Context) error {
-				return probeRealityClient(ctx, binary, endpoint, material, endpoint.ServerNames[0], target.URL, roots, true)
+				return probeRealityClient(ctx, binary, endpoint, material, endpoint.ServerNames[0], target.URL, roots, true, glivela.EgressAuto)
 			}
 			start := time.Now()
 			if err := gate.check(ctx, identity, probe); err != nil {
