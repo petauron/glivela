@@ -212,7 +212,7 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 			return nil, errors.New("control: entry revision exhausted")
 		}
 		plan.Revision++
-		desired, err = NewEntryDesired(*plan, *desired.EntryNetwork)
+		desired, err = newEntryDesiredVersion(*plan, *desired.EntryNetwork, desired.EntryRenderVersion)
 		if err != nil {
 			return nil, err
 		}

@@ -44,3 +44,25 @@ validates every new local bind as usual, and removes only exact retained firewal
 policies reconstructed on local interfaces with full ownership/rule readback.
 The old IP need not remain assigned for cleanup or an authenticated pending retry;
 unknown or changed rules are retained and the operation fails closed.
+
+## Automatic address-family selection
+
+An empty or `auto` native egress policy uses the bundled Xray's Happy Eyeballs
+for TCP domain destinations. A failed address immediately advances to another
+candidate; a pending attempt permits the next attempt after 250 ms. A successful
+connection cancels the other attempts. Freedom's explicit business DNS and
+post-resolution destination guards remain in force. This does not add UDP
+fallback or change fixed landing routes, credentials or subscriptions.
+
+`ipv4_only` and `ipv6_only` still force their selected family and block the
+opposite family, including literal destinations. Use an explicit policy when
+only that family is intended; automatic acceptance does not certify both families.
+
+New entry artifacts use render version 7, retaining the existing UDP 443 and
+public-port policy bits. Versions 0..3 remain unchanged for exact historical
+snapshot validation. This change does not run a startup fleet migration: an
+existing desired configuration retains its render version during account/quota,
+route, listener and probe updates. Install compatible node programs before the
+controller, then select the new format through an explicit managed entry update
+with an advancing revision. Updating the controller alone does not enable this
+policy on retained entries; never send format 7 to an older node program.

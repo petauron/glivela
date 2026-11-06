@@ -168,15 +168,16 @@ type XrayPlan struct {
 
 // XrayRenderVersion identifies the deterministic entry configuration format.
 // Bit zero retains the REALITY UDP 443 policy. Bit one removes the retired
-// management-port blacklist. Versions 0/1 are immutable snapshot readers only.
-const XrayRenderVersion uint8 = 3
+// management-port blacklist. Bit two enables automatic TCP family fallback.
+// Versions 0..3 remain immutable snapshot readers.
+const XrayRenderVersion uint8 = 7
 
 func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 	return renderXrayConfiguration(plan, XrayRenderVersion)
 }
 
 func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
-	if version > XrayRenderVersion {
+	if version > 3 && version != XrayRenderVersion {
 		return nil, errors.New("glivela: unsupported Xray render version")
 	}
 	if version >= 2 {
@@ -258,7 +259,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 		})
 	}
 
-	outbounds := []any{nativeXrayOutbound(plan.NativeEgress), map[string]any{"protocol": "freedom", "tag": "resolver", "settings": map[string]any{"domainStrategy": "UseIPv4", "finalRules": []any{
+	outbounds := []any{nativeXrayOutbound(plan.NativeEgress, version&4 != 0), map[string]any{"protocol": "freedom", "tag": "resolver", "settings": map[string]any{"domainStrategy": "UseIPv4", "finalRules": []any{
 		map[string]any{"action": "allow", "ip": []string{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp"},
 		map[string]any{"action": "block", "ip": []string{"0.0.0.0/0", "::/0"}},
 	}}}}

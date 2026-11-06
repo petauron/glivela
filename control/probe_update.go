@@ -86,7 +86,7 @@ func (s *Store) UpdateProbeTargets(request ProbeUpdate) error {
 		return invalid
 	}
 	current.Entry.Revision++
-	desired, err := NewEntryDesired(*current.Entry, *current.EntryNetwork)
+	desired, err := newEntryDesiredVersion(*current.Entry, *current.EntryNetwork, current.EntryRenderVersion)
 	if err != nil || !probeOnlyEntryChange(n.Desired, desired) {
 		return invalid
 	}
@@ -111,7 +111,7 @@ func (s *Store) UpdateProbeTargets(request ProbeUpdate) error {
 		}
 	}
 	base.Entry.Revision = desired.Revision
-	q.Base, err = NewEntryDesired(*base.Entry, *base.EntryNetwork)
+	q.Base, err = newEntryDesiredVersion(*base.Entry, *base.EntryNetwork, base.EntryRenderVersion)
 	if err != nil || q.validate() != nil || q.validateDesired(desired) != nil {
 		return invalid
 	}

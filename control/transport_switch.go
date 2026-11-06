@@ -141,7 +141,7 @@ func (s *Store) SwitchPrivateTransport(request TransportSwitch) error {
 				}
 			}
 			q.Base.Entry.Revision = current.Entry.Revision
-			base, err := NewEntryDesired(*q.Base.Entry, *q.Base.EntryNetwork)
+			base, err := newEntryDesiredVersion(*q.Base.Entry, *q.Base.EntryNetwork, q.Base.EntryRenderVersion)
 			if err != nil {
 				return invalid
 			}
@@ -149,7 +149,7 @@ func (s *Store) SwitchPrivateTransport(request TransportSwitch) error {
 			current.Entry = q.plan(current.Entry.Revision)
 			n.EntryQuota = q
 		}
-		desired, err := NewEntryDesired(*current.Entry, *current.EntryNetwork)
+		desired, err := newEntryDesiredVersion(*current.Entry, *current.EntryNetwork, current.EntryRenderVersion)
 		if err != nil {
 			return invalid
 		}
