@@ -18,13 +18,19 @@ func measureRouteLatency(ctx context.Context, client LatencyClient) error {
 		return err
 	}
 	result := LatencyResult{AttemptID: probe.AttemptID}
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	network := "tcp"
+	if probe.Source != "" {
+		dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(probe.Source)}
+		network = "tcp6"
+	}
 	total := 0.0
 	for i := 0; i < 3; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		start := time.Now()
-		conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(probe.Address, strconv.Itoa(probe.Port)))
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(probe.Address, strconv.Itoa(probe.Port)))
 		if err == nil {
 			total += float64(time.Since(start)) / float64(time.Millisecond)
 			result.Samples++

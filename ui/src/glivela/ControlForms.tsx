@@ -95,7 +95,7 @@ export function CreateRoute({ inventory, disabled, save, latencies, now, latency
     if (!account || !entry || !landings.includes(egressID) || ipv6Chain && (!sourceIpv6.trim() || !serverIpv6.trim())) return;
     void save(mode === "client" ? "client-chains" : "routes", { id: id.current, accountId: accountID, entryId: entryID, egressId: egressID, enabled: true, ...(mode === "client" ? { name: name.trim(), transport, ...(ipv6Chain ? { sourceIpv6: sourceIpv6.trim(), serverIpv6: serverIpv6.trim() } : {}) } : { hideNative: false }), expectedRevision: account.account.desiredRevision });
   }}><FieldGroup>
-    <Field><FieldLabel htmlFor={`${formID}-mode`}>生成模式</FieldLabel><SelectControl id={`${formID}-mode`} aria-label="生成模式" disabled={disabled} value={mode} onValueChange={value => { setMode(value); setEgressID(""); }} options={[{ value: "server", label: "服务端转发（原有模式）" }, { value: "client", label: "客户端链式（OpenClash / Mihomo）" }]} /></Field>
+    <Field><FieldLabel htmlFor={`${formID}-mode`}>生成模式</FieldLabel><SelectControl id={`${formID}-mode`} aria-label="生成模式" disabled={disabled} value={mode} onValueChange={value => { setMode(value); setEgressID(""); }} options={[{ value: "server", label: "转发" }, { value: "client", label: "链式" }]} /></Field>
     {mode === "client" ? <>
       <p className="text-sm text-muted-foreground">仅 TCP；使用独立落地凭据。仅 Mihomo 格式包含链式配置，普通链接订阅不包含；现有服务端转发保持不变。停用后请更新客户端订阅。</p>
       <Field><FieldLabel>组合名称<Input required maxLength={64} disabled={disabled} value={name} onChange={event => setName(event.target.value)} placeholder="香港 → 落地" /></FieldLabel></Field>

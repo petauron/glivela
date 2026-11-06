@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type LatencySample = { checkedAt: string; latencyMs?: number; samples: number };
-export type RouteLatency = { history?: LatencySample[]; historyUnavailable?: boolean; entryId: string; landingId: string; port: number; state: "unknown" | "pending" | "ready" | "unreachable" | "stale" | "unavailable"; checkedAt?: string; latencyMs?: number; samples: number };
+export type RouteLatency = { history?: LatencySample[]; historyUnavailable?: boolean; entryId: string; landingId: string; port: number; address?: string; source?: string; state: "unknown" | "pending" | "ready" | "unreachable" | "stale" | "unavailable"; checkedAt?: string; latencyMs?: number; samples: number };
 type Loader = (body: { refresh: boolean; force: boolean }, signal: AbortSignal) => Promise<{ latencies: RouteLatency[] }>;
-export const latencyKey = (entry: string, landing: string, port = 1080) => `${entry}/${landing}/${port}`;
+export const latencyKey = (entry: string, landing: string, port = 1080, source = "", address = "") => `${entry}/${landing}/${port}${source ? `/${source}/${address}` : ""}`;
 const formatLatency = (value: number) => value > 0 && value < 0.1 ? "<0.1 ms" : value > 0 && value < 1 ? `${value.toFixed(1)} ms` : `${Math.round(value)} ms`;
 
 // Only the visible control page requests diagnostics. Samples are shared by
-// entry/landing/port, never measured again for each account or table row.
+// exact entry/landing/transport path, never once per account or table row.
 export function useRouteLatencies(enabled: boolean, load: Loader) {
   const [values, setValues] = useState<RouteLatency[]>([]);
   const [busy, setBusy] = useState(false);
@@ -50,7 +50,7 @@ export function useRouteLatencies(enabled: boolean, load: Loader) {
     document.addEventListener("visibilitychange", visible);
     return () => { mounted.current = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", visible); request.current?.abort(); request.current = null; };
   }, [enabled, refresh]);
-  return { values: new Map(values.map(value => [latencyKey(value.entryId, value.landingId, value.port), value])), busy, error, now, refresh };
+  return { values: new Map(values.map(value => [latencyKey(value.entryId, value.landingId, value.port, value.source, value.address), value])), busy, error, now, refresh };
 }
 
 export function LatencyCell({ value, now, failed = false, hideEmpty = false }: { value?: RouteLatency; now: number; failed?: boolean; hideEmpty?: boolean }) {

@@ -120,6 +120,9 @@ func (s *Store) chainSpeedPairLocked(entryID, landingID string, requireFresh boo
 			continue
 		}
 		t := latencyTarget{Certificate: entry.CertificateID, EntryRevision: entry.Desired.Revision, LandingRevision: landing.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: landing.Desired.ConfigSHA256, Address: peer.Address, EntryID: entryID, LandingID: landingID, Port: c.Port}
+		if c.Transport == "ipv6-ss2022" {
+			t.Source = peer.Source
+		}
 		if requireFresh && !s.latencyOnlineLocked(t, now) {
 			continue
 		}

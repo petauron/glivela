@@ -237,7 +237,7 @@ func (s *Store) StartSpeed(request SpeedRequest, actor string) (SpeedView, error
 	if s.speedHub == nil || !s.speedHub.online(t.Certificate) || !s.speedHub.online(cert) {
 		return SpeedView{}, errors.New("control_disconnected")
 	}
-	if recent := s.latencies[latencyKey(request.EntryID, request.LandingID, t.Port)]; recent != nil && recent.Result != nil && recent.Result.LatencyMillis != nil && *recent.Result.LatencyMillis > 100 {
+	if recent := s.latencies[latencyTargetKey(t)]; recent != nil && recent.Result != nil && recent.Result.LatencyMillis != nil && *recent.Result.LatencyMillis > 100 {
 		return SpeedView{}, errors.New("latency_above_100ms")
 	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

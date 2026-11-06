@@ -15,11 +15,12 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
 }) {
  const [query,setQuery]=useState("");const [filter,setFilter]=useState("all");const [modeFilter,setModeFilter]=useState("all");const [selected,setSelected]=useState("");const [deleteKey,setDeleteKey]=useState("");
  const speed = useLinkSpeed(loadSpeeds, active);
- const rows=[...inventory.routes.map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,egressId:value.egressId,enabled:value.enabled,shared:false,port:1080,transport:"",mode:"server",state:value.state,name:"",ipv4EgressId:value.ipv4EgressId,value})),...(inventory.clientChains??[]).map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,egressId:value.egressId,enabled:value.enabled,shared:value.shared??false,port:value.port,transport:value.transport??"",mode:"client",state:value.enabled?"configured":"disabled",name:value.name,ipv4EgressId:undefined,value}))];
+ const rows=[...inventory.routes.map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,egressId:value.egressId,enabled:value.enabled,shared:false,port:1080,transport:"",sourceIpv6:"",serverIpv6:"",mode:"server",state:value.state,name:"",ipv4EgressId:value.ipv4EgressId,value})),...(inventory.clientChains??[]).map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,egressId:value.egressId,enabled:value.enabled,shared:value.shared??false,port:value.port,transport:value.transport??"",sourceIpv6:value.sourceIpv6??"",serverIpv6:value.serverIpv6??"",mode:"client",state:value.enabled?"configured":"disabled",name:value.name,ipv4EgressId:undefined,value}))];
  const nodeName=(id:string)=>names.get(id)??id;
  const label=(row:typeof rows[number])=>row.name||`${nodeName(row.entryId)} → ${nodeName(row.egressId)}`;
  const accountName=(id:string)=>inventory.accounts.find(a=>a.account.id===id)?.account.displayName??id;
  const landingIds=(row:typeof rows[number])=>[...new Set([row.egressId,row.ipv4EgressId].filter((id):id is string=>!!id))];
+ const routeLatency=(row:typeof rows[number],landingId:string)=>row.transport==="ipv6-ss2022"&&(!row.sourceIpv6||!row.serverIpv6)?undefined:latency.values.get(latencyKey(row.entryId,landingId,row.port,row.transport==="ipv6-ss2022"?row.sourceIpv6:"",row.transport==="ipv6-ss2022"?row.serverIpv6:""));
  const state=(row:typeof rows[number])=>row.mode==="client"&&row.enabled?"已配置 · 待客户端验证":routeLabels[row.state]??"未确认";
  const paused=(id:string)=>{
   const pause=inventory.availability?.nodes[id];
@@ -51,7 +52,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
   if (!authorized || row.entryId===landingId) return "该入口与落地配对未启用测速。";
   const ready=new Set(inventory.runtimes.filter(node=>node.runtimeReady).map(node=>node.id));
   if (!ready.has(row.entryId)||!ready.has(landingId)) return "两端节点就绪后可测速。";
-  const measured=latency.values.get(latencyKey(row.entryId,landingId,row.port));
+  const measured=routeLatency(row,landingId);
   if (measured?.latencyMs != null && measured.latencyMs > 100) return "线路参考延迟超过 100ms，无法开始测速。";
   return "";
  };
@@ -73,7 +74,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
   <div className="gl-toolbar gl-route-toolbar">
    <label className="gl-search"><Search/><input aria-label="搜索线路" placeholder="搜索入口、落地或账户…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
    <div className="gl-segment" role="group" aria-label="按线路状态筛选" title="启用表示线路开关和已知限制状态，实际连通性以检测结果为准。">{[["all","全部"],["enabled","启用"],["disabled","停用"]].map(([id,text])=><button key={id} aria-pressed={filter===id} onClick={()=>setFilter(id)}>{text}</button>)}</div>
-   <SelectControl className="gl-route-mode" aria-label="筛选线路模式" value={modeFilter} onValueChange={setModeFilter} options={[{value:"all",label:"全部模式"},{value:"server",label:"服务端转发"},{value:"client",label:"客户端链式"}]}/>
+   <SelectControl className="gl-route-mode" aria-label="筛选线路模式" value={modeFilter} onValueChange={setModeFilter} options={[{value:"all",label:"全部模式"},{value:"server",label:"转发"},{value:"client",label:"链式"}]}/>
   </div>
   {latency.error?<p role="status" className="gl-inline-error">{latency.error}</p>:null}
   {[...latency.values.values()].some(value=>value.historyUnavailable)?<p role="status" className="gl-inline-error">延迟历史暂时无法保存，重启后可能丢失；当前检测不受影响。</p>:null}
@@ -88,7 +89,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
      const meta=[inventory.accounts.length>1?accountName(row.accountId):"",sameLanding?`端口 ${row.port}`:""].filter(Boolean).join(" · ");
      return <tr key={itemKey(row,landingId)} data-selected={selected===itemKey(row,landingId)} onClick={()=>setSelected(itemKey(row,landingId))}>
       <td><div className="gl-route-heading"><span className="gl-status" data-tone={status.enabled?"good":"muted"} title={status.detail}>{status.enabled?"启用":"停用"}</span><span className="gl-route-kind" data-mode={row.mode}>{row.mode==="server"?"转发":"链式"}</span><div className="gl-route-label"><button className="gl-route-name" title={row.name||name} aria-label={row.name?`${name}，组合 ${row.name}`:name} onClick={()=>setSelected(itemKey(row,landingId))}>{name}</button>{meta?<small className="gl-route-meta" title={meta}>{meta}</small>:null}</div></div></td>
-      <td><LatencyCell hideEmpty value={latency.values.get(latencyKey(row.entryId,landingId,row.port))} now={latency.now} failed={!!latency.error}/></td>
+      <td><LatencyCell hideEmpty value={routeLatency(row,landingId)} now={latency.now} failed={!!latency.error}/></td>
       <td><RouteSpeedSummary test={speed.latest.get(speedKey(row.entryId,landingId))}/></td>
       <td><button className="gl-icon-button" aria-label={`查看 ${label(row)}${index>0?` · IPv4 ${nodeName(landingId)}`:""} 线路详情`} onClick={()=>setSelected(itemKey(row,landingId))}><MoreHorizontal/></button></td>
      </tr>;
@@ -96,11 +97,11 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
    </tbody>)}
   </table>{!shown.length?<div className="gl-empty"><Search/><h3>没有匹配的线路</h3><p>切换筛选条件，或新增一条已授权的组合。</p></div>:null}</div>
  </div>{current?<aside className="gl-inspector" data-mobile-open="true" aria-label="线路详情"><header><h2>线路详情</h2><button className="gl-icon-button" aria-label="关闭线路详情" onClick={()=>setSelected("")}><X/></button></header>
- <div className="gl-route-definitions">{[["入口",nodeName(current.entryId)],["落地",nodeName(current.egressId)],...(current.mode==="client"&&current.name?[["组合名称",current.name]]:[]),...(current.ipv4EgressId?[["IPv4 落地",nodeName(current.ipv4EgressId)]]:[]),["账户",accountName(current.accountId)],["生成模式",current.mode==="server"?"服务端转发":"客户端链式"],["状态",listState(current).enabled?"启用":"停用"]].map(([title,value])=><div key={title} className={title==="组合名称"?"gl-route-combination-name":undefined}><h3>{title}</h3><p title={value}>{value}</p></div>)}</div>
+ <div className="gl-route-definitions">{[["入口",nodeName(current.entryId)],["落地",nodeName(current.egressId)],...(current.mode==="client"&&current.name?[["组合名称",current.name]]:[]),...(current.ipv4EgressId?[["IPv4 落地",nodeName(current.ipv4EgressId)]]:[]),["账户",accountName(current.accountId)],["生成模式",current.mode==="server"?"转发":"链式"],["状态",listState(current).enabled?"启用":"停用"]].map(([title,value])=><div key={title} className={title==="组合名称"?"gl-route-combination-name":undefined}><h3>{title}</h3><p title={value}>{value}</p></div>)}</div>
  <p className="gl-context-copy">{listState(current).detail}</p>
  {current.mode==="client"?<p className="gl-context-copy">仅 TCP · 落地端口 {current.port}{current.shared?" · 共享凭据":""}。停用或配置变更后，请刷新客户端订阅并验证。</p>:null}
  <details className="gl-context-details gl-route-verification"><summary>查看验证信息</summary><p>{state(current)}</p></details>
- <section className="gl-route-latencies"><h3>TCP 连接记录</h3>{landingIds(current).map(landingId=><div className="gl-route-latency-detail" key={landingId}><p>{nodeName(landingId)}</p><LatencyCell value={latency.values.get(latencyKey(current.entryId,landingId,current.port))} now={latency.now} failed={!!latency.error}/></div>)}</section>
+ <section className="gl-route-latencies"><h3>TCP 连接记录</h3>{landingIds(current).map(landingId=><div className="gl-route-latency-detail" key={landingId}><p>{nodeName(landingId)}</p><LatencyCell value={routeLatency(current,landingId)} now={latency.now} failed={!!latency.error}/></div>)}</section>
  {landingIds(current).map(landingId=><PathMTU key={`mtu/${current.mode}/${current.id}/${landingId}`} routeId={current.id} mode={current.mode} landingId={landingId} landingName={nodeName(landingId)} disabled={disabled}/>)}
  {landingIds(current).map(landingId=><LinkSpeed key={`${current.id}/${landingId}`} entryId={current.entryId} entryName={nodeName(current.entryId)} landingId={landingId} landingName={nodeName(landingId)} reason={reason(current,landingId)} disabled={disabled} control={speed}/>)}
  <section>{current.mode==="client"&&!current.shared?<Button className="gl-wide" variant="outline" disabled={disabled} onClick={()=>shareLanding(current)}>落地统一 24000</Button>:null}<Button className="gl-wide" variant="outline" disabled={disabled||!inventory.accounts.some(a=>a.account.id===current.accountId)} onClick={()=>toggle(current)}>{current.enabled?(listState(current).enabled?"停用线路":"关闭线路开关"):"启用线路"}</Button>
