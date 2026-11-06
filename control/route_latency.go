@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/netip"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -21,6 +22,7 @@ type LatencyProbe struct {
 	EntryID   string `json:"entryId"`
 	LandingID string `json:"landingId"`
 	Address   string `json:"address"`
+	Source    string `json:"source,omitempty"`
 	Port      int    `json:"port"`
 }
 
@@ -28,6 +30,9 @@ func (p LatencyProbe) Validate() error {
 	a, err := netip.ParseAddr(p.Address)
 	if !glivela.ValidIdentifier(p.AttemptID) || !glivela.ValidIdentifier(p.EntryID) || !glivela.ValidIdentifier(p.LandingID) || err != nil || a.String() != p.Address || a.Zone() != "" || !a.IsGlobalUnicast() || p.Port != landing.SOCKSPort && (p.Port < 24000 || p.Port > 24999) {
 		return errors.New("control: invalid latency assignment")
+	}
+	if p.Source != "" && (!glivela.PublicTransportIPv6(p.Source) || !glivela.PublicTransportIPv6(p.Address) || p.Source == p.Address || p.Port == landing.SOCKSPort) {
+		return errors.New("control: invalid IPv6 latency source")
 	}
 	return nil
 }
@@ -49,6 +54,8 @@ type LatencyView struct {
 	EntryID            string          `json:"entryId"`
 	LandingID          string          `json:"landingId"`
 	Port               int             `json:"port"`
+	Address            string          `json:"address"`
+	Source             string          `json:"source,omitempty"`
 	State              string          `json:"state"`
 	CheckedAt          *time.Time      `json:"checkedAt,omitempty"`
 	LatencyMillis      *float64        `json:"latencyMs,omitempty"`
@@ -63,6 +70,7 @@ type latencyTarget struct {
 	EntryHash       string
 	LandingHash     string
 	Address         string
+	Source          string
 	EntryID         string
 	LandingID       string
 	Port            int
@@ -79,6 +87,18 @@ type latencyRecord struct {
 
 func latencyKey(entry, landing string, port int) string {
 	return entry + "/" + landing + "/" + strconv.Itoa(port)
+}
+
+func latencyPathKey(entry, landing string, port int, source, address string) string {
+	key := latencyKey(entry, landing, port)
+	if source != "" {
+		key += "/" + source + "/" + address
+	}
+	return key
+}
+
+func latencyTargetKey(t latencyTarget) string {
+	return latencyPathKey(t.EntryID, t.LandingID, t.Port, t.Source, t.Address)
 }
 
 // Only the current enrolled transport can supply a target. The administrator
@@ -106,30 +126,38 @@ func (s *Store) latencyTargetsLocked() map[string]latencyTarget {
 			}
 			target := latencyTarget{Certificate: cert, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Transport.Endpoint(peer.Address), EntryID: entry.ID, LandingID: node.ID, Port: landing.SOCKSPort}
 			out[latencyKey(entry.ID, node.ID, target.Port)] = target
-			if s.business != nil && s.business.material.Ownership != nil && !s.business.faulted {
-				for _, original := range s.business.material.ClientChains {
-					chain, err := s.business.material.EffectiveClientChain(original)
-					if err != nil {
-						continue
-					}
-					if chain.Enabled && chain.EntryID == entry.ID && chain.EgressID == node.ID {
-						for _, listener := range node.Desired.Landing.ClientListeners {
-							if listener.ID == chain.ID && listener.Port == chain.Port {
-								t := target
-								t.Address = peer.Transport.PublicAddress
-								t.Port = chain.Port
-								if (LatencyProbe{AttemptID: "latency", EntryID: t.EntryID, LandingID: t.LandingID, Address: t.Address, Port: t.Port}).Validate() == nil {
-									out[latencyKey(entry.ID, node.ID, t.Port)] = t
-								}
-							}
-						}
-					}
-				}
-			}
+		}
+	}
+	if s.business == nil || s.business.material.Ownership == nil || s.business.faulted {
+		return out
+	}
+	material := s.business.material
+	credentials, _, err := effectiveBusinessCredentials(material, time.Now())
+	if err != nil {
+		return out
+	}
+	// Client chains own their exact transport independently of server-forwarding
+	// peers. A projected listener and source grant must exist before diagnostics.
+	for _, original := range material.ClientChains {
+		chain, err := material.EffectiveClientChain(original)
+		if err != nil {
+			continue
+		}
+		peer, entry, node, ok := chainSpeedPeer(s.nodes, material, chain, credentials)
+		if !ok || entry.Desired.EntryNetwork == nil || !slices.Contains(entry.Desired.EntryNetwork.SpeedPeers, peer) {
+			continue
+		}
+		target := latencyTarget{Certificate: entry.CertificateID, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Address, EntryID: entry.ID, LandingID: node.ID, Port: chain.Port}
+		if chain.Transport == "ipv6-ss2022" {
+			target.Source = peer.Source
+		}
+		if (LatencyProbe{AttemptID: "latency", EntryID: target.EntryID, LandingID: target.LandingID, Address: target.Address, Source: target.Source, Port: target.Port}).Validate() == nil {
+			out[latencyTargetKey(target)] = target
 		}
 	}
 	return out
 }
+
 func (s *Store) pruneLatenciesLocked(targets map[string]latencyTarget) {
 	for k, r := range s.latencies {
 		if t, ok := targets[k]; !ok || t != r.Target {
@@ -178,14 +206,14 @@ func (s *Store) RouteLatencies(refresh, force bool) ([]LatencyView, error) {
 			if err != nil {
 				return nil, err
 			}
-			p := LatencyProbe{AttemptID: attempt, EntryID: t.EntryID, LandingID: t.LandingID, Address: t.Address, Port: t.Port}
+			p := LatencyProbe{AttemptID: attempt, EntryID: t.EntryID, LandingID: t.LandingID, Address: t.Address, Source: t.Source, Port: t.Port}
 			if p.Validate() != nil {
 				continue
 			}
 			r = &latencyRecord{Target: t, Probe: p, QueuedAt: now, History: history}
 			s.latencies[k] = r
 		}
-		v := LatencyView{EntryID: t.EntryID, LandingID: t.LandingID, Port: t.Port, State: "unknown", History: append([]LatencySample(nil), history...), HistoryUnavailable: s.latencyHistoryFault}
+		v := LatencyView{EntryID: t.EntryID, LandingID: t.LandingID, Port: t.Port, Address: t.Address, Source: t.Source, State: "unknown", History: append([]LatencySample(nil), history...), HistoryUnavailable: s.latencyHistoryFault}
 		if len(history) > 0 {
 			v.State = "stale"
 		}
@@ -213,7 +241,7 @@ func (s *Store) RouteLatencies(refresh, force bool) ([]LatencyView, error) {
 		views = append(views, v)
 	}
 	sort.Slice(views, func(i, j int) bool {
-		return latencyKey(views[i].EntryID, views[i].LandingID, views[i].Port) < latencyKey(views[j].EntryID, views[j].LandingID, views[j].Port)
+		return latencyPathKey(views[i].EntryID, views[i].LandingID, views[i].Port, views[i].Source, views[i].Address) < latencyPathKey(views[j].EntryID, views[j].LandingID, views[j].Port, views[j].Source, views[j].Address)
 	})
 	return views, nil
 }
@@ -259,7 +287,7 @@ func (s *Store) LatencyExchange(ctx context.Context, certificate string, report 
 				if len(r.History) > latencyHistoryLimit {
 					r.History = append([]LatencySample(nil), r.History[len(r.History)-latencyHistoryLimit:]...)
 				}
-				s.saveLatencyHistoryLocked(latencyKey(r.Target.EntryID, r.Target.LandingID, r.Target.Port), r.Target, r.History)
+				s.saveLatencyHistoryLocked(latencyTargetKey(r.Target), r.Target, r.History)
 			}
 			found = true
 			break

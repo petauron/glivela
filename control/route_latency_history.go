@@ -33,7 +33,11 @@ type latencyHistoryState struct {
 }
 
 func latencyAddressHash(t latencyTarget) string {
-	hash := sha256.Sum256([]byte(t.Address))
+	address := t.Address
+	if t.Source != "" {
+		address = t.Source + "\x00" + address
+	}
+	hash := sha256.Sum256([]byte(address))
 	return hex.EncodeToString(hash[:])
 }
 
@@ -43,12 +47,20 @@ func (h latencyHistoryState) validate() error {
 	}
 	for key, record := range h.Targets {
 		parts := strings.Split(key, "/")
-		if len(parts) != 3 || !glivela.ValidIdentifier(parts[0]) || !glivela.ValidIdentifier(parts[1]) || !glivela.ValidIdentity(record.AddressHash) || len(record.Samples) == 0 || len(record.Samples) > latencyHistoryLimit {
+		if (len(parts) != 3 && len(parts) != 5) || !glivela.ValidIdentifier(parts[0]) || !glivela.ValidIdentifier(parts[1]) || !glivela.ValidIdentity(record.AddressHash) || len(record.Samples) == 0 || len(record.Samples) > latencyHistoryLimit {
 			return errors.New("invalid latency history target")
 		}
 		port, err := strconv.Atoi(parts[2])
 		if err != nil || strconv.Itoa(port) != parts[2] || port != landing.SOCKSPort && (port < 24000 || port > 24999) {
 			return errors.New("invalid latency history port")
+		}
+		// Existing IPv4/1080 keys remain unchanged. IPv6 histories are bound to
+		// both canonical source and destination; they never read an IPv4 record.
+		if len(parts) == 5 {
+			probe := LatencyProbe{AttemptID: "history", EntryID: parts[0], LandingID: parts[1], Port: port, Source: parts[3], Address: parts[4]}
+			if probe.Source == "" || probe.Validate() != nil || record.AddressHash != latencyAddressHash(latencyTarget{Source: probe.Source, Address: probe.Address}) {
+				return errors.New("invalid IPv6 latency history target")
+			}
 		}
 		for _, sample := range record.Samples {
 			if sample.CheckedAt.IsZero() || sample.Samples < 0 || sample.Samples > 3 || (sample.Samples == 0) != (sample.LatencyMillis == nil) {
