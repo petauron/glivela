@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.111](https://github.com/petauron/glivela/compare/v0.1.0-alpha.110...v0.1.0-alpha.111) (2026-11-06)
+
+
+### Bug Fixes
+
+* **subscription:** align labels and default order ([e7714d0](https://github.com/petauron/glivela/commit/e7714d0d321a091f91f564546fa93abf66b6ab97))
+
 ## [0.1.0-alpha.110](https://github.com/petauron/glivela/compare/v0.1.0-alpha.109...v0.1.0-alpha.110) (2026-11-06)
 
 
