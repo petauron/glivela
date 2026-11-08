@@ -53,8 +53,17 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	for _, address := range []string{"100.64.0.10/32", "100.64.0.11/32", "100.64.0.12/32", "192.168.50.2/32", "93.184.216.34/32", "93.184.216.35/32", "1.1.1.1/32", "1.0.0.1/32"} {
 		ip("addr", "add", address, "dev", "lo")
 	}
+	resolverAddress, resolverNetwork := "1.1.1.1:53", "udp"
+	resolverListeners := "1.1.1.1,1.0.0.1"
 	if ipv6 {
 		ip("-6", "addr", "add", egress+"/128", "dev", "lo", "nodad")
+		for _, address := range []string{"2606:4700:4700::1111", "2606:4700:4700::1001"} {
+			ip("-6", "addr", "add", address+"/128", "dev", "lo", "nodad")
+		}
+		// No IPv4 DNS listener exists in this case: real TLS must depend only
+		// on IPv6 TCP DNS through the existing UID-scoped firewall.
+		resolverAddress, resolverNetwork = "[2606:4700:4700::1111]:53", "tcp"
+		resolverListeners = "2606:4700:4700::1111,2606:4700:4700::1001"
 	}
 	// The unprivileged worker needs traversal; no credentials are stored here.
 	directory, err := os.MkdirTemp("", "glivela-isolated-dns-")
@@ -81,7 +90,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		t.Cleanup(func() { _ = command.Process.Kill(); _ = command.Wait() })
 	}
 	dnsLog := filepath.Join(directory, "dns.log")
-	args := []string{"--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--local-ttl=60", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1", "--user=root", "--pid-file=" + filepath.Join(directory, "dns.pid"), "--log-queries", "--log-facility=" + dnsLog}
+	args := []string{"--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--local-ttl=60", "--bind-interfaces", "--listen-address=" + resolverListeners, "--user=root", "--pid-file=" + filepath.Join(directory, "dns.pid"), "--log-queries", "--log-facility=" + dnsLog}
 	for i := 1; i <= 12; i++ {
 		address := fmt.Sprintf("2001:db8::%x", i)
 		if ipv6 {
@@ -98,7 +107,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	}
 	start(exec.CommandContext(ctx, "dnsmasq", args...))
 	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, network, "1.1.1.1:53")
+		return (&net.Dialer{}).DialContext(ctx, resolverNetwork, resolverAddress)
 	}}
 	deadline := time.Now().Add(4 * time.Second)
 	for {
@@ -246,6 +255,12 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 			t.Fatal("warm request did not use DNS cache")
 		}
 		t.Logf("%s cache: verified TLS/HTTP 204, resolver %s queries %d -> %d", phase, queryType, before, countQueries())
+	}
+	if ipv6 {
+		evidence, err := os.ReadFile(dnsLog)
+		if err != nil || !strings.Contains(string(evidence), "query[AAAA] example.com from "+egress) {
+			t.Fatal("resolver did not use the fixed IPv6 source", err)
+		}
 	}
 	for _, port := range []string{"22", "3306"} {
 		response, err := client.Get("https://example.com:" + port + "/")

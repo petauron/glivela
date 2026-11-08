@@ -106,7 +106,7 @@ const legacyManagementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3
 // Render targets official Xray 26.10.31. SOCKS does not receive the core's
 // default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
 // remains mandatory for post-resolution targets and address-family limits.
-const RenderVersion uint8 = 1
+const RenderVersion uint8 = 2
 
 func (p Plan) Render() ([]byte, error) {
 	return p.RenderVersion(RenderVersion)
@@ -117,7 +117,7 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 	if version > RenderVersion {
 		return nil, errors.New("landing: unsupported render version")
 	}
-	if version == RenderVersion {
+	if version >= 1 {
 		p.PublicSSH = nil
 	}
 	if err := p.Validate(); err != nil {
@@ -133,10 +133,22 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		blocked = append(slices.Clone(blockedIPv4), blockedIPv6...)
 		blocked = append(blocked, "::/3", "4000::/2", "8000::/1")
 	}
+	dnsServers := []string{"1.1.1.1", "1.0.0.1"}
+	resolverIPs := []string{"1.1.1.1/32", "1.0.0.1/32"}
+	resolverNetwork := "tcp,udp"
+	resolverOutbound := map[string]any{"tag": "resolver", "protocol": "freedom", "settings": map[string]any{"domainStrategy": "AsIs"}}
+	if version >= 2 && egress.Is6() {
+		// Use the existing fixed-source IPv6 TCP policy without depending on
+		// IPv4 or authorizing UDP. Literal addresses avoid bootstrap DNS.
+		dnsServers = []string{"tcp://[2606:4700:4700::1111]", "tcp://[2606:4700:4700::1001]"}
+		resolverIPs = []string{"2606:4700:4700::1111/128", "2606:4700:4700::1001/128"}
+		resolverNetwork = "tcp"
+		resolverOutbound["sendThrough"] = p.EgressIP
+	}
 	rules := []any{
 		// Built-in DNS has no authorized SOCKS client source. Route only its
 		// tagged queries to the exact resolvers before business-family rules.
-		map[string]any{"type": "field", "inboundTag": []string{"resolver"}, "ip": []string{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp", "outboundTag": "resolver"},
+		map[string]any{"type": "field", "inboundTag": []string{"resolver"}, "ip": resolverIPs, "port": "53", "network": resolverNetwork, "outboundTag": "resolver"},
 		map[string]any{"type": "field", "ip": []string{opposite}, "outboundTag": "deny"},
 		map[string]any{"type": "field", "ip": blocked, "outboundTag": "deny"},
 	}
@@ -200,10 +212,10 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 	}
 	value := map[string]any{
 		"log":      map[string]any{"loglevel": "warning"},
-		"dns":      map[string]any{"tag": "resolver", "servers": []string{"1.1.1.1", "1.0.0.1"}, "queryStrategy": strategy},
+		"dns":      map[string]any{"tag": "resolver", "servers": dnsServers, "queryStrategy": strategy},
 		"inbounds": inbounds,
 		// A miss is blocked, including an unrecognized source or UDP grant.
-		"outbounds": []any{map[string]any{"tag": "deny", "protocol": "blackhole"}, map[string]any{"tag": "egress", "protocol": "freedom", "sendThrough": p.EgressIP, "settings": map[string]any{"domainStrategy": strategy}}, map[string]any{"tag": "resolver", "protocol": "freedom", "settings": map[string]any{"domainStrategy": "AsIs"}}},
+		"outbounds": []any{map[string]any{"tag": "deny", "protocol": "blackhole"}, map[string]any{"tag": "egress", "protocol": "freedom", "sendThrough": p.EgressIP, "settings": map[string]any{"domainStrategy": strategy}}, resolverOutbound},
 		"routing":   map[string]any{"domainStrategy": "IPOnDemand", "rules": rules},
 		"policy":    map[string]any{"levels": map[string]any{"0": map[string]any{"handshake": 10, "connIdle": 300}}},
 	}
