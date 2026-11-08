@@ -41,8 +41,8 @@ for arch in amd64 arm64; do
   esac
   bundle="$stage/$arch"
   mkdir "$bundle"
-  # Resolve the exact official asset through GitHub's API. The browser URL
-  # can cache an expired upstream redirect; the pinned bytes are unchanged.
+  # Resolve the exact official asset through GitHub's API after browser URL
+  # downloads returned HTTP 504; the pinned bytes are unchanged.
   gh release download v26.10.31 --repo XTLS/Xray-core \
     --pattern "$asset" --output "$stage/$asset"
   printf '%s  %s\n' "$digest" "$stage/$asset" | sha256sum --check --status
