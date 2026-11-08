@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.112](https://github.com/petauron/glivela/compare/v0.1.0-alpha.111...v0.1.0-alpha.112) (2026-11-08)
+
+
+### Bug Fixes
+
+* select IPv6 DNS for IPv6-only entries ([#64](https://github.com/petauron/glivela/issues/64)) ([555425f](https://github.com/petauron/glivela/commit/555425fa8f9d6807253b078fcaefb2c31ca47bd5))
+
 ## [0.1.0-alpha.111](https://github.com/petauron/glivela/compare/v0.1.0-alpha.110...v0.1.0-alpha.111) (2026-11-06)
 
 
