@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNativeEgressChangesOnlyTheDirectOutbound(t *testing.T) {
+func TestNativeEgressChangesOnlyTheDirectOutboundAndResolverFamily(t *testing.T) {
 	plan := egressPlanFixture()
 	original, err := RenderXrayConfiguration(plan)
 	if err != nil {
@@ -38,6 +38,13 @@ func TestNativeEgressChangesOnlyTheDirectOutbound(t *testing.T) {
 				t.Fatal("native policy was ignored")
 			}
 			outbounds[0] = before["outbounds"].([]any)[0]
+			if policy == EgressIPv6Only {
+				// Resolver addresses and their exact allow rules follow the exit
+				// family; all unrelated route and identity fields remain fixed.
+				after["dns"] = before["dns"]
+				outbounds[1] = before["outbounds"].([]any)[1]
+				after["routing"].(map[string]any)["rules"].([]any)[1] = before["routing"].(map[string]any)["rules"].([]any)[1]
+			}
 			if !reflect.DeepEqual(before, after) {
 				t.Fatal("native policy changed a credential, public entry, API or fixed landing route")
 			}
@@ -71,7 +78,15 @@ func TestNativeBusinessDNSAndFinalDestinationPolicyAreExplicit(t *testing.T) {
 			Outbounds []map[string]any
 			Routing   struct{ Rules []map[string]any }
 		}
-		if json.Unmarshal(raw, &config) != nil || config.DNS.Tag != "resolver" || !reflect.DeepEqual(config.DNS.Servers, []string{"1.1.1.1", "1.0.0.1"}) {
+		servers := []string{"1.1.1.1", "1.0.0.1"}
+		resolverCIDRs := []any{"1.1.1.1/32", "1.0.0.1/32"}
+		resolverStrategy := "UseIPv4"
+		if policy == EgressIPv6Only {
+			servers = []string{"2606:4700:4700::1111", "2606:4700:4700::1001"}
+			resolverCIDRs = []any{"2606:4700:4700::1111/128", "2606:4700:4700::1001/128"}
+			resolverStrategy = "UseIPv6"
+		}
+		if json.Unmarshal(raw, &config) != nil || config.DNS.Tag != "resolver" || !reflect.DeepEqual(config.DNS.Servers, servers) {
 			t.Fatal("business DNS inherited system/control resolution")
 		}
 		direct := config.Outbounds[0]
@@ -105,8 +120,11 @@ func TestNativeBusinessDNSAndFinalDestinationPolicyAreExplicit(t *testing.T) {
 		if resolver["tag"] != "resolver" || config.Routing.Rules[1]["outboundTag"] != "resolver" || config.Routing.Rules[2]["outboundTag"] != "blocked" {
 			t.Fatal("resolver lacks private subsystem scope or closed fallback")
 		}
-		resolverRules := resolver["settings"].(map[string]any)["finalRules"].([]any)
-		if len(resolverRules) != 2 || resolverRules[0].(map[string]any)["port"] != "53" || resolverRules[1].(map[string]any)["action"] != "block" {
+		resolverSettings := resolver["settings"].(map[string]any)
+		resolverRules := resolverSettings["finalRules"].([]any)
+		expectedAllow := map[string]any{"action": "allow", "ip": resolverCIDRs, "port": "53", "network": "tcp,udp"}
+		expectedRoute := map[string]any{"type": "field", "inboundTag": []any{"resolver"}, "ip": resolverCIDRs, "port": "53", "network": "tcp,udp", "outboundTag": "resolver"}
+		if resolverSettings["domainStrategy"] != resolverStrategy || len(resolverRules) != 2 || !reflect.DeepEqual(resolverRules[0], expectedAllow) || !reflect.DeepEqual(config.Routing.Rules[1], expectedRoute) || resolverRules[1].(map[string]any)["action"] != "block" {
 			t.Fatal("resolver became an unrestricted alternate native exit")
 		}
 	}
