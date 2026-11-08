@@ -41,9 +41,10 @@ for arch in amd64 arm64; do
   esac
   bundle="$stage/$arch"
   mkdir "$bundle"
-  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-    --connect-timeout 15 --max-time 180 --retry 3 \
-    "https://github.com/XTLS/Xray-core/releases/download/v26.10.31/$asset" -o "$stage/$asset"
+  # Resolve the exact official asset through GitHub's API. The browser URL
+  # can cache an expired upstream redirect; the pinned bytes are unchanged.
+  gh release download v26.10.31 --repo XTLS/Xray-core \
+    --pattern "$asset" --output "$stage/$asset"
   printf '%s  %s\n' "$digest" "$stage/$asset" | sha256sum --check --status
   unzip -p "$stage/$asset" xray > "$bundle/xray"
   unzip -p "$stage/$asset" LICENSE > "$bundle/LICENSE.xray"
