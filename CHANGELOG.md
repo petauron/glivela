@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.113](https://github.com/petauron/glivela/compare/v0.1.0-alpha.112...v0.1.0-alpha.113) (2026-11-08)
+
+
+### Bug Fixes
+
+* resolve IPv6 landing DNS through its fixed IPv6 exit ([d474679](https://github.com/petauron/glivela/commit/d47467951a08edd744d88f997113ab3cda25640b))
+
 ## [0.1.0-alpha.112](https://github.com/petauron/glivela/compare/v0.1.0-alpha.111...v0.1.0-alpha.112) (2026-11-08)
 
 
