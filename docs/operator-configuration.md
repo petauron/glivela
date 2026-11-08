@@ -96,3 +96,31 @@ Historical render policies, including 7, retain their original bytes for ownersh
 Landing render policy 2 uses IPv6 literals over TCP for built-in DNS when the fixed exit is IPv6, with the resolver socket bound to that same exit. DNS routing stays limited to those resolver addresses and TCP port 53; business traffic keeps its existing source and address-family restrictions. IPv4 landings retain their resolver configuration. No UDP allowance or system DNS fallback is added.
 
 Historical landing policies 0 and 1 retain their original configuration bytes and validation. Controller startup does not activate this DNS policy on retained nodes. Upgrade the controller and selected landing program, then explicitly apply that landing's existing plan through the normal administrator update with an advancing revision. Preserve its exact sources, credentials and fixed exit; verify domain-based HTTPS through the published chain before treating the update as accepted.
+
+
+## Explicit client-only IPv6 landing
+
+An operator may set a landing plan's `ipv6OnlyAddress` to one exact, locally
+assigned public IPv6 address. This requires the new landing render format 3 and
+a fixed IPv6 egress source. Upgrade the selected controller and landing program
+before treating the new revision as accepted; ordinary landings retain format 2.
+Controller startup never activates this mode automatically.
+
+The landing retains its old transport, source grants and IPv4 client records as
+configuration/history. It activates only IPv6 client listeners at the explicit
+address, with their original SS2022 credentials, TCP ports and exact IPv6 sources.
+No base IPv4/mesh listener or IPv4 DNS exception is installed. IPv4 client chains
+and server-forwarding publication are unavailable in this mode; credentials,
+account policy, counters and subscription order slots remain stored. The client
+chain view reports `landing_ipv6_only`, rather than substituting a new IPv4
+address or a direct connection. An address change remains an explicit operation.
+
+A failed pending transaction may be superseded only by a strictly higher
+assignment received through the existing authenticated controller channel.
+The runtime verifies its retained configuration, validates the new candidate,
+keeps the previous candidate as a private recovery file and stops its owned
+worker/table before persisting the replacement. Unresolved commit intents,
+reused revisions, corrupt state or failed ownership checks remain closed.
+This does not authorize editing journals, replaying an old ledger or changing
+unrelated nodes. Installation success is distinct from fresh runtime receipts
+and a real subscription client request through the expected exit.

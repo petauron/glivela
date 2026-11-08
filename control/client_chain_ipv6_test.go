@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 func TestIPv6ClientChainPreservesOwnedBusinessAndBindsIdentities(t *testing.T) {
@@ -56,6 +57,40 @@ func TestIPv6ClientChainPreservesOwnedBusinessAndBindsIdentities(t *testing.T) {
 	}
 	if _, _, err := chainLanding(s.nodes, chain); err != nil {
 		t.Fatal("valid enrolled identities rejected", err)
+	}
+
+	// Explicit pure IPv6 mode keeps account records but withdraws IPv4 publication.
+	pure := *s.nodes[landingCert].Desired.Landing
+	pure.IPv6OnlyAddress = chain.ServerIPv6
+	pure.EgressIP = "2606:4700::100"
+	pure.Sources = append([]landing.Source(nil), pure.Sources...)
+	for i := range pure.Sources {
+		pure.Sources[i].TCPOnly = true
+	}
+	pure.Revision++
+	desired, err = NewDesired(pure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desired.LandingRenderVersion != 3 {
+		t.Fatal("explicit IPv6 mode lacks its version gate")
+	}
+	node := s.nodes[landingCert]
+	node.Desired = desired
+	s.nodes[landingCert] = node
+	if _, _, err := chainLanding(s.nodes, chain); err != nil {
+		t.Fatal("valid pure IPv6 chain rejected", err)
+	}
+	oldChain := chain
+	oldChain.Transport = glivela.IPv4ClientSS2022
+	if clientChainUnavailableReason(s.nodes, oldChain) != "landing_ipv6_only" {
+		t.Fatal("IPv4 record lacks unavailable reason")
+	}
+	if _, _, err := chainLanding(s.nodes, oldChain); err == nil {
+		t.Fatal("pure IPv6 silently fell back to IPv4")
+	}
+	if !reflect.DeepEqual(before.TrafficCounters, s.business.material.TrafficCounters) || !reflect.DeepEqual(after.ClientChains, s.business.material.ClientChains) {
+		t.Fatal("mode changed account credentials or traffic")
 	}
 	nodes := make(map[string]Node, len(s.nodes))
 	for k, v := range s.nodes {

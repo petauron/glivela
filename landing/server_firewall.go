@@ -27,6 +27,7 @@ type ClientListenerPolicy struct {
 }
 
 type ServerFirewall struct {
+	IPv6Only        bool                     `json:"ipv6Only,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	ClientListeners []ClientListenerPolicy   `json:"clientListeners,omitempty"`
 	Public          bool                     `json:"public,omitempty"`
@@ -66,6 +67,12 @@ func (policy ServerFirewall) validateIdentity() error {
 	if policy.Public {
 		validAddress = glivela.PublicTransportIPv4
 	}
+	if policy.IPv6Only {
+		if !policy.Public || len(policy.Sources) != 0 || len(policy.TCPOnlySources) != 0 || !strings.Contains(policy.EgressIP, ":") {
+			return errors.New("landing: invalid IPv6-only firewall")
+		}
+		validAddress = glivela.PublicTransportIPv6
+	}
 	if policy.Revision == 0 || !validAddress(policy.Address) || policy.UID == 0 || policy.UID == 65534 || !bridgeNamePattern.MatchString(policy.Interface) || len(policy.Sources) > 128 {
 		return errors.New("landing: invalid native firewall identity")
 	}
@@ -85,6 +92,9 @@ func (policy ServerFirewall) validateIdentity() error {
 	for _, c := range policy.ClientListeners {
 		validTransport := (c.Transport == "" || c.Transport == glivela.IPv4ClientSS2022) && c.Address == "" && seen[c.Source] ||
 			c.Transport == "ipv6-ss2022" && glivela.PublicTransportIPv6(c.Address) && glivela.PublicTransportIPv6(c.Source) && c.Address != c.Source
+		if policy.IPv6Only && (c.Transport != "ipv6-ss2022" || c.Address != policy.Address) {
+			return errors.New("landing: IPv4 listener in IPv6-only firewall")
+		}
 		previous, duplicate := ports[c.Port]
 		if !policy.Public || c.Shared && c.Port != 24000 || c.Port < 24000 || c.Port > 24999 || duplicate && (!previous.Shared || !c.Shared) || !validTransport {
 			return errors.New("landing: invalid client listener firewall")
@@ -130,6 +140,9 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 		objects = append(objects, map[string]nftObject{"rule": {"family": "inet", "table": table, "chain": chain, "expr": expr}})
 	}
 	for _, protocol := range []string{"tcp", "udp"} {
+		if policy.IPv6Only {
+			continue
+		}
 		var port any = SOCKSPort
 		if protocol == "udp" {
 			if legacy {
@@ -227,7 +240,7 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 	}
 	// Name resolution is the only IPv4 exception for an explicit IPv6 exit.
 	// Fixed resolver destinations cannot carry arbitrary application connections.
-	if policy.EgressIP != "" {
+	if policy.EgressIP != "" && !policy.IPv6Only {
 		for _, resolver := range []string{"1.1.1.1", "1.0.0.1"} {
 			for _, protocol := range []string{"tcp", "udp"} {
 				rule("destinations", match(payload("ip", "daddr"), resolver), match(payload(protocol, "dport"), 53), nftObject{"return": nil})

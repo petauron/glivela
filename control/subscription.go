@@ -310,7 +310,7 @@ func (s *Store) subscriptionNodeEnabled(node Node, now time.Time) bool {
 
 func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now time.Time) bool {
 	for _, node := range s.nodes {
-		if node.ID != landingID || node.Desired.Landing == nil || !s.subscriptionNodeEnabled(node, now) {
+		if node.ID != landingID || node.Desired.Landing == nil || node.Desired.Landing.IPv6OnlyAddress != "" || !s.subscriptionNodeEnabled(node, now) {
 			continue
 		}
 		authorized, ok := node.RouteEntries[entry.ID]

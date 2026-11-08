@@ -254,8 +254,9 @@ func (r *NativeRuntime) Apply(ctx context.Context, desired Desired) error {
 	return r.activatePending(ctx, state)
 }
 
-// ResumeAssigned retries only the exact pending transaction still assigned by
-// the authenticated controller. Every original acceptance and commit check runs.
+// ResumeAssigned resumes the authenticated pending revision, or supersedes it
+// with a strictly newer authenticated assignment. Retain the old candidate and
+// verify ownership before stopping its worker; all activation checks still run.
 func (r *NativeRuntime) ResumeAssigned(ctx context.Context, desired Desired) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -263,10 +264,10 @@ func (r *NativeRuntime) ResumeAssigned(ctx context.Context, desired Desired) err
 		return err
 	}
 	state, err := r.journal()
-	if err != nil || state.Retired || state.Phase != "pending" || state.Current == nil || state.Candidate == nil || desired.Validate() != nil || desired.Revision <= state.Current.Revision || !reflect.DeepEqual(*state.Candidate, desired) {
+	if err != nil || state.Retired || state.Phase != "pending" || state.Current == nil || state.Candidate == nil || desired.Validate() != nil || desired.Revision <= state.Current.Revision || desired.Revision < state.Candidate.Revision || desired.Revision == state.Candidate.Revision && !reflect.DeepEqual(*state.Candidate, desired) {
 		return errors.New("control: pending transaction does not match assigned revision")
 	}
-	if r.verifyConfig(*state.Current) != nil && r.verifyConfig(desired) != nil {
+	if r.verifyConfig(*state.Current) != nil && r.verifyConfig(*state.Candidate) != nil {
 		return errors.New("control: pending recovery configuration changed")
 	}
 	if err := checkLegacyCutoverApply(r, desired); err != nil {
@@ -277,6 +278,22 @@ func (r *NativeRuntime) ResumeAssigned(ctx context.Context, desired Desired) err
 	}
 	if err := r.Driver.Validate(ctx, desired, filepath.Join(r.Directory, "candidate.json")); err != nil {
 		return errors.New("control: assigned startup configuration rejected")
+	}
+	if desired.Revision > state.Candidate.Revision {
+		if _, err := os.Lstat(filepath.Join(r.Directory, "commit-pending.json")); !errors.Is(err, os.ErrNotExist) {
+			return errors.New("control: pending commit must be resolved before superseding")
+		}
+		if err := r.backup(*state.Candidate); err != nil {
+			return err
+		}
+		// No old candidate firewall or worker may survive a superseding transaction.
+		if err := r.Driver.Stop(ctx, *state.Candidate); err != nil {
+			return err
+		}
+		state.Candidate = &desired
+		if err := r.save(state); err != nil {
+			return err
+		}
 	}
 	return r.activatePending(ctx, state)
 }

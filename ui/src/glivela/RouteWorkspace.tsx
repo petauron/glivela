@@ -15,7 +15,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
 }) {
  const [query,setQuery]=useState("");const [filter,setFilter]=useState("all");const [modeFilter,setModeFilter]=useState("all");const [selected,setSelected]=useState("");const [deleteKey,setDeleteKey]=useState("");
  const speed = useLinkSpeed(loadSpeeds, active);
- const rows=[...inventory.routes.map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,egressId:value.egressId,enabled:value.enabled,shared:false,port:1080,transport:"",sourceIpv6:"",serverIpv6:"",mode:"server",state:value.state,name:"",ipv4EgressId:value.ipv4EgressId,value})),...(inventory.clientChains??[]).map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,egressId:value.egressId,enabled:value.enabled,shared:value.shared??false,port:value.port,transport:value.transport??"",sourceIpv6:value.sourceIpv6??"",serverIpv6:value.serverIpv6??"",mode:"client",state:value.enabled?"configured":"disabled",name:value.name,ipv4EgressId:undefined,value}))];
+ const rows=[...inventory.routes.map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,egressId:value.egressId,enabled:value.enabled,shared:false,port:1080,unavailableReason:"",transport:"",sourceIpv6:"",serverIpv6:"",mode:"server",state:value.state,name:"",ipv4EgressId:value.ipv4EgressId,value})),...(inventory.clientChains??[]).map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,egressId:value.egressId,enabled:value.enabled,shared:value.shared??false,port:value.port,unavailableReason:value.unavailableReason??"",transport:value.transport??"",sourceIpv6:value.sourceIpv6??"",serverIpv6:value.serverIpv6??"",mode:"client",state:value.enabled?"configured":"disabled",name:value.name,ipv4EgressId:undefined,value}))];
  const nodeName=(id:string)=>names.get(id)??id;
  const label=(row:typeof rows[number])=>row.name||`${nodeName(row.entryId)} → ${nodeName(row.egressId)}`;
  const accountName=(id:string)=>inventory.accounts.find(a=>a.account.id===id)?.account.displayName??id;
@@ -31,6 +31,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  };
  const listState=(row:typeof rows[number])=>{
   if (!row.enabled) return {enabled:false,detail:"线路开关已关闭。"};
+  if (row.unavailableReason==="landing_ipv6_only") return {enabled:false,detail:"落地仅支持 IPv6，此线路不发布；原配置和凭据保留。"};
   const account=inventory.accounts.find(item=>item.account.id===row.accountId);
   if (account && !account.account.plan.enabled) return {enabled:false,detail:"账户已停用，线路开关仍为启用。"};
   if (row.state==="policy-disabled") return {enabled:false,detail:"账户额度或策略限制了此线路，线路开关仍为启用。"};
@@ -63,11 +64,11 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  };
  const toggle=(row:typeof rows[number])=>{
   const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account)return;
-  void save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined}:{state:undefined}),enabled:!row.enabled,expectedRevision:account.account.desiredRevision});
+  void save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined}),enabled:!row.enabled,expectedRevision:account.account.desiredRevision});
  };
  const remove=async(row:typeof rows[number])=>{
   const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account||row.enabled)return;
-  const ok=await save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined}:{state:undefined}),enabled:false,delete:true,expectedRevision:account.account.desiredRevision});
+  const ok=await save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined}),enabled:false,delete:true,expectedRevision:account.account.desiredRevision});
   if(ok){setDeleteKey("");setSelected("");}
  };
  return <div className="gl-split gl-route-split"><div className="gl-primary">
