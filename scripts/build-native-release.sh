@@ -52,9 +52,8 @@ for arch in amd64 arm64; do
   test -s "$bundle/LICENSE.xray"
   # The supplier build is separately pinned and attested; it is never fetched
   # by a running node and the attestation is not a reproducible-build claim.
-  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-    --connect-timeout 15 --max-time 180 --retry 3 \
-    "https://github.com/userdocs/iperf3-static/releases/download/3.22/$iperf_asset" -o "$bundle/iperf3"
+  gh release download 3.22 --repo userdocs/iperf3-static \
+    --pattern "$iperf_asset" --output "$bundle/iperf3"
   printf '%s  %s\n' "$iperf_digest" "$bundle/iperf3" | sha256sum --check --status
   gh attestation verify "$bundle/iperf3" --repo userdocs/iperf3-static \
     --signer-workflow userdocs/iperf3-static/.github/workflows/ci-linux-crossbuild.yml \
