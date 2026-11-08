@@ -84,3 +84,9 @@ On failure, stop the batch. `restoreLanding:true` with the same landing/account
 and current revision restores the retained original per-chain configuration
 through a forward revision. Never restore an older ledger, loosen source checks,
 change the exit or fabricate health to continue.
+
+## IPv6-only entry DNS
+
+New entry render policy 15 uses the existing public resolvers over IPv6 when the native exit is explicitly `ipv6_only`. The DNS servers, resolver outbound family and exact port-53 destination rules select the same addresses; composite local DoH uses those IPv6 endpoints too. Private/control-address isolation and proxy readiness checks remain mandatory. IPv4-only and automatic policies retain their existing resolver configuration.
+
+Historical render policies, including 7, retain their original bytes for ownership and recovery checks. Controller startup does not rewrite retained nodes. Upgrade the controller and selected entry first, then apply that entry's existing plan through the normal administrator entry update with an advancing revision. Other node assignments, credentials, subscriptions and counters are unchanged. A program installation alone is not proxy or subscription acceptance.

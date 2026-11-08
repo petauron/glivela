@@ -169,15 +169,16 @@ type XrayPlan struct {
 // XrayRenderVersion identifies the deterministic entry configuration format.
 // Bit zero retains the REALITY UDP 443 policy. Bit one removes the retired
 // management-port blacklist. Bit two enables automatic TCP family fallback.
-// Versions 0..3 remain immutable snapshot readers.
-const XrayRenderVersion uint8 = 7
+// Bit three selects IPv6 resolver transport for explicit IPv6-only entries.
+// Versions 0..3 and 7 remain immutable snapshot readers.
+const XrayRenderVersion uint8 = 15
 
 func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 	return renderXrayConfiguration(plan, XrayRenderVersion)
 }
 
 func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
-	if version > 3 && version != XrayRenderVersion {
+	if version > 3 && version != 7 && version != XrayRenderVersion {
 		return nil, errors.New("glivela: unsupported Xray render version")
 	}
 	if version >= 2 {
@@ -259,13 +260,23 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 		})
 	}
 
-	outbounds := []any{nativeXrayOutbound(plan.NativeEgress, version&4 != 0), map[string]any{"protocol": "freedom", "tag": "resolver", "settings": map[string]any{"domainStrategy": "UseIPv4", "finalRules": []any{
-		map[string]any{"action": "allow", "ip": []string{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp"},
+	resolverAddresses := []string{"1.1.1.1", "1.0.0.1"}
+	resolverCIDRs := []string{"1.1.1.1/32", "1.0.0.1/32"}
+	resolverStrategy := "UseIPv4"
+	resolverDoH := []string{"https+local://1.1.1.1/dns-query", "https+local://8.8.8.8/dns-query"}
+	if version&8 != 0 && plan.NativeEgress == EgressIPv6Only {
+		resolverAddresses = []string{"2606:4700:4700::1111", "2606:4700:4700::1001"}
+		resolverCIDRs = []string{"2606:4700:4700::1111/128", "2606:4700:4700::1001/128"}
+		resolverStrategy = "UseIPv6"
+		resolverDoH = []string{"https+local://[2606:4700:4700::1111]/dns-query", "https+local://[2606:4700:4700::1001]/dns-query"}
+	}
+	outbounds := []any{nativeXrayOutbound(plan.NativeEgress, version&4 != 0), map[string]any{"protocol": "freedom", "tag": "resolver", "settings": map[string]any{"domainStrategy": resolverStrategy, "finalRules": []any{
+		map[string]any{"action": "allow", "ip": resolverCIDRs, "port": "53", "network": "tcp,udp"},
 		map[string]any{"action": "block", "ip": []string{"0.0.0.0/0", "::/0"}},
 	}}}}
 	rules := []any{
 		map[string]any{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
-		map[string]any{"type": "field", "inboundTag": []string{"resolver"}, "ip": []string{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp", "outboundTag": "resolver"},
+		map[string]any{"type": "field", "inboundTag": []string{"resolver"}, "ip": resolverCIDRs, "port": "53", "network": "tcp,udp", "outboundTag": "resolver"},
 		map[string]any{"type": "field", "inboundTag": []string{"resolver"}, "outboundTag": "blocked"},
 	}
 	// Apply the Vision destination policy only to managed REALITY inbounds.
@@ -320,7 +331,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},
 		},
 		"routing": map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
-		"dns":     map[string]any{"tag": "resolver", "queryStrategy": "UseIP", "servers": []string{"1.1.1.1", "1.0.0.1"}},
+		"dns":     map[string]any{"tag": "resolver", "queryStrategy": "UseIP", "servers": resolverAddresses},
 	}
 	if version < 2 && plan.PublicSSH != nil {
 		// Resolve protected SSH targets before a user-scoped route can match.
@@ -332,7 +343,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 		// resolution and caching; no Agent-side resolver or scripts are needed.
 		config["dns"] = map[string]any{
 			"queryStrategy": "UseIP",
-			"servers":       []string{"https+local://1.1.1.1/dns-query", "https+local://8.8.8.8/dns-query"},
+			"servers":       resolverDoH,
 		}
 	}
 	encoded, err := json.Marshal(config)
