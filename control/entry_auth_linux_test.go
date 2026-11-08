@@ -70,6 +70,9 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 	for _, address := range []string{"100.64.0.3/32", "100.64.0.4/32", "93.184.216.34/32", "93.184.216.35/32", "1.1.1.1/32", "1.0.0.1/32"} {
 		ip("addr", "add", address, "dev", "lo")
 	}
+	for _, address := range []string{"2606:4700:4700::1111/128", "2606:4700:4700::1001/128"} {
+		ip("-6", "addr", "add", address, "dev", "lo", "nodad")
+	}
 	dnsLog := filepath.Join(t.TempDir(), "resolver.log")
 	stopDNS := startEntryResolverFixture(t, ctx, "93.184.216.34", dnsLog)
 	defer stopDNS()
@@ -208,7 +211,7 @@ func TestRenderedEntryAccountAuthentication(t *testing.T) {
 
 func startEntryResolverFixture(t *testing.T, ctx context.Context, answer, logPath string) func() {
 	t.Helper()
-	command := exec.CommandContext(ctx, "dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--local-ttl=1", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1", "--user=root", "--pid-file="+filepath.Join(t.TempDir(), "dns.pid"), "--log-queries", "--log-facility="+logPath, "--host-record=example.com,"+answer)
+	command := exec.CommandContext(ctx, "dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--local-ttl=1", "--bind-interfaces", "--listen-address=1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001", "--user=root", "--pid-file="+filepath.Join(t.TempDir(), "dns.pid"), "--log-queries", "--log-facility="+logPath, "--host-record=example.com,"+answer)
 	if err := command.Start(); err != nil {
 		t.Fatal("isolated resolver did not start", err)
 	}
