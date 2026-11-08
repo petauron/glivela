@@ -262,7 +262,7 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 				continue
 			}
 			landingNode, source, chainErr := chainLanding(s.nodes, chain)
-			if chainErr != nil || !s.subscriptionNodeEnabled(landingNode, now) {
+			if chainErr != nil || clientChainUnavailableReason(s.nodes, chain) != "" || !s.subscriptionNodeEnabled(landingNode, now) {
 				continue
 			}
 			listener := clientListener(chain, source)

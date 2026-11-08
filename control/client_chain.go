@@ -49,9 +49,6 @@ type ClientChainView struct {
 // The existing public transport's enrolled source is an authorization boundary,
 // not a key to disclose. Shared client credentials never reuse the server key.
 func chainLanding(nodes map[string]Node, c glivela.ClientChain) (Node, string, error) {
-	if clientChainUnavailableReason(nodes, c) != "" {
-		return Node{}, "", errors.New("control: landing only accepts explicitly authorized IPv6 client chains")
-	}
 	if c.Transport == "ipv6-ss2022" {
 		if c.Validate() != nil {
 			return Node{}, "", errors.New("control: invalid IPv6 client chain")
@@ -69,7 +66,7 @@ func chainLanding(nodes map[string]Node, c glivela.ClientChain) (Node, string, e
 		return Node{}, "", errors.New("control: unsupported client chain transport")
 	}
 	for _, n := range nodes {
-		if n.ID != c.EgressID || n.Desired.Landing == nil || n.Desired.Landing.IPv6OnlyAddress != "" {
+		if n.ID != c.EgressID || n.Desired.Landing == nil {
 			continue
 		}
 		p := n.Desired.Landing
@@ -184,6 +181,9 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 			return AccountChangeResult{}, invalid
 		}
 		if chain.Enabled {
+			if clientChainUnavailableReason(s.nodes, chain) != "" {
+				return AccountChangeResult{}, errors.New("control: landing only accepts explicitly authorized IPv6 client chains")
+			}
 			if _, _, err := chainLanding(s.nodes, chain); err != nil {
 				return AccountChangeResult{}, err
 			}

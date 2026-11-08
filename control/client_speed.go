@@ -115,6 +115,9 @@ func (s *Store) chainSpeedPairLocked(entryID, landingID string, requireFresh boo
 		if err != nil {
 			return latencyTarget{}, "", "", fail
 		}
+		if clientChainUnavailableReason(s.nodes, c) != "" {
+			continue
+		}
 		peer, entry, landing, ok := chainSpeedPeer(s.nodes, m, c, credentials)
 		if !ok || entry.Desired.EntryNetwork == nil || !slices.Contains(entry.Desired.EntryNetwork.SpeedPeers, peer) {
 			continue
