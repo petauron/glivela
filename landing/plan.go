@@ -36,6 +36,8 @@ type ClientListener struct {
 }
 
 type Plan struct {
+	// Explicit client-only IPv6 bind; retained IPv4 grants are inactive.
+	IPv6OnlyAddress string                   `json:"ipv6OnlyAddress,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	ClientListeners []ClientListener         `json:"clientListeners,omitempty"`
 	Transport       glivela.PrivateTransport `json:"transport,omitzero"`
@@ -63,6 +65,9 @@ func (p Plan) Validate() error {
 		return errors.New("landing: invalid plan")
 	}
 	egress, _ := netip.ParseAddr(p.EgressIP)
+	if p.IPv6OnlyAddress != "" && (!glivela.PublicTransportIPv6(p.IPv6OnlyAddress) || !egress.Is6() || p.PublicSSH.RequireHost(p.IPv6OnlyAddress) != nil) {
+		return errors.New("landing: exact IPv6 listener and fixed IPv6 egress required")
+	}
 	seen := map[string]bool{}
 	publicSources := map[string]bool{}
 	for _, source := range p.Sources {
@@ -83,6 +88,9 @@ func (p Plan) Validate() error {
 	seenIDs := map[string]bool{}
 	for _, c := range p.ClientListeners {
 		if c.Transport == "ipv6-ss2022" {
+			if p.IPv6OnlyAddress != "" && c.Address != p.IPv6OnlyAddress {
+				return errors.New("landing: client listener differs from explicit IPv6 bind")
+			}
 			if err := p.PublicSSH.RequireHost(c.Address); err != nil {
 				return err
 			}
@@ -91,7 +99,7 @@ func (p Plan) Validate() error {
 		validTransport := (c.Transport == "" || c.Transport == glivela.IPv4ClientSS2022) && c.Address == "" && publicSources[c.Source] && (len(key) == 32 && !c.Shared || len(key) == 16 && c.Shared && c.Transport == glivela.IPv4ClientSS2022) && (c.Transport == "" || base64.StdEncoding.EncodeToString(key) == c.Key) ||
 			c.Transport == "ipv6-ss2022" && glivela.PublicTransportIPv6(c.Address) && glivela.PublicTransportIPv6(c.Source) && c.Address != c.Source && len(key) == 16 && base64.StdEncoding.EncodeToString(key) == c.Key
 		previous, duplicate := seenPorts[c.Port]
-		if p.Transport.PublicAddress == "" || !glivela.ValidIdentifier(c.ID) || seenIDs[c.ID] || c.Port < 24000 || c.Port > 24999 || duplicate && (!previous.Shared || !c.Shared || previous.Key != c.Key) || c.Shared && c.Port != 24000 || err != nil || !validTransport {
+		if p.Transport.PublicAddress == "" && (p.IPv6OnlyAddress == "" || c.Transport != "ipv6-ss2022") || !glivela.ValidIdentifier(c.ID) || seenIDs[c.ID] || c.Port < 24000 || c.Port > 24999 || duplicate && (!previous.Shared || !c.Shared || previous.Key != c.Key) || c.Shared && c.Port != 24000 || err != nil || !validTransport {
 			return errors.New("landing: invalid client listener")
 		}
 		seenPorts[c.Port] = c
@@ -106,7 +114,7 @@ const legacyManagementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3
 // Render targets official Xray 26.10.31. SOCKS does not receive the core's
 // default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
 // remains mandatory for post-resolution targets and address-family limits.
-const RenderVersion uint8 = 2
+const RenderVersion uint8 = 3
 
 func (p Plan) Render() ([]byte, error) {
 	return p.RenderVersion(RenderVersion)
@@ -114,7 +122,7 @@ func (p Plan) Render() ([]byte, error) {
 
 // RenderVersion reads old signed artifacts without changing their hash.
 func (p Plan) RenderVersion(version uint8) ([]byte, error) {
-	if version > RenderVersion {
+	if version > RenderVersion || p.IPv6OnlyAddress != "" && version < 3 {
 		return nil, errors.New("landing: unsupported render version")
 	}
 	if version >= 1 {
@@ -166,6 +174,9 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 	slices.SortFunc(sources, func(a, b Source) int { return strings.Compare(a.Address, b.Address) })
 	udp := false
 	for _, source := range sources {
+		if p.IPv6OnlyAddress != "" {
+			continue
+		}
 		network := "tcp"
 		if !source.TCPOnly {
 			network = "tcp,udp"
@@ -187,9 +198,12 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		inbound["protocol"] = "shadowsocks"
 		inbound["settings"] = map[string]any{"method": glivela.SS2022Method, "password": p.Transport.Key, "network": network}
 	}
-	inbounds := []any{inbound}
+	inbounds := []any{}
+	if p.IPv6OnlyAddress == "" {
+		inbounds = append(inbounds, inbound)
+	}
 	sharedInbounds := map[string]bool{}
-	for _, c := range p.ClientListeners {
+	for _, c := range p.ActiveClientListeners() {
 		tag := "client-chain-" + c.ID
 		address, method, prefix := p.Transport.PublicAddress, "aes-256-gcm", "/32"
 		if c.Transport == glivela.IPv4ClientSS2022 {
@@ -244,8 +258,11 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 	if err := p.Validate(); err != nil {
 		return ServerFirewall{}, err
 	}
-	result := ServerFirewall{PublicSSH: p.PublicSSH.Clone(), Revision: p.Revision, Address: p.Transport.Endpoint(p.Address), EgressIP: p.EgressIP, UID: uid, Interface: iface, Public: p.Transport.PublicAddress != ""}
+	result := ServerFirewall{PublicSSH: p.PublicSSH.Clone(), Revision: p.Revision, IPv6Only: p.IPv6OnlyAddress != "", Address: p.ListenerAddress(), EgressIP: p.EgressIP, UID: uid, Interface: iface, Public: p.Transport.PublicAddress != "" || p.IPv6OnlyAddress != ""}
 	for _, source := range p.Sources {
+		if p.IPv6OnlyAddress != "" {
+			continue
+		}
 		address := source.Address
 		if result.Public {
 			address = source.PublicAddress
@@ -255,8 +272,30 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 			result.TCPOnlySources = append(result.TCPOnlySources, address)
 		}
 	}
-	for _, c := range p.ClientListeners {
+	for _, c := range p.ActiveClientListeners() {
 		result.ClientListeners = append(result.ClientListeners, ClientListenerPolicy{Shared: c.Shared, Port: c.Port, Source: c.Source, Transport: c.Transport, Address: c.Address})
 	}
 	return result, result.validate()
+}
+
+// ListenerAddress never guesses a replacement public address.
+func (p Plan) ListenerAddress() string {
+	if p.IPv6OnlyAddress != "" {
+		return p.IPv6OnlyAddress
+	}
+	return p.Transport.Endpoint(p.Address)
+}
+
+// Retain historical IPv4 identities without activating them on IPv6-only hosts.
+func (p Plan) ActiveClientListeners() []ClientListener {
+	if p.IPv6OnlyAddress == "" {
+		return p.ClientListeners
+	}
+	active := []ClientListener{}
+	for _, c := range p.ClientListeners {
+		if c.Transport == "ipv6-ss2022" {
+			active = append(active, c)
+		}
+	}
+	return active
 }

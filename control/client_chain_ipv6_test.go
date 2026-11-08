@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 func TestIPv6ClientChainPreservesOwnedBusinessAndBindsIdentities(t *testing.T) {
@@ -56,6 +58,37 @@ func TestIPv6ClientChainPreservesOwnedBusinessAndBindsIdentities(t *testing.T) {
 	}
 	if _, _, err := chainLanding(s.nodes, chain); err != nil {
 		t.Fatal("valid enrolled identities rejected", err)
+	}
+
+	// Explicit pure IPv6 mode keeps account records but withdraws IPv4 publication.
+	pure := *s.nodes[landingCert].Desired.Landing
+	pure.IPv6OnlyAddress = chain.ServerIPv6
+	pure.EgressIP = "2606:4700::100"
+	pure.Sources = append([]landing.Source(nil), pure.Sources...)
+	for i := range pure.Sources {
+		pure.Sources[i].TCPOnly = true
+	}
+	pure.Revision++
+	desired, err = NewDesired(pure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desired.LandingRenderVersion != 3 {
+		t.Fatal("explicit IPv6 mode lacks its version gate")
+	}
+	node := s.nodes[landingCert]
+	node.Desired = desired
+	s.nodes[landingCert] = node
+	if _, _, err := chainLanding(s.nodes, chain); err != nil {
+		t.Fatal("valid pure IPv6 chain rejected", err)
+	}
+	oldChain := chain
+	oldChain.Transport = glivela.IPv4ClientSS2022
+	if clientChainUnavailableReason(s.nodes, oldChain) != "landing_ipv6_only" {
+		t.Fatal("IPv4 record lacks unavailable reason")
+	}
+	if !reflect.DeepEqual(before.TrafficCounters, s.business.material.TrafficCounters) || !reflect.DeepEqual(after.ClientChains, s.business.material.ClientChains) {
+		t.Fatal("mode changed account credentials or traffic")
 	}
 	nodes := make(map[string]Node, len(s.nodes))
 	for k, v := range s.nodes {
@@ -175,4 +208,61 @@ func TestIPv4ClientChainSS2022UpgradeRetainsAccountState(t *testing.T) {
 		t.Fatal("forward recovery changed usage or original config")
 	}
 
+}
+
+func TestIPv6OnlyModePreservesOtherNodesAndWithholdsIPv4(t *testing.T) {
+	s, _, entryCert, _ := subscriptionFixture(t, false)
+	cert := strings.Repeat("b", 64)
+	p := *artifact(1).Landing
+	p.Sources[0].PublicAddress = "1.1.1.1"
+	p.Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: base64.StdEncoding.EncodeToString(make([]byte, 16)), PublicAddress: "9.9.9.9"}
+	d, err := NewDesired(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(Node{ID: "landing-example", CertificateID: cert, Desired: d, RouteEntries: map[string]RouteEntry{"entry-example": {CertificateID: entryCert, Address: "100.64.0.3"}}}); err != nil {
+		t.Fatal(err)
+	}
+	change := ClientChainChange{ID: "chain-a", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Name: "Retained IPv4", Enabled: true, ExpectedRevision: s.business.material.Plan.Accounts[0].Account.DesiredRevision}
+	if _, err := s.ChangeClientChain(context.Background(), change); err != nil {
+		t.Fatal(err)
+	}
+	before := s.nodes[entryCert].Desired.clone()
+	m := s.business.material
+	chain := m.ClientChains[0]
+	n := s.nodes[cert]
+	copy := n.Desired.clone()
+	p = *copy.Landing
+	p.Revision++
+	p.IPv6OnlyAddress = "2606:4700:4700::1111"
+	p.EgressIP = "2606:4700::100"
+	for i := range p.Sources {
+		p.Sources[i].TCPOnly = true
+	}
+	n.Desired, err = NewDesired(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.nodes[cert] = n
+	projected, _, err := projectBusinessEntries(s.nodes, m, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(projected[entryCert].Desired, before) || !reflect.DeepEqual(projected[cert].Desired, n.Desired) {
+		t.Fatal("unavailable IPv4 rewrote retained node policy")
+	}
+	response := getSubscription(t, s, "/sub/example-token?format=mihomo", "")
+	if response.Code != 200 || strings.Contains(response.Body.String(), chain.Key) {
+		t.Fatal("inactive IPv4 chain was published")
+	}
+	if _, _, _, err := s.chainSpeedPairLocked(change.EntryID, change.EgressID, false); err == nil {
+		t.Fatal("inactive IPv4 test path was authorized")
+	}
+	view := s.Business()
+	if len(view.ClientChains) != 1 || view.ClientChains[0].UnavailableReason != "landing_ipv6_only" || !view.ClientChains[0].Enabled {
+		t.Fatal("retained record lost its reason or configured switch")
+	}
+	if !reflect.DeepEqual(m, s.business.material) {
+		t.Fatal("account configuration or ledger changed")
+	}
 }

@@ -32,17 +32,18 @@ type ClientChainChange struct {
 }
 
 type ClientChainView struct {
-	Shared     bool   `json:"shared,omitempty"`
-	Transport  string `json:"transport,omitempty"`
-	SourceIPv6 string `json:"sourceIpv6,omitempty"`
-	ServerIPv6 string `json:"serverIpv6,omitempty"`
-	Port       int    `json:"port"`
-	ID         string `json:"id"`
-	AccountID  string `json:"accountId"`
-	EntryID    string `json:"entryId"`
-	EgressID   string `json:"egressId"`
-	Name       string `json:"name"`
-	Enabled    bool   `json:"enabled"`
+	UnavailableReason string `json:"unavailableReason,omitempty"`
+	Shared            bool   `json:"shared,omitempty"`
+	Transport         string `json:"transport,omitempty"`
+	SourceIPv6        string `json:"sourceIpv6,omitempty"`
+	ServerIPv6        string `json:"serverIpv6,omitempty"`
+	Port              int    `json:"port"`
+	ID                string `json:"id"`
+	AccountID         string `json:"accountId"`
+	EntryID           string `json:"entryId"`
+	EgressID          string `json:"egressId"`
+	Name              string `json:"name"`
+	Enabled           bool   `json:"enabled"`
 }
 
 // The existing public transport's enrolled source is an authorization boundary,
@@ -56,7 +57,7 @@ func chainLanding(nodes map[string]Node, c glivela.ClientChain) (Node, string, e
 		target, targetExists := nodes[c.LandingCertificateID]
 		// This association is created explicitly by the authenticated operator;
 		// do not infer an IPv6 source from the old shared IPv4 transport grant.
-		if entryExists && targetExists && entry.CertificateID == c.EntryCertificateID && target.CertificateID == c.LandingCertificateID && entry.ID == c.EntryID && entry.Desired.Entry != nil && entry.Desired.Entry.NativeEgress != glivela.EgressIPv4Only && target.ID == c.EgressID && target.Desired.Landing != nil {
+		if entryExists && targetExists && entry.CertificateID == c.EntryCertificateID && target.CertificateID == c.LandingCertificateID && entry.ID == c.EntryID && entry.Desired.Entry != nil && entry.Desired.Entry.NativeEgress != glivela.EgressIPv4Only && target.ID == c.EgressID && target.Desired.Landing != nil && (target.Desired.Landing.IPv6OnlyAddress == "" || target.Desired.Landing.IPv6OnlyAddress == c.ServerIPv6) {
 			return target, c.SourceIPv6, nil
 		}
 		return Node{}, "", errors.New("control: client chain requires enrolled entry and landing identities")
@@ -180,6 +181,9 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 			return AccountChangeResult{}, invalid
 		}
 		if chain.Enabled {
+			if clientChainUnavailableReason(s.nodes, chain) != "" {
+				return AccountChangeResult{}, errors.New("control: landing only accepts explicitly authorized IPv6 client chains")
+			}
 			if _, _, err := chainLanding(s.nodes, chain); err != nil {
 				return AccountChangeResult{}, err
 			}
@@ -307,4 +311,14 @@ func projectClientLandings(nodes map[string]Node, m glivela.ImportMaterial, now 
 
 func clientListener(c glivela.ClientChain, source string) landing.ClientListener {
 	return landing.ClientListener{Shared: c.Shared, ID: c.ID, Port: c.Port, Key: c.Key, Source: source, Transport: c.Transport, Address: c.ServerIPv6}
+}
+
+// A retained IPv4 record is not authority to bind a new address or fall back.
+func clientChainUnavailableReason(nodes map[string]Node, c glivela.ClientChain) string {
+	for _, n := range nodes {
+		if n.ID == c.EgressID && n.Desired.Landing != nil && n.Desired.Landing.IPv6OnlyAddress != "" && (c.Transport != "ipv6-ss2022" || c.ServerIPv6 != n.Desired.Landing.IPv6OnlyAddress) {
+			return "landing_ipv6_only"
+		}
+	}
+	return ""
 }

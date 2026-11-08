@@ -262,10 +262,10 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 		}
 		return false
 	}
-	if !assigned(addresses, desired.Landing.Transport.Endpoint(desired.Landing.Address)) {
+	if !assigned(addresses, desired.Landing.ListenerAddress()) {
 		return landing.ServerFirewall{}, errors.New("control: landing listener is not on private interface")
 	}
-	for _, listener := range desired.Landing.ClientListeners {
+	for _, listener := range desired.Landing.ActiveClientListeners() {
 		if listener.Transport == "ipv6-ss2022" && !assigned(addresses, listener.Address) {
 			return landing.ServerFirewall{}, errors.New("control: client listener address is not assigned to the landing interface")
 		}
@@ -277,10 +277,10 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 	return desired.Landing.Firewall(d.WorkerUID, ifaceName)
 }
 
-// Public listeners bind an exact locally assigned IPv4 address. Discover its
+// Public listeners bind an exact locally assigned address. Discover its
 // actual interface rather than changing the retained management interface.
 func (d SystemdDriver) landingInterface(plan landing.Plan) (string, error) {
-	if plan.Transport.PublicAddress == "" {
+	if plan.Transport.PublicAddress == "" && plan.IPv6OnlyAddress == "" {
 		return d.Interface, nil
 	}
 	interfaces, err := net.Interfaces()
@@ -295,7 +295,7 @@ func (d SystemdDriver) landingInterface(plan landing.Plan) (string, error) {
 		}
 		for _, address := range addresses {
 			prefix, err := netip.ParsePrefix(address.String())
-			if err == nil && prefix.Addr().String() == plan.Transport.PublicAddress {
+			if err == nil && prefix.Addr().String() == plan.ListenerAddress() {
 				if found != "" || iface.Flags&net.FlagUp == 0 {
 					return "", errors.New("control: public listener interface is ambiguous or down")
 				}
@@ -429,10 +429,12 @@ func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 	if err := policy.Verify(ctx); err != nil {
 		return err
 	}
-	if err := verifyOwnedListener(desired.Landing.Transport.Endpoint(desired.Landing.Address), landing.SOCKSPort, d.WorkerUID); err != nil {
-		return err
+	if desired.Landing.IPv6OnlyAddress == "" {
+		if err := verifyOwnedListener(desired.Landing.ListenerAddress(), landing.SOCKSPort, d.WorkerUID); err != nil {
+			return err
+		}
 	}
-	for _, listener := range desired.Landing.ClientListeners {
+	for _, listener := range desired.Landing.ActiveClientListeners() {
 		address := desired.Landing.Transport.PublicAddress
 		if listener.Transport == "ipv6-ss2022" {
 			address = listener.Address

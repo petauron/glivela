@@ -6,8 +6,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	glivela "github.com/petauron/glivela"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -177,6 +180,17 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		direct.CloseIdleConnections()
 	}
 	plan := Plan{Revision: 1, Address: "100.64.0.10", EgressIP: egress, Sources: []Source{{Address: "100.64.0.11", TCPOnly: true}}}
+	if ipv6 {
+		plan.IPv6OnlyAddress = "2606:4700::200"
+		for _, address := range []string{plan.IPv6OnlyAddress, "2001:4860:4860::8888", "2001:4860:4860::8844"} {
+			ip("-6", "addr", "add", address+"/128", "dev", "lo", "nodad")
+		}
+		key := base64.StdEncoding.EncodeToString(make([]byte, 16))
+		// Retain an intentionally unassigned IPv4. The real core must never bind it.
+		plan.Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: key, PublicAddress: "9.9.9.9"}
+		plan.Sources[0].PublicAddress = "1.1.1.1"
+		plan.ClientListeners = []ClientListener{{ID: "client", Shared: true, Transport: "ipv6-ss2022", Address: plan.IPv6OnlyAddress, Source: "2001:4860:4860::8888", Port: 24000, Key: key}}
+	}
 	raw, err := plan.Render()
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +213,21 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	worker := exec.CommandContext(ctx, binary, "run", "-config", config)
 	worker.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: workerUID, Gid: workerUID, Groups: []uint32{}}}
 	start(worker)
+	if ipv6 {
+		outbound := func(tag, source string) map[string]any {
+			return map[string]any{"tag": tag, "protocol": "shadowsocks", "sendThrough": source, "settings": map[string]any{"servers": []any{map[string]any{"address": plan.IPv6OnlyAddress, "port": 24000, "method": glivela.SS2022Method, "password": plan.ClientListeners[0].Key}}}}
+		}
+		client := map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": plan.Address, "port": 1080, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}}, "outbounds": []any{outbound("authorized", "2001:4860:4860::8888"), outbound("untrusted", "2001:4860:4860::8844")}, "routing": map[string]any{"rules": []any{map[string]any{"type": "field", "source": []string{"100.64.0.12/32"}, "outboundTag": "untrusted"}}}}
+		bytes, err := json.Marshal(client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(directory, "client.json")
+		if err := os.WriteFile(path, bytes, 0600); err != nil {
+			t.Fatal(err)
+		}
+		start(exec.CommandContext(ctx, binary, "run", "-config", path))
+	}
 	proxy := &url.URL{Scheme: "socks5", Host: fmt.Sprintf("%s:%d", plan.Address, SOCKSPort)}
 	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP("100.64.0.11")}, Timeout: time.Second}
 	deadline = time.Now().Add(4 * time.Second)

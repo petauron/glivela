@@ -24,7 +24,12 @@ type Desired struct {
 }
 
 func NewDesired(plan landing.Plan) (Desired, error) {
-	return newLandingDesiredVersion(plan, landing.RenderVersion)
+	version := landing.RenderVersion
+	// Ordinary listener projections must remain consumable by unchanged nodes.
+	if plan.IPv6OnlyAddress == "" {
+		version = 2
+	}
+	return newLandingDesiredVersion(plan, version)
 }
 
 func newLandingDesiredVersion(plan landing.Plan, version uint8) (Desired, error) {

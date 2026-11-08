@@ -262,7 +262,7 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 				continue
 			}
 			landingNode, source, chainErr := chainLanding(s.nodes, chain)
-			if chainErr != nil || !s.subscriptionNodeEnabled(landingNode, now) {
+			if chainErr != nil || clientChainUnavailableReason(s.nodes, chain) != "" || !s.subscriptionNodeEnabled(landingNode, now) {
 				continue
 			}
 			listener := clientListener(chain, source)
@@ -310,7 +310,7 @@ func (s *Store) subscriptionNodeEnabled(node Node, now time.Time) bool {
 
 func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now time.Time) bool {
 	for _, node := range s.nodes {
-		if node.ID != landingID || node.Desired.Landing == nil || !s.subscriptionNodeEnabled(node, now) {
+		if node.ID != landingID || node.Desired.Landing == nil || node.Desired.Landing.IPv6OnlyAddress != "" || !s.subscriptionNodeEnabled(node, now) {
 			continue
 		}
 		authorized, ok := node.RouteEntries[entry.ID]
