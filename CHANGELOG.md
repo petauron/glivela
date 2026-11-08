@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.114](https://github.com/petauron/glivela/compare/v0.1.0-alpha.113...v0.1.0-alpha.114) (2026-11-08)
+
+
+### Bug Fixes
+
+* support explicit IPv6-only client landings ([#69](https://github.com/petauron/glivela/issues/69)) ([b84073a](https://github.com/petauron/glivela/commit/b84073a80c9e25d28064763935a3cabed9c0328b))
+
 ## [0.1.0-alpha.113](https://github.com/petauron/glivela/compare/v0.1.0-alpha.112...v0.1.0-alpha.113) (2026-11-08)
 
 
