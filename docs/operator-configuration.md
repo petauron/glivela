@@ -90,3 +90,9 @@ change the exit or fabricate health to continue.
 New entry render policy 15 uses the existing public resolvers over IPv6 when the native exit is explicitly `ipv6_only`. The DNS servers, resolver outbound family and exact port-53 destination rules select the same addresses; composite local DoH uses those IPv6 endpoints too. Private/control-address isolation and proxy readiness checks remain mandatory. IPv4-only and automatic policies retain their existing resolver configuration.
 
 Historical render policies, including 7, retain their original bytes for ownership and recovery checks. Controller startup does not rewrite retained nodes. Upgrade the controller and selected entry first, then apply that entry's existing plan through the normal administrator entry update with an advancing revision. Other node assignments, credentials, subscriptions and counters are unchanged. A program installation alone is not proxy or subscription acceptance.
+
+## IPv6 fixed-exit landing DNS
+
+Landing render policy 2 uses IPv6 literals over TCP for built-in DNS when the fixed exit is IPv6, with the resolver socket bound to that same exit. DNS routing stays limited to those resolver addresses and TCP port 53; business traffic keeps its existing source and address-family restrictions. IPv4 landings retain their resolver configuration. No UDP allowance or system DNS fallback is added.
+
+Historical landing policies 0 and 1 retain their original configuration bytes and validation. Controller startup does not activate this DNS policy on retained nodes. Upgrade the controller and selected landing program, then explicitly apply that landing's existing plan through the normal administrator update with an advancing revision. Preserve its exact sources, credentials and fixed exit; verify domain-based HTTPS through the published chain before treating the update as accepted.

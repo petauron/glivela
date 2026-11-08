@@ -83,7 +83,10 @@ func TestInternalResolverExceptionCannotAuthorizeBusinessTraffic(t *testing.T) {
 			t.Fatal(err)
 		}
 		var config struct {
-			DNS       struct{ Tag, QueryStrategy string }
+			DNS struct {
+				Tag, QueryStrategy string
+				Servers            []string
+			}
 			Routing   struct{ Rules []map[string]any }
 			Outbounds []map[string]any
 		}
@@ -91,7 +94,18 @@ func TestInternalResolverExceptionCannotAuthorizeBusinessTraffic(t *testing.T) {
 			t.Fatal(err)
 		}
 		expected := map[string]any{"type": "field", "inboundTag": []any{"resolver"}, "ip": []any{"1.1.1.1/32", "1.0.0.1/32"}, "port": "53", "network": "tcp,udp", "outboundTag": "resolver"}
-		if !reflect.DeepEqual(config.Routing.Rules[0], expected) || config.DNS.Tag != "resolver" {
+		servers := []string{"1.1.1.1", "1.0.0.1"}
+		if egress == "2606:4700::1111" {
+			servers = []string{"tcp://[2606:4700:4700::1111]", "tcp://[2606:4700:4700::1001]"}
+			expected["ip"] = []any{"2606:4700:4700::1111/128", "2606:4700:4700::1001/128"}
+			expected["network"] = "tcp"
+			if config.Outbounds[2]["sendThrough"] != egress {
+				t.Fatal("IPv6 resolver lost the authorized fixed source")
+			}
+		} else if _, bound := config.Outbounds[2]["sendThrough"]; bound {
+			t.Fatal("IPv4 resolver behavior changed")
+		}
+		if !reflect.DeepEqual(config.DNS.Servers, servers) || !reflect.DeepEqual(config.Routing.Rules[0], expected) || config.DNS.Tag != "resolver" {
 			t.Fatal("resolver exception widened")
 		}
 		for _, rule := range config.Routing.Rules[1:] {
@@ -195,6 +209,27 @@ func TestOfficialLandingConfiguration(t *testing.T) {
 			if err = exec.Command(binary, "run", "-test", "-config", path).Run(); err != nil {
 				t.Fatal("official Xray rejected landing configuration", err)
 			}
+		}
+	}
+}
+
+// Digests captured from the immutable pre-DNS-policy source, with the retired
+// SSH policy present so render 1 must continue stripping it independently of
+// whichever version is current.
+func TestHistoricalLandingRenderDigestsRemainImmutable(t *testing.T) {
+	p := fixturePlan()
+	p.EgressIP = "2606:4700::100"
+	for i := range p.Sources {
+		p.Sources[i].TCPOnly = true
+	}
+	p.PublicSSH = &glivela.PublicSSHPolicy{AddressesComplete: true, HostPublicAddresses: []string{p.EgressIP}}
+	for version, digest := range map[uint8]string{
+		0: "6f9d0d5604e3d004e4f75a7dc14c52e20b202005bca44a83b8cbda099b7ee6d4",
+		1: "33bbad7921cc1442ecfbe8b43df1be949b1bd0909ce345399e110ea800ede24a",
+	} {
+		a, err := p.ArtifactVersion(version)
+		if err != nil || a.ConfigSHA256 != digest || a.Validate() != nil {
+			t.Fatal("historical artifact changed", version, err)
 		}
 	}
 }

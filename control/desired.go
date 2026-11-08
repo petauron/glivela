@@ -24,14 +24,20 @@ type Desired struct {
 }
 
 func NewDesired(plan landing.Plan) (Desired, error) {
-	plan.PublicSSH = nil
-	a, err := plan.Artifact()
+	return newLandingDesiredVersion(plan, landing.RenderVersion)
+}
+
+func newLandingDesiredVersion(plan landing.Plan, version uint8) (Desired, error) {
+	if version >= 1 {
+		plan.PublicSSH = nil
+	}
+	a, err := plan.ArtifactVersion(version)
 	if err != nil {
 		return Desired{}, err
 	}
 	plan.Sources = slices.Clone(plan.Sources)
 	plan.ClientListeners = slices.Clone(plan.ClientListeners)
-	return Desired{DesiredArtifact: a, LandingRenderVersion: landing.RenderVersion, Landing: &plan}, nil
+	return Desired{DesiredArtifact: a, LandingRenderVersion: version, Landing: &plan}, nil
 }
 
 // NewEntryDesired selects the current format for new enrollment or an explicit

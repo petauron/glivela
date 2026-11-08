@@ -118,3 +118,37 @@ func TestPublicEgressUpgradeAdvancesHistoricalLandingWithoutChangingSources(t *t
 		t.Fatal("historical landing became unreadable")
 	}
 }
+
+func TestPublicEgressStartupDoesNotActivateLandingDNS(t *testing.T) {
+	for _, version := range []uint8{1, 2} {
+		s := store(t)
+		plan := *artifact(7).Landing
+		plan.EgressIP = "2606:4700::100"
+		for i := range plan.Sources {
+			plan.Sources[i].TCPOnly = true
+		}
+		desired, err := newLandingDesiredVersion(plan, version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert := strings.Repeat("b", 64)
+		if err := s.Put(Node{ID: "landing-example", CertificateID: cert, Desired: desired}); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(s.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpgradePublicEgress(); err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.ReadFile(s.path)
+		if err != nil || !bytes.Equal(before, after) || !reflect.DeepEqual(s.nodes[cert].Desired, desired) {
+			t.Fatal("startup changed an unselected landing", version, err)
+		}
+		reopened, err := OpenStore(s.path)
+		if err != nil || reopened.nodes[cert].Desired.Validate() != nil {
+			t.Fatal("retained artifact cannot reload", version, err)
+		}
+	}
+}
