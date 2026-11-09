@@ -39,9 +39,9 @@ func (r *NativeRuntime) CheckPairingSource(ctx context.Context) error {
 		if err != nil || !process.Active || process.PID <= 0 || process.ControlPID != 0 {
 			return errors.New("control: original landing worker is not running")
 		}
-		if err := verifyNativeEntryProcess(driver, process, current); err != nil {
-			return err
-		}
+		// Landing readiness owns its listener/UID and policy checks. The entry
+		// process resource inspector requires an Entry plan and cannot inspect
+		// this role's committed Landing plan.
 		return driver.Healthy(ctx, current)
 	default:
 		return errors.New("control: concrete installed native role required for pairing")
