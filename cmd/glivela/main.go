@@ -50,6 +50,13 @@ type configuration struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "stage-node-pair" {
+		if err := stageNodePairCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			log.Print("Glivela node pairing not confirmed; retain the existing installation and recovery bootstrap")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "initialize-business" {
 		if err := initializeBusinessCommand(os.Args[2:], os.Stdout); err != nil {
 			log.Print("Glivela fresh initialization failed; retain existing files and inspect private inputs")

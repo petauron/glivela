@@ -5,7 +5,16 @@ package control
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 )
+
+func checkPairingLegacyState(_ context.Context, r *NativeRuntime) error {
+	if _, err := os.Lstat(filepath.Join(r.Directory, "legacy-cutover.json")); !errors.Is(err, os.ErrNotExist) {
+		return errors.New("control: legacy pairing verification requires Linux")
+	}
+	return nil
+}
 
 // Legacy Dante native handover is Linux-only. Other platforms have no old
 // host service to recover and cannot execute the switch command.

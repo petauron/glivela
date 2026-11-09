@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/base64"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,6 +28,17 @@ func TestIPv6ClientChainPreservesOwnedBusinessAndBindsIdentities(t *testing.T) {
 	}
 	before := s.business.material
 	change := ClientChainChange{ID: "chain-a", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Name: "IPv6 chain", Enabled: true, Transport: "ipv6-ss2022", SourceIPv6: "2001:4860:4860::8888", ServerIPv6: "2606:4700:4700::1111", ExpectedRevision: before.Plan.Accounts[0].Account.DesiredRevision}
+	// Distinct role IDs on the same enrolled host are still a self-loop.
+	s.business.material.References.Nodes = maps.Clone(before.References.Nodes)
+	s.business.material.References.Applications = maps.Clone(before.References.Applications)
+	s.business.material.References.Nodes["landing-example"] = glivela.ImportNode{Name: "Same host", PreviousStatus: "active"}
+	app := s.business.material.References.Applications["entry-example"]
+	app.NodeID = "landing-example"
+	s.business.material.References.Applications["entry-example"] = app
+	if _, err := s.ChangeClientChain(context.Background(), change); err == nil || !strings.Contains(err.Error(), "same host") || len(s.business.material.ClientChains) != 0 {
+		t.Fatal("same-host chain was not rejected before changing business state", err)
+	}
+	s.business.material.References = before.References
 	if _, err := s.ChangeClientChain(context.Background(), change); err != nil {
 		t.Fatal(err)
 	}

@@ -181,6 +181,18 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 			return AccountChangeResult{}, invalid
 		}
 		if chain.Enabled {
+			entryHost, landingHost := "", ""
+			for _, node := range s.nodes {
+				if node.ID == chain.EntryID {
+					entryHost = runtimeHostID(next, node)
+				}
+				if node.ID == chain.EgressID {
+					landingHost = runtimeHostID(next, node)
+				}
+			}
+			if entryHost != "" && entryHost == landingHost {
+				return AccountChangeResult{}, errors.New("control: client chain cannot loop through two roles on the same host")
+			}
 			if clientChainUnavailableReason(s.nodes, chain) != "" {
 				return AccountChangeResult{}, errors.New("control: landing only accepts explicitly authorized IPv6 client chains")
 			}
