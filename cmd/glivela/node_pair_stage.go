@@ -45,6 +45,10 @@ func stageNodePairCommand(parent context.Context, args []string, output io.Write
 	if err != nil || source != *path {
 		return errors.New("persistent bootstrap ownership not confirmed")
 	}
+	installationBefore, err := os.ReadFile(before.Installation)
+	if err != nil {
+		return err
+	}
 	next, err := readConfiguration(*candidate)
 	if err != nil || next.Mode != "node-pair" || next.Installation != before.Installation || next.Service != before.Service {
 		return errors.New("pair must use the same installed manager")
@@ -125,12 +129,18 @@ func stageNodePairCommand(parent context.Context, args []string, output io.Write
 	if installed.Role == "entry" {
 		driver = &control.NativeEntryDriver{SystemdDriver: installed, Directory: before.Directory}
 	}
-	observation, err := (&control.NativeRuntime{Directory: before.Directory, Driver: driver}).PairingObservation(ctx)
-	if err != nil || !observation.RuntimeReady {
-		return errors.New("existing role must have healthy committed state; no automatic recovery during pairing")
+	if err := (&control.NativeRuntime{Directory: before.Directory, Driver: driver}).CheckPairingSource(ctx); err != nil {
+		return errors.New("existing role must have an owned running committed state; no automatic recovery during pairing")
 	}
 	status := "pairing-preflight-passed"
 	if *apply {
+		installationNow, err := os.ReadFile(before.Installation)
+		if err != nil || !bytes.Equal(installationBefore, installationNow) {
+			return errors.New("installation changed during pairing; rerun preflight")
+		}
+		if _, _, _, err := control.InstalledMaintenanceFiles(before.Installation, before.Service); err != nil {
+			return err
+		}
 		if err := savePairBackup(backup, original); err != nil {
 			return err
 		}

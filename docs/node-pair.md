@@ -52,10 +52,13 @@ does not authorize a source or create a public listener.
 
 Stop only the owned manager through the normal service lifecycle before
 staging; retain the existing worker and its original statistics generation.
-The command requires exclusive state leases, a healthy committed original
-runtime, no pending maintenance, a stopped installed second worker and distinct
+The command requires exclusive state leases, an owned running committed original
+runtime/configuration/firewall, no pending maintenance, a stopped installed second worker and distinct
 trusted role certificates/keys and worker UID/GID. It does not recover a failed
 source, reset a retired runtime or reinitialize an existing companion journal.
+An entry's stopped manager has no surviving process-local startup proof;
+staging does not invent one. Normal paired startup must reestablish its existing
+acceptance through the unchanged runtime path before reporting business readiness.
 
 ```sh
 glivela stage-node-pair --config /private/installed/node.json --pair /private/pair.json
