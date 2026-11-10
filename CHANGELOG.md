@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.121](https://github.com/petauron/glivela/compare/v0.1.0-alpha.120...v0.1.0-alpha.121) (2026-11-10)
+
+
+### Features
+
+* bind client exits within one landing instance ([#90](https://github.com/petauron/glivela/issues/90)) ([7cbd8c1](https://github.com/petauron/glivela/commit/7cbd8c14edc0934bf27a3218c5a8b0224218774a))
+
 ## [0.1.0-alpha.120](https://github.com/petauron/glivela/compare/v0.1.0-alpha.119...v0.1.0-alpha.120) (2026-11-10)
 
 
