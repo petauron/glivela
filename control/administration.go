@@ -204,6 +204,23 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(view)
+		case "/v1/admin/subscription-landing":
+			var request struct {
+				ID       string               `json:"id"`
+				Expected *SubscriptionLanding `json:"expected,omitempty"`
+				Value    *SubscriptionLanding `json:"value,omitempty"`
+			}
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil {
+				http.Error(w, "invalid landing presentation request", http.StatusBadRequest)
+				return
+			}
+			value, err := store.SubscriptionLanding(r.Context(), request.ID, request.Expected, request.Value)
+			if err != nil {
+				http.Error(w, "landing presentation changed or unavailable", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(value)
 		case "/v1/admin/subscription-names":
 			var request struct {
 				Expected map[string]string `json:"expected"`

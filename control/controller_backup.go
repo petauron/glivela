@@ -86,7 +86,7 @@ func openControllerBackup(raw, key []byte) (controllerBackup, error) {
 		}
 	}
 	if raw, ok := value.Files[subscriptionNamesFile]; ok {
-		if _, err := parseSubscriptionNames(raw); err != nil {
+		if _, err := parseSubscriptionPresentation(raw); err != nil {
 			return controllerBackup{}, err
 		}
 	}
@@ -131,16 +131,16 @@ func (s *Store) BackupController(now time.Time) error {
 		}
 		value.Files[hostBindingsFile] = raw
 	}
-	names, err := loadSubscriptionNames(directory, material)
-	if err != nil || !reflect.DeepEqual(names, s.subscriptionNames) {
+	names, err := loadSubscriptionPresentation(directory, material)
+	if err != nil || !reflect.DeepEqual(names.Names, s.subscriptionNames) || !reflect.DeepEqual(names.Landings, s.subscriptionLandings) {
 		return errors.New("control: issued names changed before backup")
 	}
-	if names != nil {
+	if len(names.Names)+len(names.Landings) > 0 {
 		raw, err := privateBackupBytes(filepath.Join(directory, subscriptionNamesFile))
 		if err != nil {
 			return err
 		}
-		observed, err := parseSubscriptionNames(raw)
+		observed, err := parseSubscriptionPresentation(raw)
 		if err != nil || !reflect.DeepEqual(observed, names) {
 			return errors.New("control: issued names changed during backup")
 		}

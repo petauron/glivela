@@ -227,11 +227,10 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 			continue
 		}
 		published := glivela.PublishedRoute{Grant: grant, Protocol: glivela.VLESSReality, EntryName: names[grant.Base.ID], BaseLink: links[grant.Base.ID], RouteLink: links[grant.Route.ID], BaseProtocolIdentity: base.Credential.Identity, RouteProtocolIdentity: route.Credential.Identity}
-		if selection := m.References.LandingSelection; selection != nil {
-			published.EgressRegionPrefix = importedLandingRegionPrefix(selection.LandingRegionCodes[grant.EgressID])
-			published.IPv4EgressRegionPrefix = importedLandingRegionPrefix(selection.LandingRegionCodes[grant.IPv4EgressID])
-			published.EgressNameSuffix = selection.LandingNameSuffixes[grant.EgressID]
-		}
+		label := s.subscriptionLandingLocked(grant.EgressID)
+		published.EgressRegionPrefix = importedLandingRegionPrefix(label.RegionCode)
+		published.IPv4EgressRegionPrefix = importedLandingRegionPrefix(s.subscriptionLandingLocked(grant.IPv4EgressID).RegionCode)
+		published.EgressNameSuffix = label.NameSuffix
 		routes = append(routes, published)
 		publishedBases[grant.Base.ID] = true
 	}
@@ -276,10 +275,9 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 						server = chain.ServerIPv6
 					}
 					published := glivela.PublishedClientChain{Chain: chain, Base: glivela.NativeEntry{Material: material, Protocol: glivela.VLESSReality, Link: links[id]}, Server: server}
-					if selection := m.References.LandingSelection; selection != nil {
-						published.EgressRegionPrefix = importedLandingRegionPrefix(selection.LandingRegionCodes[chain.EgressID])
-						published.EgressNameSuffix = selection.LandingNameSuffixes[chain.EgressID]
-					}
+					label := s.subscriptionLandingLocked(chain.EgressID)
+					published.EgressRegionPrefix = importedLandingRegionPrefix(label.RegionCode)
+					published.EgressNameSuffix = label.NameSuffix
 					chains = append(chains, published)
 					break
 				}

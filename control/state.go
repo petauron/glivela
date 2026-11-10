@@ -41,29 +41,30 @@ type Node struct {
 // is private (0600) and must never be logged or published. Imported business
 // data is separately authenticated/encrypted; node desired plans are projections.
 type Store struct {
-	mu                  sync.Mutex
-	qualityPolls        map[string]time.Time
-	quality             *QualityHistory
-	path                string
-	nodes               map[string]Node
-	availability        availabilityState
-	business            *businessState
-	managementUI        http.Handler
-	latencies           map[string]*latencyRecord
-	latencyHistory      *latencyHistoryState
-	latencyHistoryFault bool
-	networkReports      map[string]NetworkSnapshot
-	pathMTUNodes        map[string]time.Time
-	pathMTUReports      map[string]map[string]PathMTUObservation
-	speedJobs           map[string]*speedRecord
-	nodeEvents          *nodeEventHub
-	speedHub            *speedHub
-	speedRevision       uint64
-	speedChanged        chan struct{}
-	speedFault          bool
-	subscriptionNames   map[string]string
-	hostBindings        map[string]string
-	subscriptionOrigin  string
+	mu                   sync.Mutex
+	qualityPolls         map[string]time.Time
+	quality              *QualityHistory
+	path                 string
+	nodes                map[string]Node
+	availability         availabilityState
+	business             *businessState
+	managementUI         http.Handler
+	latencies            map[string]*latencyRecord
+	latencyHistory       *latencyHistoryState
+	latencyHistoryFault  bool
+	networkReports       map[string]NetworkSnapshot
+	pathMTUNodes         map[string]time.Time
+	pathMTUReports       map[string]map[string]PathMTUObservation
+	speedJobs            map[string]*speedRecord
+	nodeEvents           *nodeEventHub
+	speedHub             *speedHub
+	speedRevision        uint64
+	speedChanged         chan struct{}
+	speedFault           bool
+	subscriptionNames    map[string]string
+	subscriptionLandings map[string]SubscriptionLanding
+	hostBindings         map[string]string
+	subscriptionOrigin   string
 }
 
 func OpenStore(path string) (*Store, error) {
