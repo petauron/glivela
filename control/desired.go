@@ -30,7 +30,10 @@ func NewDesired(plan landing.Plan) (Desired, error) {
 		version = 2
 	}
 	if slices.ContainsFunc(plan.ClientListeners, func(c landing.ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
-		version = landing.RenderVersion
+		version = 4
+	}
+	if plan.ClientOnly {
+		version = 5
 	}
 	return newLandingDesiredVersion(plan, version)
 }
