@@ -166,3 +166,17 @@ reused revisions, corrupt state or failed ownership checks remain closed.
 This does not authorize editing journals, replaying an old ledger or changing
 unrelated nodes. Installation success is distinct from fresh runtime receipts
 and a real subscription client request through the expected exit.
+
+## Independent client-only landing
+
+A separately enrolled landing may set `clientOnly:true` with render format 5.
+It retains a fixed final egress, exact sources, its own certificate, worker UID,
+state directory and native installation. IPv4 and IPv6 client transports do not
+select the final egress family. The server-forwarding listener on port 1080 is
+not started or authorized, allowing this worker to coexist with another landing.
+Retained ordinary landing formats and IPv6 relays are unchanged. The controller
+allocates nonconflicting ports across landings sharing listener addresses and
+rejects conflicting client-only projections before changing business state.
+Use a separate signed native recipe namespace; never overwrite the original
+installation or share worker users. This does not create server-forwarding
+routes, add UDP, or change existing subscription selectors.

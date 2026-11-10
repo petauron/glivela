@@ -36,6 +36,8 @@ type ClientListener struct {
 }
 
 type Plan struct {
+	// ClientOnly omits the server-forwarding listener; client transport and final egress remain independently constrained.
+	ClientOnly bool `json:"clientOnly,omitempty"`
 	// Explicit client-only IPv6 bind; retained IPv4 grants are inactive.
 	IPv6OnlyAddress string                   `json:"ipv6OnlyAddress,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
@@ -63,6 +65,9 @@ func (p Plan) Validate() error {
 	}
 	if p.Revision == 0 || !tailnetIPv4(p.Address) || !ValidEgressIP(p.EgressIP) || len(p.Sources) > 128 || len(p.ClientListeners) > 1000 || p.Transport.Validate() != nil {
 		return errors.New("landing: invalid plan")
+	}
+	if p.ClientOnly && (p.IPv6OnlyAddress != "" || p.Transport.PublicAddress == "" || slices.ContainsFunc(p.Sources, func(s Source) bool { return !s.TCPOnly })) {
+		return errors.New("landing: client-only plan requires explicit public transport and TCP-only sources")
 	}
 	egress, _ := netip.ParseAddr(p.EgressIP)
 	if p.IPv6OnlyAddress != "" && (!glivela.PublicTransportIPv6(p.IPv6OnlyAddress) || !egress.Is6() || p.PublicSSH.RequireHost(p.IPv6OnlyAddress) != nil) {
@@ -115,7 +120,7 @@ const legacyManagementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3
 // Render targets official Xray 26.10.31. SOCKS does not receive the core's
 // default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
 // remains mandatory for post-resolution targets and address-family limits.
-const RenderVersion uint8 = 4
+const RenderVersion uint8 = 5
 
 func (p Plan) Render() ([]byte, error) {
 	return p.RenderVersion(RenderVersion)
@@ -123,7 +128,7 @@ func (p Plan) Render() ([]byte, error) {
 
 // RenderVersion reads old signed artifacts without changing their hash.
 func (p Plan) RenderVersion(version uint8) ([]byte, error) {
-	if version > RenderVersion || p.IPv6OnlyAddress != "" && version < 3 || version < 4 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
+	if version > RenderVersion || p.ClientOnly && version < 5 || p.IPv6OnlyAddress != "" && version < 3 || version < 4 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
 		return nil, errors.New("landing: unsupported render version")
 	}
 	if version >= 1 {
@@ -175,7 +180,7 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 	slices.SortFunc(sources, func(a, b Source) int { return strings.Compare(a.Address, b.Address) })
 	udp := false
 	for _, source := range sources {
-		if p.IPv6OnlyAddress != "" {
+		if !p.HasServerListener() {
 			continue
 		}
 		network := "tcp"
@@ -200,7 +205,7 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		inbound["settings"] = map[string]any{"method": glivela.SS2022Method, "password": p.Transport.Key, "network": network}
 	}
 	inbounds := []any{}
-	if p.IPv6OnlyAddress == "" {
+	if p.HasServerListener() {
 		inbounds = append(inbounds, inbound)
 	}
 	sharedInbounds := map[string]bool{}
@@ -259,7 +264,7 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 	if err := p.Validate(); err != nil {
 		return ServerFirewall{}, err
 	}
-	result := ServerFirewall{PublicSSH: p.PublicSSH.Clone(), Revision: p.Revision, IPv6Only: p.IPv6OnlyAddress != "", Address: p.ListenerAddress(), EgressIP: p.EgressIP, UID: uid, Interface: iface, Public: p.Transport.PublicAddress != "" || p.IPv6OnlyAddress != ""}
+	result := ServerFirewall{ClientOnly: p.ClientOnly, PublicSSH: p.PublicSSH.Clone(), Revision: p.Revision, IPv6Only: p.IPv6OnlyAddress != "", Address: p.ListenerAddress(), EgressIP: p.EgressIP, UID: uid, Interface: iface, Public: p.Transport.PublicAddress != "" || p.IPv6OnlyAddress != ""}
 	for _, source := range p.Sources {
 		if p.IPv6OnlyAddress != "" {
 			continue
@@ -277,6 +282,10 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 		result.ClientListeners = append(result.ClientListeners, ClientListenerPolicy{Shared: c.Shared, Port: c.Port, Source: c.Source, Transport: c.Transport, Address: c.Address})
 	}
 	return result, result.validate()
+}
+
+func (p Plan) HasServerListener() bool {
+	return !p.ClientOnly && p.IPv6OnlyAddress == ""
 }
 
 // ListenerAddress never guesses a replacement public address.

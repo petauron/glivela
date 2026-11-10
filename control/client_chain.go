@@ -7,8 +7,10 @@ import (
 	"errors"
 	"maps"
 	"math"
+	"net"
 	"reflect"
 	"slices"
+	"strconv"
 	"time"
 
 	glivela "github.com/petauron/glivela"
@@ -118,14 +120,58 @@ func chainRelay(nodes map[string]Node, c glivela.ClientChain) (Node, error) {
 	return node, nil
 }
 
-func clientChainPort(next glivela.ImportMaterial, nodeID string) int {
-	for port := 24000; port <= 24999; port++ {
-		if _, shared := next.ClientLandings[nodeID]; shared && port == 24000 {
+// Distinct identities on one host can share a listener address. Keep their
+// ports disjoint without changing retained ports, credentials or revisions.
+func landingListenerAddresses(nodes map[string]Node, id string) map[string]bool {
+	out := map[string]bool{}
+	for _, n := range nodes {
+		if n.ID != id || n.Desired.Landing == nil {
 			continue
 		}
-		if !slices.ContainsFunc(next.ClientChains, func(v glivela.ClientChain) bool {
-			return !next.DeletedClientChains[v.ID] && (v.EgressID == nodeID && v.Port == port || v.Relay != nil && v.Relay.NodeID == nodeID && v.Relay.Port == port)
-		}) {
+		p := n.Desired.Landing
+		out[p.ListenerAddress()] = true
+		for _, c := range p.ActiveClientListeners() {
+			if c.Address != "" {
+				out[c.Address] = true
+			}
+		}
+	}
+	return out
+}
+
+func overlappingLandingListeners(nodes map[string]Node, a, b string) bool {
+	if a == b {
+		return true
+	}
+	left, right := landingListenerAddresses(nodes, a), landingListenerAddresses(nodes, b)
+	for address := range left {
+		if right[address] {
+			return true
+		}
+	}
+	return false
+}
+
+func clientChainPort(next glivela.ImportMaterial, nodes map[string]Node, nodeID string) int {
+	occupied := map[int]bool{}
+	for id := range next.ClientLandings {
+		if overlappingLandingListeners(nodes, nodeID, id) {
+			occupied[24000] = true
+		}
+	}
+	for _, v := range next.ClientChains {
+		if next.DeletedClientChains[v.ID] {
+			continue
+		}
+		if overlappingLandingListeners(nodes, nodeID, v.EgressID) {
+			occupied[v.Port] = true
+		}
+		if v.Relay != nil && overlappingLandingListeners(nodes, nodeID, v.Relay.NodeID) {
+			occupied[v.Relay.Port] = true
+		}
+	}
+	for port := 24000; port <= 24999; port++ {
+		if !occupied[port] {
 			return port
 		}
 	}
@@ -196,7 +242,7 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 			if !c.Enabled || len(next.ClientChains) >= 1000 {
 				return AccountChangeResult{}, invalid
 			}
-			port := clientChainPort(next, c.EgressID)
+			port := clientChainPort(next, s.nodes, c.EgressID)
 			keyLength := 32
 			if c.Transport == "ipv6-ss2022" {
 				keyLength = 16
@@ -217,7 +263,10 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 				}
 			}
 			if c.RelayID != "" {
-				relay := &glivela.ClientChainRelay{NodeID: c.RelayID, Transport: c.RelayTransport, SourceIPv4: c.RelaySourceIPv4, ServerIPv4: c.RelayServerIPv4, SourceIPv6: c.RelaySourceIPv6, ServerIPv6: c.RelayServerIPv6, Port: clientChainPort(next, c.RelayID)}
+				if overlappingLandingListeners(s.nodes, c.EgressID, c.RelayID) {
+					return AccountChangeResult{}, invalid
+				}
+				relay := &glivela.ClientChainRelay{NodeID: c.RelayID, Transport: c.RelayTransport, SourceIPv4: c.RelaySourceIPv4, ServerIPv4: c.RelayServerIPv4, SourceIPv6: c.RelaySourceIPv6, ServerIPv6: c.RelayServerIPv6, Port: clientChainPort(next, s.nodes, c.RelayID)}
 				for cert, node := range s.nodes {
 					if node.ID == c.RelayID && node.Desired.Landing != nil && cert == node.CertificateID {
 						relay.CertificateID = cert
@@ -406,7 +455,36 @@ func projectClientLandings(nodes map[string]Node, m glivela.ImportMaterial, now 
 		nodes[cert] = n
 		changed = true
 	}
+	if err := validateClientOnlyListeners(nodes); err != nil {
+		return false, err
+	}
 	return changed, nil
+}
+
+func validateClientOnlyListeners(nodes map[string]Node) error {
+	type owner struct {
+		id         string
+		clientOnly bool
+	}
+	occupied := map[string]owner{}
+	for _, n := range nodes {
+		if n.Desired.Landing == nil {
+			continue
+		}
+		p := n.Desired.Landing
+		for _, c := range p.ActiveClientListeners() {
+			address := p.Transport.PublicAddress
+			if c.Transport == "ipv6-ss2022" {
+				address = c.Address
+			}
+			key := net.JoinHostPort(address, strconv.Itoa(c.Port))
+			if old, found := occupied[key]; found && old.id != n.ID && (old.clientOnly || p.ClientOnly) {
+				return errors.New("control: cohosted landing listener already owned")
+			}
+			occupied[key] = owner{n.ID, p.ClientOnly}
+		}
+	}
+	return nil
 }
 
 func clientListener(c glivela.ClientChain, source string) landing.ClientListener {

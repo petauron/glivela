@@ -22,7 +22,7 @@ func reconcileOwnedRouteChecks(nodes map[string]Node, business *businessState, n
 		return nil
 	}
 	for certificate, node := range nodes {
-		if node.Desired.Landing == nil || !runtimeFresh(node, now) || len(node.RouteEntries) == 0 {
+		if node.Desired.Landing == nil || !node.Desired.Landing.HasServerListener() || !runtimeFresh(node, now) || len(node.RouteEntries) == 0 {
 			continue
 		}
 		snapshot := ""

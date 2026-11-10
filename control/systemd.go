@@ -429,7 +429,7 @@ func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 	if err := policy.Verify(ctx); err != nil {
 		return err
 	}
-	if desired.Landing.IPv6OnlyAddress == "" {
+	if desired.Landing.HasServerListener() {
 		if err := verifyOwnedListener(desired.Landing.ListenerAddress(), landing.SOCKSPort, d.WorkerUID); err != nil {
 			return err
 		}

@@ -27,6 +27,7 @@ type ClientListenerPolicy struct {
 }
 
 type ServerFirewall struct {
+	ClientOnly      bool                     `json:"clientOnly,omitempty"`
 	IPv6Only        bool                     `json:"ipv6Only,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	ClientListeners []ClientListenerPolicy   `json:"clientListeners,omitempty"`
@@ -75,6 +76,9 @@ func (policy ServerFirewall) validateIdentity() error {
 	}
 	if policy.Revision == 0 || !validAddress(policy.Address) || policy.UID == 0 || policy.UID == 65534 || !bridgeNamePattern.MatchString(policy.Interface) || len(policy.Sources) > 128 {
 		return errors.New("landing: invalid native firewall identity")
+	}
+	if policy.ClientOnly && (!policy.Public || policy.IPv6Only || len(policy.Sources) != len(policy.TCPOnlySources)) {
+		return errors.New("landing: invalid client-only firewall")
 	}
 	seen := map[string]bool{}
 	for _, source := range policy.Sources {
@@ -141,7 +145,7 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 		objects = append(objects, map[string]nftObject{"rule": {"family": "inet", "table": table, "chain": chain, "expr": expr}})
 	}
 	for _, protocol := range []string{"tcp", "udp"} {
-		if policy.IPv6Only {
+		if policy.IPv6Only || policy.ClientOnly {
 			continue
 		}
 		var port any = SOCKSPort
@@ -199,6 +203,9 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 	// Only replies to an existing authorized SOCKS conversation may return to
 	// the private network. There is no general established/related bypass.
 	for _, source := range sources {
+		if policy.ClientOnly {
+			continue
+		}
 		for _, protocol := range []string{"tcp", "udp"} {
 			if protocol == "udp" && slices.Contains(policy.TCPOnlySources, source) {
 				continue

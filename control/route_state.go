@@ -60,7 +60,7 @@ func enrolledEntryPeersFresh(node Node, nodes map[string]Node, now time.Time, de
 }
 
 func routeTargetsLanding(p RouteProbe, node Node) bool {
-	if node.Desired.Landing == nil {
+	if node.Desired.Landing == nil || !node.Desired.Landing.HasServerListener() {
 		return false
 	}
 	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)

@@ -117,7 +117,7 @@ func (s *Store) latencyTargetsLocked() map[string]latencyTarget {
 		}
 		for _, peer := range entry.Desired.Entry.Peers {
 			node, ok := landings[peer.EgressID]
-			if !ok {
+			if !ok || !node.Desired.Landing.HasServerListener() {
 				continue
 			}
 			enrolled, ok := node.RouteEntries[entry.ID]
