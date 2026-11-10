@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectControl } from "@/components/SelectControl";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { LatencyCell, latencyKey, type RouteLatency } from "./RouteLatency";
 import type { Inventory, Plan } from "./control-types";
 const unlimited: Plan = { totalBytes: "0", expiryTime: "0", resetDays: 0, enabled: true };
@@ -71,6 +71,7 @@ export function CreateRoute({ inventory, names, disabled, save, latencies, now, 
   const formID = useId();
   const [mode, setMode] = useState("server");
   const [transport, setTransport] = useState("ipv4-ss2022");
+  const [egressIp, setEgressIp] = useState("");
   const [sourceIpv6, setSourceIpv6] = useState("");
   const [serverIpv6, setServerIpv6] = useState("");
   const [relayID, setRelayID] = useState("none");
@@ -86,7 +87,7 @@ export function CreateRoute({ inventory, names, disabled, save, latencies, now, 
   useEffect(() => {
     if (inventory.routes.some(item => item.id === id.current) || inventory.clientChains?.some(item => item.id === id.current)) {
       id.current = crypto.randomUUID();
-      setAccountID(""); setEntryID(""); setEgressID(""); setName("");
+      setAccountID(""); setEntryID(""); setEgressID(""); setName(""); setEgressIp("");
       setSourceIpv6(""); setServerIpv6("");
       setRelayID("none"); setRelayIpv6(""); setRelayTransport("ipv6"); setRelaySourceIpv4(""); setRelayServerIpv4("");
     }
@@ -100,7 +101,7 @@ export function CreateRoute({ inventory, names, disabled, save, latencies, now, 
   return <form onSubmit={event => {
     event.preventDefault();
     if (!account || !entry || !landings.includes(egressID) || ipv6Chain && (!serverIpv6.trim() || !ipv4Relay && !sourceIpv6.trim()) || relayEnabled && (!relayIpv6.trim() || !landings.includes(relayID) || relayID === egressID || relayID === entryID) || ipv4Relay && (!relaySourceIpv4.trim() || !relayServerIpv4.trim())) return;
-    void save(mode === "client" ? "client-chains" : "routes", { id: id.current, accountId: accountID, entryId: entryID, egressId: egressID, enabled: true, ...(mode === "client" ? { name: name.trim(), transport, ...(ipv6Chain ? { sourceIpv6: relayEnabled ? relayIpv6.trim() : sourceIpv6.trim(), serverIpv6: serverIpv6.trim(), ...(relayEnabled ? { relayId: relayID, ...(ipv4Relay ? { relayTransport: "ipv4-relay-ss2022", relaySourceIpv4: relaySourceIpv4.trim(), relayServerIpv4: relayServerIpv4.trim() } : { relaySourceIpv6: sourceIpv6.trim(), relayServerIpv6: relayIpv6.trim() }) } : {}) } : {}) } : { hideNative: false }), expectedRevision: account.account.desiredRevision });
+    void save(mode === "client" ? "client-chains" : "routes", { id: id.current, accountId: accountID, entryId: entryID, egressId: egressID, enabled: true, ...(mode === "client" ? { name: name.trim(), egressIp: egressIp.trim(), transport, ...(ipv6Chain ? { sourceIpv6: relayEnabled ? relayIpv6.trim() : sourceIpv6.trim(), serverIpv6: serverIpv6.trim(), ...(relayEnabled ? { relayId: relayID, ...(ipv4Relay ? { relayTransport: "ipv4-relay-ss2022", relaySourceIpv4: relaySourceIpv4.trim(), relayServerIpv4: relayServerIpv4.trim() } : { relaySourceIpv6: sourceIpv6.trim(), relayServerIpv6: relayIpv6.trim() }) } : {}) } : {}) } : { hideNative: false }), expectedRevision: account.account.desiredRevision });
   }}><FieldGroup>
     <Field><FieldLabel htmlFor={`${formID}-mode`}>生成模式</FieldLabel><SelectControl id={`${formID}-mode`} aria-label="生成模式" disabled={disabled} value={mode} onValueChange={value => { setMode(value); setEgressID(""); }} options={[{ value: "server", label: "转发" }, { value: "client", label: "链式" }]} /></Field>
     {mode === "client" ? <>
@@ -113,6 +114,7 @@ export function CreateRoute({ inventory, names, disabled, save, latencies, now, 
     {ipv6Chain ? <Field><FieldLabel htmlFor={`${formID}-relay`}>中转节点</FieldLabel><SelectControl id={`${formID}-relay`} aria-label="中转节点" disabled={disabled} value={relayID} onValueChange={setRelayID} options={[{value:"none",label:"无（双跳）"},...landings.filter(id=>id!==entryID).map(id=>({value:id,label:names.get(id)??id,disabled:id===egressID}))]} /></Field> : null}
     {relayEnabled ? <Field><FieldLabel htmlFor={`${formID}-relay-transport`}>入口至中转传输</FieldLabel><SelectControl id={`${formID}-relay-transport`} aria-label="入口至中转传输" disabled={disabled} value={relayTransport} onValueChange={setRelayTransport} options={[{value:"ipv6",label:"公网 IPv6 · SS2022"},{value:"ipv4",label:"公网 IPv4 · SS2022"}]} /></Field> : null}
     <Field><FieldLabel htmlFor={`${formID}-landing`}>{ipv6Chain ? "落地" : "已授权落地"}</FieldLabel><SelectControl id={`${formID}-landing`} aria-label={ipv6Chain ? "落地" : "已授权落地"} required disabled={disabled} value={egressID} onValueChange={setEgressID} placeholder="请选择" options={landings.map(id => ({ value: id, label: `${names.get(id) ?? id}${!ipv6Chain ? optionLatency(latencies.get(latencyKey(entryID, id)), now, latencyFailed) : ""}` }))} /></Field>
+    {mode === "client" ? <Field><FieldLabel htmlFor={`${formID}-egress-ip`}>最终出口绑定 IP（可选）</FieldLabel><Input id={`${formID}-egress-ip`} aria-describedby={`${formID}-egress-hint`} maxLength={45} disabled={disabled} value={egressIp} onChange={event => setEgressIp(event.target.value)} placeholder="留空使用落地默认出口"/><FieldDescription id={`${formID}-egress-hint`}>填写落地网卡已分配的 IPv4 或 IPv6 地址。此线路固定使用该出口，不改变其他线路，也不随传输地址族切换。</FieldDescription></Field> : null}
     {ipv6Chain ? <><p className="text-sm text-muted-foreground">使用已核验的公网单一地址；每一跳只允许上一跳地址连接，地址变化后需重新授权。</p>{ipv4Relay ? <><Field><FieldLabel>入口出口 IPv4<Input required disabled={disabled} value={relaySourceIpv4} onChange={event => setRelaySourceIpv4(event.target.value)} /></FieldLabel></Field><Field><FieldLabel>中转监听 IPv4<Input required disabled={disabled} value={relayServerIpv4} onChange={event => setRelayServerIpv4(event.target.value)} /></FieldLabel></Field></> : <Field><FieldLabel>入口出口 IPv6<Input required disabled={disabled} value={sourceIpv6} onChange={event => setSourceIpv6(event.target.value)} /></FieldLabel></Field>}{relayEnabled ? <Field><FieldLabel>{ipv4Relay?"中转出口 IPv6":"中转监听及出口 IPv6"}<Input required disabled={disabled} value={relayIpv6} onChange={event => setRelayIpv6(event.target.value)} /></FieldLabel></Field> : null}<Field><FieldLabel>落地监听 IPv6<Input required disabled={disabled} value={serverIpv6} onChange={event => setServerIpv6(event.target.value)} /></FieldLabel></Field></> : null}
     {!ipv6Chain && entryID && egressID ? <div className="text-sm"><span className="text-muted-foreground">落地传输端口 TCP 1080 参考延迟：</span><LatencyCell value={latencies.get(latencyKey(entryID, egressID))} now={now} failed={latencyFailed} /></div> : null}
     <Button type="submit" disabled={disabled || !account || !entry || !egressID || mode === "client" && !name.trim() || ipv6Chain && (!serverIpv6.trim() || !ipv4Relay && !sourceIpv6.trim()) || relayEnabled && (!relayIpv6.trim() || relayID === egressID || relayID === entryID) || ipv4Relay && (!relaySourceIpv4.trim() || !relayServerIpv4.trim())}>新增线路</Button>

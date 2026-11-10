@@ -3,6 +3,7 @@ package glivela
 import (
 	"encoding/base64"
 	"errors"
+	"net/netip"
 	"strings"
 )
 
@@ -16,8 +17,9 @@ const IPv4RelaySS2022 = "ipv4-relay-ss2022"
 // ClientChain contains a dedicated user credential, never the server transport key.
 // It is stored only inside the encrypted business material.
 type ClientChain struct {
-	Shared bool              `json:"shared,omitempty"`
-	Relay  *ClientChainRelay `json:"relay,omitempty"`
+	EgressIP string            `json:"egressIp,omitempty"`
+	Shared   bool              `json:"shared,omitempty"`
+	Relay    *ClientChainRelay `json:"relay,omitempty"`
 	// IPv6SS2022 chains carry separately authorized, exact transport addresses.
 	// Empty transport fields identify existing IPv4 client chains.
 	Transport            string `json:"transport,omitempty"`
@@ -50,6 +52,12 @@ type ClientChainRelay struct {
 }
 
 func (c ClientChain) Validate() error {
+	if c.EgressIP != "" {
+		ip, err := netip.ParseAddr(c.EgressIP)
+		if err != nil || ip.String() != c.EgressIP || !(PublicTransportIPv4(c.EgressIP) || PublicTransportIPv6(c.EgressIP) || ip.Is4() && ip.IsPrivate()) {
+			return errors.New("glivela: invalid client exit source")
+		}
+	}
 	key, err := base64.StdEncoding.DecodeString(c.Key)
 	validTransport := (c.Transport == "" || c.Transport == IPv4ClientSS2022) && c.SourceIPv6 == "" && c.ServerIPv6 == "" && c.EntryCertificateID == "" && c.LandingCertificateID == "" && (len(key) == 32 && !c.Shared || len(key) == 16 && c.Shared && c.Transport == IPv4ClientSS2022) && (c.Transport == "" || base64.StdEncoding.EncodeToString(key) == c.Key) ||
 		c.Transport == "ipv6-ss2022" && PublicTransportIPv6(c.SourceIPv6) && PublicTransportIPv6(c.ServerIPv6) && c.SourceIPv6 != c.ServerIPv6 && ValidIdentity(c.EntryCertificateID) && ValidIdentity(c.LandingCertificateID) && c.EntryCertificateID != c.LandingCertificateID && len(key) == 16 && base64.StdEncoding.EncodeToString(key) == c.Key

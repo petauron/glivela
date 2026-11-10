@@ -271,8 +271,13 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 		}
 	}
 	all, err := net.InterfaceAddrs()
-	if err != nil || !assigned(all, desired.Landing.EgressIP) {
-		return landing.ServerFirewall{}, errors.New("control: egress source is not locally assigned")
+	if err != nil {
+		return landing.ServerFirewall{}, err
+	}
+	for _, ip := range desired.Landing.EgressAddresses() {
+		if !assigned(all, ip) {
+			return landing.ServerFirewall{}, errors.New("control: egress source is not locally assigned")
+		}
 	}
 	return desired.Landing.Firewall(d.WorkerUID, ifaceName)
 }

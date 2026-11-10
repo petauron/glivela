@@ -398,9 +398,6 @@ func (s *Store) copy() map[string]Node {
 }
 
 func (s *Store) commit(nodes map[string]Node) error {
-	if err := validateClientOnlyListeners(nodes); err != nil {
-		return err
-	}
 	if err := s.retainQuotaSuspensions(nodes); err != nil {
 		return err
 	}
