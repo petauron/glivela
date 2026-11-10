@@ -104,6 +104,26 @@ and current revision restores the retained original per-chain configuration
 through a forward revision. Never restore an older ledger, loosen source checks,
 change the exit or fabricate health to continue.
 
+## Three-hop Mihomo client chains
+
+The client-chain form can select an optional intermediate landing for an IPv6
+SS2022 chain. Enroll distinct entry, relay and final landing identities first.
+The relay listener and fixed IPv6 egress must use the same explicitly verified
+public IPv6 address. The entry's verified IPv6 source and the relay's IPv6
+source are authorized separately on their respective listeners. Each new chain
+has an independent relay credential; existing two-hop and server-forwarding
+routes are unchanged. TCP only is supported.
+
+The Mihomo subscription makes the final SS2022 proxy dial via the relay SS2022
+proxy, which dials through the original VLESS/REALITY entry. Only the final
+chain is placed in the selector. A suspended or mismatched relay suppresses the
+chain rather than substituting a direct path. Refresh the subscription and
+verify a real client request and exit; node receipts alone are not acceptance.
+Disabling a chain withdraws both listeners, and deletion waits for both nodes'
+fresh applied receipts. Do not roll an older controller back onto an encrypted
+ledger containing relay records; use a verified recovery point or a forward fix
+without discarding later accounting.
+
 ## IPv6-only entry DNS
 
 New entry render policy 15 uses the existing public resolvers over IPv6 when the native exit is explicitly `ipv6_only`. The DNS servers, resolver outbound family and exact port-53 destination rules select the same addresses; composite local DoH uses those IPv6 endpoints too. Private/control-address isolation and proxy readiness checks remain mandatory. IPv4-only and automatic policies retain their existing resolver configuration.

@@ -268,6 +268,12 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 			if !slices.Contains(landingNode.Desired.Landing.ClientListeners, listener) {
 				continue
 			}
+			if chain.Relay != nil {
+				relay, err := chainRelay(s.nodes, chain)
+				if err != nil || !s.subscriptionNodeEnabled(relay, now) || !slices.Contains(relay.Desired.Landing.ClientListeners, clientRelayListener(chain)) {
+					continue
+				}
+			}
 			for id, material := range byID {
 				if material.Credential.Kind == glivela.NativeCredential && material.Credential.EntryID == chain.EntryID {
 					server := landingNode.Desired.Landing.Transport.PublicAddress

@@ -132,8 +132,8 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 	}
 	type proxyEntry struct {
 		SubscriptionItem
-		value  map[string]any
-		helper string
+		value   map[string]any
+		helpers []string
 	}
 	values := make([]proxyEntry, 0, len(resolved)+len(chains))
 	helperValues := map[string]map[string]any{}
@@ -193,7 +193,14 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 		if c.Transport == "ipv6-ss2022" || c.Shared {
 			cipher = SS2022Method
 		}
-		values = append(values, proxyEntry{SubscriptionItem: SubscriptionItem{ID: "chain/" + c.ID, Name: name, Kind: "chain", Protocol: ProtocolKind("shadowsocks")}, helper: helper, value: map[string]any{"name": name, "type": "ss", "server": published.Server, "port": c.Port, "cipher": cipher, "password": c.Key, "udp": false, "dialer-proxy": helper}})
+		dependencies := []string{helper}
+		if c.Relay != nil {
+			relayName := uniqueSubscriptionName("中转｜"+c.Name, used)
+			helperValues[relayName] = map[string]any{"name": relayName, "type": "ss", "server": c.Relay.ServerIPv6, "port": c.Relay.Port, "cipher": SS2022Method, "password": c.Relay.Key, "udp": false, "dialer-proxy": helper}
+			dependencies = append(dependencies, relayName)
+			helper = relayName
+		}
+		values = append(values, proxyEntry{SubscriptionItem: SubscriptionItem{ID: "chain/" + c.ID, Name: name, Kind: "chain", Protocol: ProtocolKind("shadowsocks")}, helpers: dependencies, value: map[string]any{"name": name, "type": "ss", "server": published.Server, "port": c.Port, "cipher": cipher, "password": c.Key, "udp": false, "dialer-proxy": helper}})
 	}
 	ranks := subscriptionRanks(order, resolved)
 	slices.SortStableFunc(values, func(a, b proxyEntry) int { return cmp.Compare(ranks.position(a.ID), ranks.position(b.ID)) })
@@ -202,9 +209,11 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 	names = make([]any, 0, len(values)+1)
 	addedHelpers := map[string]bool{}
 	for _, entry := range values {
-		if entry.helper != "" && !addedHelpers[entry.helper] {
-			proxies = append(proxies, helperValues[entry.helper])
-			addedHelpers[entry.helper] = true
+		for _, helper := range entry.helpers {
+			if !addedHelpers[helper] {
+				proxies = append(proxies, helperValues[helper])
+				addedHelpers[helper] = true
+			}
 		}
 		proxies = append(proxies, entry.value)
 		names = append(names, entry.Name)
