@@ -67,9 +67,8 @@ export function CreateAccount({ inventory, disabled, save }: { inventory: Invent
   return <details open className="gl-form-disclosure"><summary className="cursor-pointer">新增账户</summary><form className="mt-3" onSubmit={event => { event.preventDefault(); if (entries.length && name.trim()) void save("accounts", { id: id.current, name: name.trim(), entryIds: entries, plan: unlimited }); }}><FieldGroup><Field><FieldLabel>名称<Input required value={name} disabled={disabled} onChange={event => setName(event.target.value)} /></FieldLabel></Field>{inventory.endpoints.filter(e => !e.retired).map(endpoint => <Field key={endpoint.id}><FieldLabel><input type="checkbox" disabled={disabled} checked={entries.includes(endpoint.entryId)} onChange={event => setEntries(event.target.checked ? [...entries, endpoint.entryId] : entries.filter(id => id !== endpoint.entryId))} />{names.get(endpoint.entryId) ?? endpoint.entryId}</FieldLabel></Field>)}<Button type="submit" disabled={disabled || entries.length === 0}>创建（默认不限额，随后编辑）</Button></FieldGroup></form></details>;
 }
 
-export function CreateRoute({ inventory, disabled, save, latencies, now, latencyFailed }: { inventory: Inventory; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean>; latencies: Map<string, RouteLatency>; now: number; latencyFailed: boolean }) {
+export function CreateRoute({ inventory, names, disabled, save, latencies, now, latencyFailed }: { inventory: Inventory; names: Map<string, string>; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean>; latencies: Map<string, RouteLatency>; now: number; latencyFailed: boolean }) {
   const formID = useId();
-  const names = hostNames(inventory);
   const [mode, setMode] = useState("server");
   const [transport, setTransport] = useState("ipv4-ss2022");
   const [sourceIpv6, setSourceIpv6] = useState("");
