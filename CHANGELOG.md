@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.116](https://github.com/petauron/glivela/compare/v0.1.0-alpha.115...v0.1.0-alpha.116) (2026-11-10)
+
+
+### Bug Fixes
+
+* **subscription:** configure landing region labels without changing routes ([#76](https://github.com/petauron/glivela/issues/76)) ([8e81af4](https://github.com/petauron/glivela/commit/8e81af4195a4531e9cdc6391a92f074df96faf59))
+
 ## [0.1.0-alpha.115](https://github.com/petauron/glivela/compare/v0.1.0-alpha.114...v0.1.0-alpha.115) (2026-11-08)
 
 
