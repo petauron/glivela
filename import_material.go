@@ -46,6 +46,14 @@ func (m ImportMaterial) Validate() error {
 		if c.Validate() != nil || c.Shared || seenChains[c.ID] || !deleted && seenPorts[port] || deleted && c.Enabled {
 			return errors.New("glivela: invalid client chain inventory")
 		}
+		relayPort := ""
+		if c.Relay != nil {
+			relayPort = c.Relay.NodeID + ":" + fmt.Sprint(c.Relay.Port)
+			_, shared := m.ClientLandings[c.Relay.NodeID]
+			if !deleted && (relayPort == port || seenPorts[relayPort] || shared && c.Relay.Port == 24000) {
+				return errors.New("glivela: conflicting client relay port")
+			}
+		}
 		found := false
 		for _, a := range m.Plan.Accounts {
 			if a.Account.ID == c.AccountID {
@@ -62,6 +70,9 @@ func (m ImportMaterial) Validate() error {
 		seenChains[c.ID] = true
 		if !deleted {
 			seenPorts[port] = true
+			if relayPort != "" {
+				seenPorts[relayPort] = true
+			}
 		}
 	}
 	for landingID, shared := range m.ClientLandings {

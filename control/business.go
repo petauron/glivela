@@ -244,7 +244,11 @@ func (s *Store) Business() BusinessInventory {
 			if err != nil {
 				continue
 			}
-			view.ClientChains = append(view.ClientChains, ClientChainView{UnavailableReason: clientChainUnavailableReason(s.nodes, c), Shared: c.Shared, Port: c.Port, ID: c.ID, AccountID: c.AccountID, EntryID: c.EntryID, EgressID: c.EgressID, Name: c.Name, Enabled: c.Enabled, Transport: c.Transport, SourceIPv6: c.SourceIPv6, ServerIPv6: c.ServerIPv6})
+			item := ClientChainView{UnavailableReason: clientChainUnavailableReason(s.nodes, c), Shared: c.Shared, Port: c.Port, ID: c.ID, AccountID: c.AccountID, EntryID: c.EntryID, EgressID: c.EgressID, Name: c.Name, Enabled: c.Enabled, Transport: c.Transport, SourceIPv6: c.SourceIPv6, ServerIPv6: c.ServerIPv6}
+			if c.Relay != nil {
+				item.RelayID, item.RelaySourceIPv6, item.RelayServerIPv6 = c.Relay.NodeID, c.Relay.SourceIPv6, c.Relay.ServerIPv6
+			}
+			view.ClientChains = append(view.ClientChains, item)
 		}
 	}
 	if s.business == nil {
