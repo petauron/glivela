@@ -107,10 +107,13 @@ change the exit or fabricate health to continue.
 ## Three-hop Mihomo client chains
 
 The client-chain form can select an optional intermediate landing for an IPv6
-SS2022 chain. Enroll distinct entry, relay and final landing identities first.
-The relay listener and fixed IPv6 egress must use the same explicitly verified
-public IPv6 address. The entry's verified IPv6 source and the relay's IPv6
-source are authorized separately on their respective listeners. Each new chain
+SS2022 final hop. Enroll distinct entry, relay and final landing identities first.
+The first hop can use an exact public IPv6 or IPv4 source and listener; the relay
+uses a fixed, explicitly verified IPv6 source for the final hop. An IPv4 relay
+listener needs landing render version 4 and an upgraded relay runtime. It is an
+independent exact-source client listener: it does not add a server-forwarding
+source grant. The entry source and the relay's IPv6 source are authorized
+separately on their respective listeners. Each new chain
 has an independent relay credential; existing two-hop and server-forwarding
 routes are unchanged. TCP only is supported.
 

@@ -16,7 +16,7 @@ import (
 // neither this operation nor recovery writes counters or the server transport.
 func (s *Store) changeSharedLandingLocked(c ClientChainChange) (AccountChangeResult, error) {
 	invalid := errors.New("control: shared client landing change refused")
-	if c.ShareLanding == c.RestoreLanding || c.ID != "" || c.EntryID != "" || c.Transport != "" || c.SourceIPv6 != "" || c.ServerIPv6 != "" || c.RelayID != "" || c.RelaySourceIPv6 != "" || c.RelayServerIPv6 != "" || c.Name != "" || c.Delete || c.Enabled || !glivela.ValidIdentifier(c.EgressID) {
+	if c.ShareLanding == c.RestoreLanding || c.ID != "" || c.EntryID != "" || c.Transport != "" || c.SourceIPv6 != "" || c.ServerIPv6 != "" || c.RelayID != "" || c.RelayTransport != "" || c.RelaySourceIPv4 != "" || c.RelayServerIPv4 != "" || c.RelaySourceIPv6 != "" || c.RelayServerIPv6 != "" || c.Name != "" || c.Delete || c.Enabled || !glivela.ValidIdentifier(c.EgressID) {
 		return AccountChangeResult{}, invalid
 	}
 	next := s.business.material

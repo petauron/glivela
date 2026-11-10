@@ -24,10 +24,13 @@ type Desired struct {
 }
 
 func NewDesired(plan landing.Plan) (Desired, error) {
-	version := landing.RenderVersion
+	version := uint8(3)
 	// Ordinary listener projections must remain consumable by unchanged nodes.
 	if plan.IPv6OnlyAddress == "" {
 		version = 2
+	}
+	if slices.ContainsFunc(plan.ClientListeners, func(c landing.ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
+		version = landing.RenderVersion
 	}
 	return newLandingDesiredVersion(plan, version)
 }

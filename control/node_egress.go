@@ -61,7 +61,7 @@ func (s *Store) nodeEgressViewLocked(node Node) (NodeEgressView, error) {
 			if err != nil {
 				return v, nodeEgressError("egress_chain_unverified")
 			}
-			if chain.Transport == "ipv6-ss2022" {
+			if chain.Transport == "ipv6-ss2022" && (chain.Relay == nil || chain.Relay.Transport != glivela.IPv4RelaySS2022) {
 				v.BlockedPolicies[glivela.EgressIPv4Only] = "egress_ipv6_chain_conflict"
 			} else {
 				v.BlockedPolicies[glivela.EgressIPv6Only] = "egress_ipv4_chain_conflict"

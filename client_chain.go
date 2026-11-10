@@ -9,6 +9,10 @@ import (
 const IPv4ClientSS2022 = "ipv4-ss2022"
 const IPv4ClientSS2022Method = "2022-blake3-aes-256-gcm"
 
+// IPv4RelaySS2022 is an exact-source client-only relay, independent of the
+// server-forwarding source grants.
+const IPv4RelaySS2022 = "ipv4-relay-ss2022"
+
 // ClientChain contains a dedicated user credential, never the server transport key.
 // It is stored only inside the encrypted business material.
 type ClientChain struct {
@@ -36,6 +40,9 @@ type ClientChain struct {
 type ClientChainRelay struct {
 	NodeID        string `json:"nodeId"`
 	CertificateID string `json:"certificateId"`
+	Transport     string `json:"transport,omitempty"`
+	SourceIPv4    string `json:"sourceIpv4,omitempty"`
+	ServerIPv4    string `json:"serverIpv4,omitempty"`
 	SourceIPv6    string `json:"sourceIpv6"`
 	ServerIPv6    string `json:"serverIpv6"`
 	Port          int    `json:"port"`
@@ -51,7 +58,9 @@ func (c ClientChain) Validate() error {
 	}
 	if r := c.Relay; r != nil {
 		relayKey, err := base64.StdEncoding.DecodeString(r.Key)
-		if c.Transport != "ipv6-ss2022" || !ValidIdentifier(r.NodeID) || r.NodeID == c.EntryID || r.NodeID == c.EgressID || !ValidIdentity(r.CertificateID) || r.CertificateID == c.EntryCertificateID || r.CertificateID == c.LandingCertificateID || !PublicTransportIPv6(r.SourceIPv6) || !PublicTransportIPv6(r.ServerIPv6) || r.SourceIPv6 == r.ServerIPv6 || r.SourceIPv6 == c.ServerIPv6 || r.ServerIPv6 != c.SourceIPv6 || r.Port < 24000 || r.Port > 24999 || err != nil || len(relayKey) != 16 || base64.StdEncoding.EncodeToString(relayKey) != r.Key {
+		validRelay := r.Transport == "" && r.SourceIPv4 == "" && r.ServerIPv4 == "" && PublicTransportIPv6(r.SourceIPv6) && PublicTransportIPv6(r.ServerIPv6) && r.SourceIPv6 != r.ServerIPv6 && r.SourceIPv6 != c.ServerIPv6 && r.ServerIPv6 == c.SourceIPv6 && len(relayKey) == 16 ||
+			r.Transport == IPv4RelaySS2022 && r.SourceIPv6 == "" && r.ServerIPv6 == "" && PublicTransportIPv4(r.SourceIPv4) && PublicTransportIPv4(r.ServerIPv4) && r.SourceIPv4 != r.ServerIPv4 && len(relayKey) == 32
+		if c.Transport != "ipv6-ss2022" || !ValidIdentifier(r.NodeID) || r.NodeID == c.EntryID || r.NodeID == c.EgressID || !ValidIdentity(r.CertificateID) || r.CertificateID == c.EntryCertificateID || r.CertificateID == c.LandingCertificateID || r.Port < 24000 || r.Port > 24999 || err != nil || !validRelay || base64.StdEncoding.EncodeToString(relayKey) != r.Key {
 			return errors.New("glivela: invalid client chain relay")
 		}
 	}
