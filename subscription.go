@@ -196,7 +196,11 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 		dependencies := []string{helper}
 		if c.Relay != nil {
 			relayName := uniqueSubscriptionName("中转｜"+c.Name, used)
-			helperValues[relayName] = map[string]any{"name": relayName, "type": "ss", "server": c.Relay.ServerIPv6, "port": c.Relay.Port, "cipher": SS2022Method, "password": c.Relay.Key, "udp": false, "dialer-proxy": helper}
+			relayServer, relayCipher := c.Relay.ServerIPv6, SS2022Method
+			if c.Relay.Transport == IPv4RelaySS2022 {
+				relayServer, relayCipher = c.Relay.ServerIPv4, IPv4ClientSS2022Method
+			}
+			helperValues[relayName] = map[string]any{"name": relayName, "type": "ss", "server": relayServer, "port": c.Relay.Port, "cipher": relayCipher, "password": c.Relay.Key, "udp": false, "dialer-proxy": helper}
 			dependencies = append(dependencies, relayName)
 			helper = relayName
 		}

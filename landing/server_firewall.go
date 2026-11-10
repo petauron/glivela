@@ -91,6 +91,7 @@ func (policy ServerFirewall) validateIdentity() error {
 	ports := map[int]ClientListenerPolicy{}
 	for _, c := range policy.ClientListeners {
 		validTransport := (c.Transport == "" || c.Transport == glivela.IPv4ClientSS2022) && c.Address == "" && seen[c.Source] ||
+			c.Transport == glivela.IPv4RelaySS2022 && c.Address == "" && !c.Shared && glivela.PublicTransportIPv4(c.Source) && c.Source != policy.Address ||
 			c.Transport == "ipv6-ss2022" && glivela.PublicTransportIPv6(c.Address) && glivela.PublicTransportIPv6(c.Source) && c.Address != c.Source
 		if policy.IPv6Only && (c.Transport != "ipv6-ss2022" || c.Address != policy.Address) {
 			return errors.New("landing: IPv4 listener in IPv6-only firewall")

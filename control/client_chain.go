@@ -22,6 +22,9 @@ type ClientChainChange struct {
 	SourceIPv6       string `json:"sourceIpv6,omitempty"`
 	ServerIPv6       string `json:"serverIpv6,omitempty"`
 	RelayID          string `json:"relayId,omitempty"`
+	RelayTransport   string `json:"relayTransport,omitempty"`
+	RelaySourceIPv4  string `json:"relaySourceIpv4,omitempty"`
+	RelayServerIPv4  string `json:"relayServerIpv4,omitempty"`
 	RelaySourceIPv6  string `json:"relaySourceIpv6,omitempty"`
 	RelayServerIPv6  string `json:"relayServerIpv6,omitempty"`
 	ID               string `json:"id"`
@@ -41,6 +44,9 @@ type ClientChainView struct {
 	SourceIPv6        string `json:"sourceIpv6,omitempty"`
 	ServerIPv6        string `json:"serverIpv6,omitempty"`
 	RelayID           string `json:"relayId,omitempty"`
+	RelayTransport    string `json:"relayTransport,omitempty"`
+	RelaySourceIPv4   string `json:"relaySourceIpv4,omitempty"`
+	RelayServerIPv4   string `json:"relayServerIpv4,omitempty"`
 	RelaySourceIPv6   string `json:"relaySourceIpv6,omitempty"`
 	RelayServerIPv6   string `json:"relayServerIpv6,omitempty"`
 	Port              int    `json:"port"`
@@ -63,7 +69,8 @@ func chainLanding(nodes map[string]Node, c glivela.ClientChain) (Node, string, e
 		target, targetExists := nodes[c.LandingCertificateID]
 		// This association is created explicitly by the authenticated operator;
 		// do not infer an IPv6 source from the old shared IPv4 transport grant.
-		if entryExists && targetExists && entry.CertificateID == c.EntryCertificateID && target.CertificateID == c.LandingCertificateID && entry.ID == c.EntryID && entry.Desired.Entry != nil && entry.Desired.Entry.NativeEgress != glivela.EgressIPv4Only && target.ID == c.EgressID && target.Desired.Landing != nil && (target.Desired.Landing.IPv6OnlyAddress == "" || target.Desired.Landing.IPv6OnlyAddress == c.ServerIPv6) {
+		entryFamily := entryExists && entry.Desired.Entry != nil && (c.Relay != nil && c.Relay.Transport == glivela.IPv4RelaySS2022 && entry.Desired.Entry.NativeEgress != glivela.EgressIPv6Only || (c.Relay == nil || c.Relay.Transport != glivela.IPv4RelaySS2022) && entry.Desired.Entry.NativeEgress != glivela.EgressIPv4Only)
+		if entryExists && targetExists && entry.CertificateID == c.EntryCertificateID && target.CertificateID == c.LandingCertificateID && entry.ID == c.EntryID && entryFamily && target.ID == c.EgressID && target.Desired.Landing != nil && (target.Desired.Landing.IPv6OnlyAddress == "" || target.Desired.Landing.IPv6OnlyAddress == c.ServerIPv6) {
 			if c.Relay != nil {
 				if _, err := chainRelay(nodes, c); err != nil {
 					return Node{}, "", err
@@ -101,8 +108,12 @@ func chainRelay(nodes map[string]Node, c glivela.ClientChain) (Node, error) {
 	}
 	r := c.Relay
 	node, ok := nodes[r.CertificateID]
-	if !ok || node.CertificateID != r.CertificateID || node.ID != r.NodeID || node.Desired.Landing == nil || node.Desired.Landing.EgressIP != r.ServerIPv6 || node.Desired.Landing.IPv6OnlyAddress != "" && node.Desired.Landing.IPv6OnlyAddress != r.ServerIPv6 {
+	if !ok || node.CertificateID != r.CertificateID || node.ID != r.NodeID || node.Desired.Landing == nil || node.Desired.Landing.EgressIP != c.SourceIPv6 {
 		return Node{}, errors.New("control: client relay requires an enrolled landing with matching IPv6 egress")
+	}
+	plan := node.Desired.Landing
+	if r.Transport == glivela.IPv4RelaySS2022 && (plan.IPv6OnlyAddress != "" || plan.Transport.PublicAddress != r.ServerIPv4) || r.Transport == "" && plan.IPv6OnlyAddress != "" && plan.IPv6OnlyAddress != r.ServerIPv6 {
+		return Node{}, errors.New("control: client relay listener address differs from enrollment")
 	}
 	return node, nil
 }
@@ -149,7 +160,7 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 	same := false
 	if ci >= 0 {
 		old := next.ClientChains[ci]
-		if old.Relay == nil && (c.RelayID != "" || c.RelaySourceIPv6 != "" || c.RelayServerIPv6 != "") || old.Relay != nil && (c.RelayID != old.Relay.NodeID || c.RelaySourceIPv6 != old.Relay.SourceIPv6 || c.RelayServerIPv6 != old.Relay.ServerIPv6) {
+		if old.Relay == nil && (c.RelayID != "" || c.RelayTransport != "" || c.RelaySourceIPv4 != "" || c.RelayServerIPv4 != "" || c.RelaySourceIPv6 != "" || c.RelayServerIPv6 != "") || old.Relay != nil && (c.RelayID != old.Relay.NodeID || c.RelayTransport != old.Relay.Transport || c.RelaySourceIPv4 != old.Relay.SourceIPv4 || c.RelayServerIPv4 != old.Relay.ServerIPv4 || c.RelaySourceIPv6 != old.Relay.SourceIPv6 || c.RelayServerIPv6 != old.Relay.ServerIPv6) {
 			return AccountChangeResult{}, invalid
 		}
 		if _, shared := next.ClientLandings[old.EgressID]; shared && c.Transport != "" {
@@ -206,13 +217,17 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 				}
 			}
 			if c.RelayID != "" {
-				relay := &glivela.ClientChainRelay{NodeID: c.RelayID, SourceIPv6: c.RelaySourceIPv6, ServerIPv6: c.RelayServerIPv6, Port: clientChainPort(next, c.RelayID)}
+				relay := &glivela.ClientChainRelay{NodeID: c.RelayID, Transport: c.RelayTransport, SourceIPv4: c.RelaySourceIPv4, ServerIPv4: c.RelayServerIPv4, SourceIPv6: c.RelaySourceIPv6, ServerIPv6: c.RelayServerIPv6, Port: clientChainPort(next, c.RelayID)}
 				for cert, node := range s.nodes {
 					if node.ID == c.RelayID && node.Desired.Landing != nil && cert == node.CertificateID {
 						relay.CertificateID = cert
 					}
 				}
-				relayKey := make([]byte, 16)
+				relayKeyLength := 16
+				if c.RelayTransport == glivela.IPv4RelaySS2022 {
+					relayKeyLength = 32
+				}
+				relayKey := make([]byte, relayKeyLength)
 				if _, err := rand.Read(relayKey); err != nil {
 					return AccountChangeResult{}, err
 				}
@@ -240,7 +255,7 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 				if entryHost != "" && (entryHost == relayHost || entryHost == landingHost) || relayHost != "" && relayHost == landingHost {
 					return AccountChangeResult{}, invalid
 				}
-			} else if c.RelaySourceIPv6 != "" || c.RelayServerIPv6 != "" {
+			} else if c.RelayTransport != "" || c.RelaySourceIPv4 != "" || c.RelayServerIPv4 != "" || c.RelaySourceIPv6 != "" || c.RelayServerIPv6 != "" {
 				return AccountChangeResult{}, invalid
 			}
 		}
@@ -400,6 +415,9 @@ func clientListener(c glivela.ClientChain, source string) landing.ClientListener
 
 func clientRelayListener(c glivela.ClientChain) landing.ClientListener {
 	r := c.Relay
+	if r.Transport == glivela.IPv4RelaySS2022 {
+		return landing.ClientListener{ID: c.ID, Port: r.Port, Key: r.Key, Source: r.SourceIPv4, Transport: r.Transport}
+	}
 	return landing.ClientListener{ID: c.ID, Port: r.Port, Key: r.Key, Source: r.SourceIPv6, Transport: "ipv6-ss2022", Address: r.ServerIPv6}
 }
 
