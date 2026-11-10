@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.117](https://github.com/petauron/glivela/compare/v0.1.0-alpha.116...v0.1.0-alpha.117) (2026-11-10)
+
+
+### Bug Fixes
+
+* **control:** support explicit userspace private-network dialing ([#78](https://github.com/petauron/glivela/issues/78)) ([333c6b8](https://github.com/petauron/glivela/commit/333c6b830f8630804cd6938163fa26d071e62add))
+
 ## [0.1.0-alpha.116](https://github.com/petauron/glivela/compare/v0.1.0-alpha.115...v0.1.0-alpha.116) (2026-11-10)
 
 
