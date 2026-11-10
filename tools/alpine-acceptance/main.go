@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -60,7 +61,7 @@ func certificate(name string, ca *x509.Certificate, signer *ecdsa.PrivateKey, se
 	} else if server {
 		cert.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
 		cert.DNSNames = []string{"localhost", "www.example.com", "www.cloudflare.com"}
-		cert.IPAddresses = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("93.184.216.34")}
+		cert.IPAddresses = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("93.184.216.34"), net.ParseIP("100.126.0.2")}
 	} else {
 		cert.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 	}
@@ -130,7 +131,7 @@ func initialize() error {
 		}
 		secrets[field] = string(raw)
 	}
-	if err := write("install-inputs.json", map[string]any{"config": map[string]any{"controller_url": "https://127.0.0.1:16443", "network_interface": "lo", "backend_port": 10443}, "secrets": secrets}); err != nil {
+	if err := write("install-inputs.json", map[string]any{"config": map[string]any{"controller_url": "https://100.126.0.2:16443", "network_interface": "lo"}, "secrets": secrets}); err != nil {
 		return err
 	}
 	client := map[string]any{"log": map[string]any{"loglevel": "warning"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}}, "outbounds": []any{
@@ -227,7 +228,17 @@ func run() error {
 		return err
 	}
 	defer server.Shutdown(context.Background())
-	errs := make(chan error, 4)
+	// Explicit synthetic target. TLS is verified against this fixture's own CA,
+	// never presented as a production Internet or streaming-unlock test.
+	target := &http.Server{Addr: "93.184.216.34:443", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, "ip=93.184.216.34\nloc=ZZ\nfixture=alpine-acceptance\n")
+	})}
+	defer target.Close()
+	errs := make(chan error, 5)
+	go func() {
+		errs <- target.ListenAndServeTLS(filepath.Join(root, "server.pem"), filepath.Join(root, "server.key"))
+	}()
 	for _, listen := range []string{"127.0.0.1:53", "1.1.1.1:53", "1.0.0.1:53"} {
 		go func() { errs <- serveDNS(listen) }()
 	}
