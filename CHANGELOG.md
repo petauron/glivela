@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.119](https://github.com/petauron/glivela/compare/v0.1.0-alpha.118...v0.1.0-alpha.119) (2026-11-10)
+
+
+### Bug Fixes
+
+* show bound host names when creating routes ([8cd837b](https://github.com/petauron/glivela/commit/8cd837bf2dbdfc582173896183da527ccc229f9d))
+
 ## [0.1.0-alpha.118](https://github.com/petauron/glivela/compare/v0.1.0-alpha.117...v0.1.0-alpha.118) (2026-11-10)
 
 
