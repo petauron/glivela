@@ -175,7 +175,7 @@ func (s *Store) LoadBusiness(keyPath string) error {
 	if err != nil {
 		return errors.New("control: business checkpoint unavailable or invalid")
 	}
-	names, err := loadSubscriptionNames(directory, material)
+	presentation, err := loadSubscriptionPresentation(directory, material)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,8 @@ func (s *Store) LoadBusiness(keyPath string) error {
 			}
 		}
 	}
-	s.subscriptionNames = names
+	s.subscriptionNames = presentation.Names
+	s.subscriptionLandings = presentation.Landings
 	s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key)}
 	return nil
 }

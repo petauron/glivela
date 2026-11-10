@@ -40,6 +40,25 @@ reject a file changed behind the running controller. Restore only to an offline
 new private destination. Configuration recovery never restores an old ledger.
 Ordinary absence uses the retained service's own display name.
 
+## Landing subscription regions
+
+`POST /v1/admin/subscription-landing` reads one enrolled landing's effective
+presentation with `{ "id": "landing-example" }`. To save, send `id`, an exact
+`expected` object from that read, and `value`, for example
+`{ "regionCode": "US", "nameSuffix": "" }`. The region is a two-letter uppercase
+code; the optional suffix follows existing route-name rules. An empty suffix
+keeps the normal double-hop label. This private administration operation uses
+the existing mTLS boundary; it does not enroll a node or authorize a route.
+
+The same `subscription-names.json` file stores explicit `landings` values keyed
+by landing ID. Existing imported regions remain effective until explicitly
+changed. Saving validates generated subscriptions and preserves selectable
+identities and ordering before the atomic write. Both ordinary name edits and
+consistent backups retain the region values. No account/node revision, proxy
+policy, key, subscription URL or traffic ledger is rewritten. IPv6 chains with
+explicit issued labels retain those labels. Refresh client subscriptions to
+receive changed names and their matching group/dependency references.
+
 ## Independently managed host firewall
 
 A native node with a separately managed input DROP guard may explicitly identify
