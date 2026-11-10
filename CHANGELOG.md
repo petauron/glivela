@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.118](https://github.com/petauron/glivela/compare/v0.1.0-alpha.117...v0.1.0-alpha.118) (2026-11-10)
+
+
+### Features
+
+* support IPv4 entry to IPv6 relay chains ([489da09](https://github.com/petauron/glivela/commit/489da0966ea3a47d42a4cf2b9ce5338f34e092ef)), closes [#80](https://github.com/petauron/glivela/issues/80)
+* support three-hop client chains ([0c0f55c](https://github.com/petauron/glivela/commit/0c0f55c23204c17101df975295b241d035ab52cb)), closes [#80](https://github.com/petauron/glivela/issues/80)
+
+
+### Bug Fixes
+
+* show unconfirmed three-hop runtime state ([aa4a7d7](https://github.com/petauron/glivela/commit/aa4a7d74eef055973739fc91d0ce874ea7b70576)), closes [#80](https://github.com/petauron/glivela/issues/80)
+
 ## [0.1.0-alpha.117](https://github.com/petauron/glivela/compare/v0.1.0-alpha.116...v0.1.0-alpha.117) (2026-11-10)
 
 
