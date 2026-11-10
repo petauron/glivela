@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.120](https://github.com/petauron/glivela/compare/v0.1.0-alpha.119...v0.1.0-alpha.120) (2026-11-10)
+
+
+### Features
+
+* isolate client-only landings on shared hosts ([#88](https://github.com/petauron/glivela/issues/88)) ([99fb51a](https://github.com/petauron/glivela/commit/99fb51ad4e4b8de1d0f29a189b3b9dfdbb5f572f))
+
 ## [0.1.0-alpha.119](https://github.com/petauron/glivela/compare/v0.1.0-alpha.118...v0.1.0-alpha.119) (2026-11-10)
 
 
