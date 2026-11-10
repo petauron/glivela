@@ -94,3 +94,13 @@ Saving confirms controller persistence, not node application or client access.
 Use the panel's readback to check the actual application state, then perform
 separately authorized real-path verification. This operation does not upgrade a
 retained renderer to the newer automatic-family fallback format.
+
+## 同一落地实例的 V4 / V6 客户端出口
+
+新建客户端链式线路时，可填写「最终出口绑定 IP」，绑定落地网卡已经分配的 IPv4 或 IPv6 地址；留空继续使用落地默认出口。公网传输可使用另一个地址族。API 的 `client-chains.egressIp` 是可选字段；修改既有线路时省略该字段会保留原值，显式空字符串才恢复默认出口。
+
+同一落地身份和 Xray worker 可同时服务两个地址族。原有默认出口、监听、凭据及 relay 的来源地址保持不变；无需新实例或新节点证书。线路详情显示其固定出口。所有绑定地址在本地激活前校验；不在本机的地址会在停止现有 worker 前拒绝。
+
+带独立出口的计划使用格式 6；旧节点拒绝该格式，须先完成已授权的受管更新，再修改线路。未配置独立出口的计划保留原格式和配置字节。每个出站固定来源地址并强制解析对应地址族，失败不切换其他出口；内核规则只允许该 worker 使用明确的本地来源，继续阻断解析后的私网和保留地址。IPv6 中转仍使用默认 IPv6 来源。
+
+签名目录中的附加客户端落地配方已被单实例能力取代；历史发布记录不改写，新配置不使用额外身份或运行服务。
