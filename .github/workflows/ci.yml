@@ -33,6 +33,16 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - name: Install reviewed management UI dependencies
         run: npm ci --prefix ui
+      - name: Install existing isolated runtime test tools
+        run: |
+          if getent ahostsv4 archive.ubuntu.com >/dev/null; then
+            echo "Ubuntu archive DNS available before runtime tests"
+          else
+            echo "Ubuntu archive DNS unavailable before runtime tests"
+            exit 1
+          fi
+          sudo apt-get update -qq --error-on=any
+          sudo apt-get install -y --no-install-recommends dnsmasq-base iproute2 nftables
       - name: Build twice and compare immutable distributions
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,11 +88,7 @@ jobs:
           wait "$server"
       - name: Exercise actual landing DNS policy in isolated namespace
         run: |
-          # Hosted mirror lists currently select an unresolvable Azure mirror.
-          # Keep Ubuntu's suites/components/signing keys and use its HTTPS archive.
-          sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g; s|mirror+file:/etc/apt/apt-mirrors-security.txt|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
-          sudo apt-get update -qq --error-on=any -o Acquire::Retries=2
-          sudo apt-get install -y --no-install-recommends dnsmasq-base iproute2 nftables
+          getent ahostsv4 archive.ubuntu.com >/dev/null
           go test -c -o "$RUNNER_TEMP/glivela-dns.test" ./landing
           sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
           sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
