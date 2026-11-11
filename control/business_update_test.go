@@ -388,6 +388,21 @@ func TestImportedPilotProcessBaselineDoesNotReplayLifetimeTotals(t *testing.T) {
 	if err := s.observeBusinessTrafficLocked(s.nodes[cert], observation, sampled.Add(3*time.Second)); err != nil || !bytes.Equal(written, businessBytes(t, s)) {
 		t.Fatal("repeated sample charged twice", err)
 	}
+	// A later idle heartbeat carries no new accounting state. Readiness uses
+	// the independent fresh runtime receipt, not this durable traffic watermark.
+	observation.Traffic.SampledAt = sampled.Add(4 * time.Second)
+	if err := s.observeBusinessTrafficLocked(s.nodes[cert], observation, sampled.Add(5*time.Second)); err != nil || !bytes.Equal(written, businessBytes(t, s)) {
+		t.Fatal("idle heartbeat rewrote unchanged accounting state", err)
+	}
+	observation.Traffic.SampledAt = sampled.Add(6 * time.Second)
+	observation.Traffic.Counters[credentialID] = TrafficCounter{Upload: 21, Download: 37}
+	if err := s.observeBusinessTrafficLocked(s.nodes[cert], observation, sampled.Add(7*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	got = s.business.material.TrafficCounters[credentialID]
+	if got.UploadBytes != counter.UploadBytes+9 || got.DownloadBytes != counter.DownloadBytes+14 {
+		t.Fatal("idle deduplication lost the next real traffic delta")
+	}
 }
 
 func TestImportedRealityPreservesNativeDNSTargetAndLegacyPin(t *testing.T) {

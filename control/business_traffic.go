@@ -109,6 +109,12 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 						continue
 					}
 				}
+				// Unchanged counters in the same core generation carry no new
+				// accounting state. Runtime freshness is recorded independently;
+				// do not reseal the full archive for an idle heartbeat timestamp.
+				if counter.StartedAt == sample.StartedAt && raw.Upload == counter.RawUploadBytes && raw.Download == counter.RawDownloadBytes {
+					continue
+				}
 				var upload, download int64
 				if counter.StartedAt == sample.StartedAt {
 					if raw.Upload < counter.RawUploadBytes || raw.Download < counter.RawDownloadBytes {
