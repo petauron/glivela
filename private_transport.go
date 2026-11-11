@@ -8,21 +8,25 @@ import (
 
 const SS2022Method = "2022-blake3-aes-128-gcm"
 
-// PrivateTransport belongs only to the entry-to-landing connection. Its key
-// must never be included in public subscriptions or diagnostic output. Empty
-// values describe the retained pre-migration SOCKS configuration, not fallback.
+// PrivateTransport belongs to the server entry-to-landing connection; never
+// serialize this policy into a public subscription or diagnostic output. An
+// explicitly shared listener can use an already-issued client key, without
+// exposing any retained server-only key. Empty values read retained SOCKS policy.
 type PrivateTransport struct {
+	// Port is explicit only for the shared public SS2022 listener. Zero reads
+	// retained server policies at their original port; it is not dial fallback.
+	Port          int    `json:"port,omitempty"`
 	Protocol      string `json:"protocol,omitempty"`
 	Key           string `json:"key,omitempty"`
 	PublicAddress string `json:"publicAddress,omitempty"`
 }
 
 func (t PrivateTransport) Validate() error {
-	if t.Protocol == "" && t.Key == "" && t.PublicAddress == "" {
+	if t.Protocol == "" && t.Key == "" && t.PublicAddress == "" && t.Port == 0 {
 		return nil
 	}
 	key, err := base64.StdEncoding.Strict().DecodeString(t.Key)
-	if t.Protocol != "ss2022" || err != nil || len(key) != 16 || base64.StdEncoding.EncodeToString(key) != t.Key || t.PublicAddress != "" && !PublicTransportIPv4(t.PublicAddress) {
+	if t.Port != 0 && (t.Port != 24000 || t.PublicAddress == "") || t.Protocol != "ss2022" || err != nil || len(key) != 16 || base64.StdEncoding.EncodeToString(key) != t.Key || t.PublicAddress != "" && !PublicTransportIPv4(t.PublicAddress) {
 		return errors.New("glivela: invalid private transport")
 	}
 	return nil
@@ -49,6 +53,13 @@ func PublicTransportIPv4(value string) bool {
 func PublicTransportIPv6(value string) bool {
 	ip, err := netip.ParseAddr(value)
 	return err == nil && ip.Is6() && ip.String() == value && CompositePublicIP(ip)
+}
+
+func (t PrivateTransport) ListenerPort() int {
+	if t.Port != 0 {
+		return t.Port
+	}
+	return DefaultLandingSOCKSPort
 }
 
 func (t PrivateTransport) Endpoint(privateAddress string) string {

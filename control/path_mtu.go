@@ -104,7 +104,7 @@ func (s *Store) pathMTUTargetLocked(mode, id, landingID string) (Node, string, e
 				if g.ID != id || !g.Enabled || g.EgressID != landingID && g.IPv4EgressID != landingID {
 					continue
 				}
-				t, ok := s.latencyTargetsLocked()[latencyKey(g.EntryID, landingID, 1080)]
+				t, ok := s.serverLatencyTargetLocked(g.EntryID, landingID)
 				entry := s.nodes[t.Certificate]
 				if ok && pathMTUAllowed(entry.Desired, t.Address) {
 					return entry, t.Address, nil

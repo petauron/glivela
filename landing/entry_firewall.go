@@ -23,6 +23,7 @@ type EntryFirewall struct {
 	PublicSSH *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	UID       uint32
 	Revision  uint64
+	PeerPorts map[string]int `json:"peerPorts,omitempty"`
 	Peers     []string
 	// Local, root-owned resolver configuration only; never supplied by peers.
 	// Exclude from the stable table identity so resolver changes are reconciled
@@ -54,6 +55,11 @@ func (p EntryFirewall) validate() error {
 			return errors.New("landing: invalid native entry peer")
 		}
 		seen[address] = true
+	}
+	for address, port := range p.PeerPorts {
+		if !seen[address] || !glivela.PublicTransportIPv4(address) || port != 24000 {
+			return errors.New("landing: invalid public entry peer port")
+		}
 	}
 	return nil
 }
@@ -124,10 +130,14 @@ func (p EntryFirewall) renderObjects(table, marker string, legacy bool) []map[st
 	peers := slices.Clone(p.Peers)
 	slices.Sort(peers)
 	for _, address := range peers {
-		rule("destinations", match(payload("ip", "daddr"), address), match(payload("tcp", "dport"), SOCKSPort), nftObject{"return": nil})
+		port := SOCKSPort
+		if selected := p.PeerPorts[address]; selected != 0 {
+			port = selected
+		}
+		rule("destinations", match(payload("ip", "daddr"), address), match(payload("tcp", "dport"), port), nftObject{"return": nil})
 		// The landing independently retains its source-specific UDP policy.
 		if glivela.PublicTransportIPv4(address) {
-			rule("destinations", match(payload("ip", "daddr"), address), match(payload("udp", "dport"), SOCKSPort), nftObject{"return": nil})
+			rule("destinations", match(payload("ip", "daddr"), address), match(payload("udp", "dport"), port), nftObject{"return": nil})
 		} else {
 			rule("destinations", match(payload("ip", "daddr"), address), match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"), nftObject{"return": nil})
 		}

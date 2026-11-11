@@ -12,8 +12,8 @@ const inventory: Inventory = {
  endpoints: [], nodes: [{id:"entry-a",name:"入口 A"},{id:"landing-a",name:"落地 A"},{id:"landing-alt",name:"IPv4 落地"},{id:"entry-b",name:"入口 B"},{id:"landing-b",name:"落地 B"}],
  runtimes: ["entry-a","landing-a","landing-alt","entry-b","landing-b"].map(id=>({id,role:"entry",revision:"1",runtimeReady:true,reportedAt:"",peers:[],publicSSHConfigured:false})),
  routes: [
-  {id:"route-a",accountId:"account-a",entryId:"entry-a",egressId:"landing-a",ipv4EgressId:"landing-alt",enabled:true,hideNative:false,state:"verified"},
-  {id:"route-b",accountId:"account-a",entryId:"entry-b",egressId:"landing-b",enabled:true,hideNative:false,state:"verified"},
+  {id:"route-a",accountId:"account-a",entryId:"entry-a",egressId:"landing-a",ipv4EgressId:"landing-alt",ipv4Port:1080,enabled:true,hideNative:false,state:"verified", port:1080},
+  {id:"route-b",accountId:"account-a",entryId:"entry-b",egressId:"landing-b",enabled:true,hideNative:false,state:"verified", port:1080},
  ],
 };
 const channels=inventory.nodes.map(node=>({id:node.id,connected:true}));

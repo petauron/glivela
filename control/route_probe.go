@@ -55,7 +55,7 @@ func (p RouteProbe) Validate() error {
 		return errors.New("control: route check identity required")
 	}
 	proxy, err := netip.ParseAddrPort(p.SOCKSAddress)
-	public := p.Transport.PublicAddress != "" && proxy.Addr().String() == p.Transport.PublicAddress && proxy.Port() == 1080
+	public := p.Transport.PublicAddress != "" && proxy.Addr().String() == p.Transport.PublicAddress && int(proxy.Port()) == p.Transport.ListenerPort()
 	if err != nil || proxy.Port() == 0 || !(public || p.Transport.PublicAddress == "" && (proxy.Addr().IsPrivate() || proxy.Addr().IsLoopback() || netip.MustParsePrefix("100.64.0.0/10").Contains(proxy.Addr()))) {
 		return errors.New("control: route check requires private SOCKS endpoint")
 	}

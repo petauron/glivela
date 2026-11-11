@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -123,7 +124,7 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 				for _, route := range desired.Entry.Peers {
 					if route.EgressID == peer.EgressID {
 						probe.Transport = route.Transport
-						probe.SOCKSAddress = net.JoinHostPort(route.Transport.Endpoint(route.Address), "1080")
+						probe.SOCKSAddress = net.JoinHostPort(route.Transport.Endpoint(route.Address), strconv.Itoa(route.Port))
 					}
 				}
 				checkRoute := CheckRoute

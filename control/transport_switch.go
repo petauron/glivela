@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"reflect"
+	"strconv"
 	"time"
 
 	glivela "github.com/petauron/glivela"
@@ -205,7 +206,7 @@ func (s *Store) SwitchPrivateTransport(request TransportSwitch) error {
 		check.Request.Revision = desired.Revision
 		check.Request.ConfigSHA256 = desired.ConfigSHA256
 		check.Request.Transport = request.Transport
-		check.Request.SOCKSAddress = net.JoinHostPort(request.Transport.Endpoint(plan.Address), "1080")
+		check.Request.SOCKSAddress = net.JoinHostPort(request.Transport.Endpoint(plan.Address), strconv.Itoa(request.Transport.ListenerPort()))
 		check.IssuedAt = now
 		check.Result = nil
 		check.ReceivedAt = time.Time{}

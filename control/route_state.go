@@ -12,7 +12,6 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
-	"github.com/petauron/glivela/landing"
 )
 
 type RouteCheck struct {
@@ -71,7 +70,7 @@ func routeMatchesLanding(p RouteProbe, node Node) bool {
 	}
 	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)
 	address, addressErr := netip.ParseAddr(node.Desired.Landing.Transport.Endpoint(node.Desired.Landing.Address))
-	return err == nil && addressErr == nil && endpoint.Addr() == address && endpoint.Port() == landing.SOCKSPort &&
+	return err == nil && addressErr == nil && endpoint.Addr() == address && int(endpoint.Port()) == node.Desired.Landing.Transport.ListenerPort() &&
 		p.LandingID == node.ID && p.Revision == node.Desired.Revision && p.ConfigSHA256 == node.Desired.ConfigSHA256 && p.Transport == node.Desired.Landing.Transport
 }
 

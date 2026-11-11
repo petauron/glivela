@@ -19,6 +19,7 @@ import (
 type TrafficGate struct {
 	mu            sync.Mutex
 	peer          PeerIdentity
+	port          int
 	publicAddress string
 	bridge        string
 	gid           uint32
@@ -26,6 +27,13 @@ type TrafficGate struct {
 	table         string
 	marker        string
 	run           func(context.Context, []byte, ...string) ([]byte, error)
+}
+
+func (g *TrafficGate) listenerPort() int {
+	if g.port != 0 {
+		return g.port
+	}
+	return SOCKSPort
 }
 
 func (g *TrafficGate) endpoint() string {
@@ -217,9 +225,20 @@ func (g *TrafficGate) RemoveClosedConflicts(ctx context.Context) error {
 		if !g.validOwnership(name, marker) {
 			return errors.New("landing: conflicting gate ownership is unavailable")
 		}
-		candidate := &TrafficGate{peer: g.peer, publicAddress: g.publicAddress, bridge: g.bridge, gid: g.gid, revision: g.revision, table: name, marker: marker, run: g.run}
-		if found, err := candidate.validate(document); err != nil || !found || len(candidate.elements(document)) != 0 {
-			return errors.Join(err, errors.New("landing: conflicting gate is not a closed managed policy"))
+		candidate := &TrafficGate{peer: g.peer, publicAddress: g.publicAddress, port: g.listenerPort(), bridge: g.bridge, gid: g.gid, revision: g.revision, table: name, marker: marker, run: g.run}
+		found, validationErr := candidate.validate(document)
+		if validationErr != nil && g.gid != 0 && g.publicAddress != "" {
+			// Read only the other supported historical port shape during exact
+			// owned cleanup. This never chooses a runtime connection fallback.
+			if candidate.port == SOCKSPort {
+				candidate.port = 24000
+			} else {
+				candidate.port = SOCKSPort
+			}
+			found, validationErr = candidate.validate(document)
+		}
+		if validationErr != nil || !found || len(candidate.elements(document)) != 0 {
+			return errors.Join(validationErr, errors.New("landing: conflicting gate is not a closed managed policy"))
 		}
 		conflicts = append(conflicts, candidate)
 	}

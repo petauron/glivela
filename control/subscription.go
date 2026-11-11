@@ -14,7 +14,6 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
-	"github.com/petauron/glivela/landing"
 )
 
 var errSubscriptionMissing = errors.New("control: subscription unavailable")
@@ -326,7 +325,7 @@ func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now tim
 		return slices.ContainsFunc(entry.Desired.EntryNetwork.Peers, func(peer EntryPeer) bool {
 			return peer.EgressID == landingID && peer.Identity.Address == node.Desired.Landing.Address
 		}) && slices.ContainsFunc(entry.Desired.Entry.Peers, func(peer glivela.RoutePeer) bool {
-			return peer.EgressID == landingID && peer.Address == node.Desired.Landing.Address && peer.Port == landing.SOCKSPort && peer.Transport == node.Desired.Landing.Transport
+			return peer.EgressID == landingID && peer.Address == node.Desired.Landing.Address && peer.Port == node.Desired.Landing.Transport.ListenerPort() && peer.Transport == node.Desired.Landing.Transport
 		})
 	}
 	return false

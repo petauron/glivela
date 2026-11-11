@@ -28,6 +28,7 @@ type ClientListenerPolicy struct {
 }
 
 type ServerFirewall struct {
+	Port            int                      `json:"port,omitempty"`
 	IPv6Only        bool                     `json:"ipv6Only,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	ClientListeners []ClientListenerPolicy   `json:"clientListeners,omitempty"`
@@ -39,6 +40,13 @@ type ServerFirewall struct {
 	TCPOnlySources  []string                 `json:"tcpOnlySources,omitempty"`
 	Interface       string                   `json:"interface"`
 	UID             uint32                   `json:"uid"`
+}
+
+func (policy ServerFirewall) listenerPort() int {
+	if policy.Port != 0 {
+		return policy.Port
+	}
+	return SOCKSPort
 }
 
 func (policy ServerFirewall) validate() error {
@@ -67,6 +75,9 @@ func (policy ServerFirewall) validate() error {
 }
 
 func (policy ServerFirewall) validateIdentity() error {
+	if policy.Port != 0 && (policy.Port != 24000 || !policy.Public || policy.IPv6Only || slices.ContainsFunc(policy.Sources, func(source string) bool { return !slices.Contains(policy.TCPOnlySources, source) })) {
+		return errors.New("landing: invalid public listener port")
+	}
 	validAddress := tailnetIPv4
 	if policy.Public {
 		validAddress = glivela.PublicTransportIPv4
@@ -103,6 +114,9 @@ func (policy ServerFirewall) validateIdentity() error {
 		previous, duplicate := ports[c.Port]
 		if !policy.Public || c.Shared && c.Port != 24000 || c.Port < 24000 || c.Port > 24999 || duplicate && (!previous.Shared || !c.Shared || previous.EgressIP != c.EgressIP) || !validTransport {
 			return errors.New("landing: invalid client listener firewall")
+		}
+		if policy.Port != 0 && c.Address == "" && c.Port == policy.Port && (!c.Shared || c.Transport != glivela.IPv4ClientSS2022 || c.EgressIP != "" && c.EgressIP != policy.EgressIP || len(policy.TCPOnlySources) != len(policy.Sources)) {
+			return errors.New("landing: shared server firewall policy differs")
 		}
 		ports[c.Port] = c
 	}
@@ -148,7 +162,7 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 		if policy.IPv6Only {
 			continue
 		}
-		var port any = SOCKSPort
+		var port any = policy.listenerPort()
 		if protocol == "udp" {
 			if legacy {
 				port = nftObject{"range": []int{1081, 1208}}
@@ -156,8 +170,14 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 		}
 		rule("input", match(payload("ip", "daddr"), policy.Address), match(payload(protocol, "dport"), port), nftObject{"jump": nftObject{"target": "sources"}})
 	}
+	// A shared primary socket is already governed by all exact server sources.
+	// Do not append a client-only terminal drop that would revoke a migrated
+	// source when its old client-chain record is disabled.
+	listeners := slices.DeleteFunc(slices.Clone(policy.ClientListeners), func(c ClientListenerPolicy) bool {
+		return policy.Port != 0 && c.Address == "" && c.Port == policy.Port
+	})
 	shared := map[string]bool{}
-	for i, c := range policy.ClientListeners {
+	for i, c := range listeners {
 		family, address := "ip", policy.Address
 		if c.Transport == "ipv6-ss2022" {
 			family, address = "ip6", c.Address
@@ -171,7 +191,7 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 			shared[address] = true
 		}
 		// Shared accepts are all emitted before the per-address final deny.
-		if i == len(policy.ClientListeners)-1 {
+		if i == len(listeners)-1 {
 			addresses := make([]string, 0, len(shared))
 			for address := range shared {
 				addresses = append(addresses, address)
@@ -215,9 +235,9 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 			if protocol == "udp" && legacy {
 				expr = append(expr, match(payload("udp", "sport"), nftObject{"range": []int{1081, 1208}}))
 			} else if protocol == "tcp" {
-				expr = append(expr, match(payload("tcp", "sport"), SOCKSPort))
+				expr = append(expr, match(payload("tcp", "sport"), policy.listenerPort()))
 			} else if policy.Public {
-				expr = append(expr, match(payload("udp", "sport"), SOCKSPort))
+				expr = append(expr, match(payload("udp", "sport"), policy.listenerPort()))
 			} else {
 				expr = append(expr, match(meta("l4proto"), "udp"))
 			}

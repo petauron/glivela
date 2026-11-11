@@ -98,6 +98,12 @@ func (d *NativeEntryDriver) policy(desired Desired) (landing.EntryFirewall, erro
 		for _, route := range desired.Entry.Peers {
 			if route.EgressID == peer.EgressID {
 				policy.Peers = append(policy.Peers, route.Transport.Endpoint(route.Address))
+				if route.Transport.Port != 0 {
+					if policy.PeerPorts == nil {
+						policy.PeerPorts = map[string]int{}
+					}
+					policy.PeerPorts[route.Transport.Endpoint(route.Address)] = route.Port
+				}
 			}
 		}
 	}
@@ -112,13 +118,13 @@ func (d *NativeEntryDriver) gates(desired Desired) ([]*landing.TrafficGate, erro
 	}
 	var gates []*landing.TrafficGate
 	for _, peer := range desired.EntryNetwork.Peers {
-		publicAddress := ""
+		transport := glivela.PrivateTransport{}
 		for _, route := range desired.Entry.Peers {
 			if route.EgressID == peer.EgressID {
-				publicAddress = route.Transport.PublicAddress
+				transport = route.Transport
 			}
 		}
-		gate, err := landing.NewHostGate(peer.Identity, d.WorkerGID, desired.Revision, publicAddress)
+		gate, err := landing.NewHostGate(peer.Identity, d.WorkerGID, desired.Revision, transport)
 		if err != nil {
 			return nil, err
 		}
