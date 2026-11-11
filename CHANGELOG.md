@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.123](https://github.com/petauron/glivela/compare/v0.1.0-alpha.122...v0.1.0-alpha.123) (2026-11-11)
+
+
+### Features
+
+* **routes:** reuse shared public SS2022 listener for server forwarding ([#95](https://github.com/petauron/glivela/issues/95)) ([3547680](https://github.com/petauron/glivela/commit/3547680e0755848e45144eb64aaf92b14778db55))
+
 ## [0.1.0-alpha.122](https://github.com/petauron/glivela/compare/v0.1.0-alpha.121...v0.1.0-alpha.122) (2026-11-11)
 
 
