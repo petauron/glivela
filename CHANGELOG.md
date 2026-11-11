@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.125](https://github.com/petauron/glivela/compare/v0.1.0-alpha.124...v0.1.0-alpha.125) (2026-11-11)
+
+
+### Bug Fixes
+
+* **control:** authenticate managed public forwarding through node mTLS ([5cb58cb](https://github.com/petauron/glivela/commit/5cb58cb054b0ca9c81fa99855063d6cab6ea470a))
+
 ## [0.1.0-alpha.124](https://github.com/petauron/glivela/compare/v0.1.0-alpha.123...v0.1.0-alpha.124) (2026-11-11)
 
 
