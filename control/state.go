@@ -143,13 +143,17 @@ func OpenStore(path string) (*Store, error) {
 			// Discard the complete inventory rather than reuse partial results;
 			// malformed, future and mismatched current attempts still fail closed.
 			outdated := node.Desired.Landing != nil && check.Request.LandingID == node.ID && check.Request.Revision < node.Desired.Revision && check.Request.ConfigSHA256 != node.Desired.ConfigSHA256
-			if entry != check.Request.EntryID || !outdated && !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
+			// IPv6-only plans retain their former source grants, but cannot
+			// execute server probes. Discard only exact, unfinished attempts;
+			// malformed/current mismatches and completed results still fail closed.
+			inactivePending := node.Desired.Landing != nil && !node.Desired.Landing.HasServerListener() && check.Result == nil && routeMatchesLanding(check.Request, node)
+			if entry != check.Request.EntryID || !outdated && !inactivePending && !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
 				return nil, errors.New("control: invalid stored route check")
 			}
 			if len(node.Checks) > 64 || !outdated && (check.Request.Revision != node.Desired.Revision || check.Request.ConfigSHA256 != node.Desired.ConfigSHA256) || (check.Result == nil) != check.ReceivedAt.IsZero() {
 				return nil, errors.New("control: inconsistent stored route check")
 			}
-			staleChecks = staleChecks || outdated
+			staleChecks = staleChecks || outdated || inactivePending
 		}
 		// Enrollment can durably retain only some authorized source bindings.
 		// Preserve that configuration, but never reuse partial health proof.

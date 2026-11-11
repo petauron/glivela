@@ -103,3 +103,58 @@ func TestPartialEntryInventorySurvivesRestartWithoutAcceptance(t *testing.T) {
 		t.Fatal("restart reused partial observations as readiness proof")
 	}
 }
+
+func TestInactivePendingRouteChecksDoNotBlockRestart(t *testing.T) {
+	for _, change := range []string{"pending", "wrong-endpoint", "future-revision", "completed"} {
+		t.Run(change, func(t *testing.T) {
+			s := store(t)
+			plan := *artifact(1).Landing
+			plan.IPv6OnlyAddress = "2606:4700:4700::1111"
+			plan.EgressIP = "2606:4700::100"
+			for i := range plan.Sources {
+				plan.Sources[i].TCPOnly = true
+			}
+			desired, err := NewDesired(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cert, entryCert := strings.Repeat("a", 64), strings.Repeat("b", 64)
+			probe := RouteProbe{AttemptID: "attempt-a", SnapshotID: "snapshot-a", EntryID: "entry-a", LandingID: "landing-a", Revision: desired.Revision, ConfigSHA256: desired.ConfigSHA256, SOCKSAddress: "100.64.0.2:1080", Target: "https://check.example.invalid/exit", ExpectedExit: "2606:4700::100"}
+			check := RouteCheck{CertificateID: entryCert, Request: probe, IssuedAt: time.Now().UTC()}
+			switch change {
+			case "wrong-endpoint":
+				check.Request.SOCKSAddress = "100.64.0.99:1080"
+			case "future-revision":
+				check.Request.Revision++
+			case "completed":
+				check.Result = &RouteProbeResult{AttemptID: probe.AttemptID, SnapshotID: probe.SnapshotID, EntryID: probe.EntryID, LandingID: probe.LandingID, Revision: probe.Revision, ConfigSHA256: probe.ConfigSHA256, CheckedAt: time.Now().UTC(), Failure: "connect-or-tls"}
+				check.ReceivedAt = check.Result.CheckedAt
+			}
+			node := Node{ID: "landing-a", CertificateID: cert, Desired: desired, RouteEntries: map[string]RouteEntry{"entry-a": {CertificateID: entryCert, Address: "100.64.0.3"}}, Checks: map[string]RouteCheck{"entry-a": check}}
+			raw, err := json.Marshal([]Node{node})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(s.path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := OpenStore(s.path)
+			if change != "pending" {
+				if err == nil {
+					t.Fatal("invalid or completed inactive probe was ignored")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal("unused pending probe blocked controller restart", err)
+			}
+			retained := loaded.nodes[cert]
+			if len(retained.Checks) != 0 || retained.Desired.ConfigSHA256 != desired.ConfigSHA256 || retained.CertificateID != cert || len(retained.RouteEntries) != 1 {
+				t.Fatal("restart changed authority or retained inactive readiness")
+			}
+			if routeTargetsLanding(probe, retained) {
+				t.Fatal("inactive listener became eligible for live route checks")
+			}
+		})
+	}
+}
