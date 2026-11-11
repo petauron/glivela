@@ -35,14 +35,18 @@ jobs:
         run: npm ci --prefix ui
       - name: Install existing isolated runtime test tools
         run: |
-          if getent ahostsv4 archive.ubuntu.com >/dev/null; then
-            echo "Ubuntu archive DNS available before runtime tests"
-          else
-            echo "Ubuntu archive DNS unavailable before runtime tests"
+          # Respect the hosted runner's existing HTTPS egress configuration.
+          # Never print proxy addresses or resolver configuration into CI logs.
+          curl --fail --silent --show-error --max-time 30 --output /dev/null https://archive.ubuntu.com/ubuntu/dists/noble/InRelease 2>/dev/null || { echo "Official Ubuntu HTTPS unavailable"; exit 1; }
+          sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g; s|mirror+file:/etc/apt/apt-mirrors-security.txt|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          if ! sudo env "http_proxy=${http_proxy:-${HTTP_PROXY:-}}" "https_proxy=${https_proxy:-${HTTPS_PROXY:-}}" "no_proxy=${no_proxy:-${NO_PROXY:-}}" apt-get update -qq --error-on=any >"$RUNNER_TEMP/runtime-tools-update.log" 2>&1; then
+            echo "Signed Ubuntu package index refresh failed"
             exit 1
           fi
-          sudo apt-get update -qq --error-on=any
-          sudo apt-get install -y --no-install-recommends dnsmasq-base iproute2 nftables
+          if ! sudo env "http_proxy=${http_proxy:-${HTTP_PROXY:-}}" "https_proxy=${https_proxy:-${HTTPS_PROXY:-}}" "no_proxy=${no_proxy:-${NO_PROXY:-}}" apt-get install -y --no-install-recommends dnsmasq-base iproute2 nftables >"$RUNNER_TEMP/runtime-tools-install.log" 2>&1; then
+            echo "Existing Ubuntu runtime test tools could not be installed"
+            exit 1
+          fi
       - name: Build twice and compare immutable distributions
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,7 +92,6 @@ jobs:
           wait "$server"
       - name: Exercise actual landing DNS policy in isolated namespace
         run: |
-          getent ahostsv4 archive.ubuntu.com >/dev/null
           go test -c -o "$RUNNER_TEMP/glivela-dns.test" ./landing
           sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
           sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
