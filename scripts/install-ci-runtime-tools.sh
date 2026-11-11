@@ -3,7 +3,8 @@
 # for Ubuntu archives while GitHub downloads remain available. Keep the resolver
 # override inside APT's private mount namespace, never in the runner or tests.
 set -eu
-[ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_OS:-}" = Linux ]
+[ "${GITHUB_ACTIONS:-}" = true ]
+[ "${RUNNER_OS:-}" = Linux ]
 [ "$#" -gt 0 ]
 for package in "$@"; do
   case "$package" in dnsmasq-base|iproute2|nftables) ;; *) exit 2 ;; esac
