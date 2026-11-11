@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.124](https://github.com/petauron/glivela/compare/v0.1.0-alpha.123...v0.1.0-alpha.124) (2026-11-11)
+
+
+### Bug Fixes
+
+* **control:** preserve administrator network settings on reenrollment ([#97](https://github.com/petauron/glivela/issues/97)) ([9878712](https://github.com/petauron/glivela/commit/9878712f56a5f7a3f12b56046ca6e670ab1096a1))
+
 ## [0.1.0-alpha.123](https://github.com/petauron/glivela/compare/v0.1.0-alpha.122...v0.1.0-alpha.123) (2026-11-11)
 
 
