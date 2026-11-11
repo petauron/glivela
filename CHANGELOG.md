@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.126](https://github.com/petauron/glivela/compare/v0.1.0-alpha.125...v0.1.0-alpha.126) (2026-11-11)
+
+
+### Bug Fixes
+
+* **control:** skip unchanged traffic checkpoint writes ([ff5bf3a](https://github.com/petauron/glivela/commit/ff5bf3a4b758469fa6341beb525738cf9b874098))
+
 ## [0.1.0-alpha.125](https://github.com/petauron/glivela/compare/v0.1.0-alpha.124...v0.1.0-alpha.125) (2026-11-11)
 
 
