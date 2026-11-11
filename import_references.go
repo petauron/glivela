@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -158,13 +159,19 @@ func (m ImportMaterial) validateReferences() error {
 	}
 	for _, a := range m.Plan.Accounts {
 		for _, g := range a.Grants {
-			if _, ok := r.Nodes[g.EgressID]; !ok {
-				return invalid
-			}
-			if g.IPv4EgressID != "" {
-				if _, ok := r.Nodes[g.IPv4EgressID]; !ok {
-					return invalid
+			knownExit := func(id string) bool {
+				if _, imported := r.Nodes[id]; imported {
+					return true
 				}
+				// A managed client landing can be retained as the same account's
+				// server-forwarding exit. Do not fabricate an imported host alias.
+				shared, managed := m.ClientLandings[id]
+				return managed && shared.AccountID == a.Account.ID && slices.ContainsFunc(m.ClientChains, func(c ClientChain) bool {
+					return c.AccountID == a.Account.ID && c.EntryID == g.EntryID && c.EgressID == id
+				})
+			}
+			if !knownExit(g.EgressID) || g.IPv4EgressID != "" && !knownExit(g.IPv4EgressID) {
+				return invalid
 			}
 		}
 	}

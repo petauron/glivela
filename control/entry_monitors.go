@@ -17,8 +17,9 @@ type entryMonitorGroup struct {
 	statuses map[string]landing.MonitorStatus
 }
 type entryMonitors struct {
-	mu    sync.Mutex
-	group *entryMonitorGroup
+	verifyPublicPeer PublicPeerVerifier
+	mu               sync.Mutex
+	group            *entryMonitorGroup
 }
 
 func (m *entryMonitors) close(ctx context.Context) error {
@@ -109,6 +110,12 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 			checker = links()
 		}
 		monitor := landing.Monitor{Gate: gates[index], Links: checker, TCPOnly: true, ExpectedExit: peer.ExpectedExit,
+			CheckPublicIdentity: func(check context.Context, identity landing.PeerIdentity) landing.LinkResult {
+				if m.verifyPublicPeer == nil || identity != peer.Identity {
+					return landing.LinkResult{State: "unknown", Reason: "peer_identity_unavailable"}
+				}
+				return m.verifyPublicPeer(check, desired, peer)
+			},
 			CheckBusiness: func(check context.Context, identity landing.PeerIdentity, revision uint64) (landing.BusinessResult, error) {
 				result := landing.BusinessResult{Peer: identity, Revision: revision, StartedAt: time.Now()}
 				before, err := checker.SelfIdentity(check, desired.EntryNetwork.Source.Address)

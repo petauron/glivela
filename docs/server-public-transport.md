@@ -47,3 +47,21 @@ publication does not erase an already downloaded configuration. Reusing that
 same listener/key deliberately keeps the old path available during acceptance.
 Implementation, local verification, CI, release/catalog publication, deployment
 and real-client acceptance must be reported separately.
+
+
+Public startup identity is verified through the existing node mTLS control
+channel, without opening overlay TCP/UDP access or requiring the two nodes to
+appear in each other's network map. The landing reports its own local
+ID/key/address read-back with its current runtime receipt. The controller
+requires the exact enrolled entry certificate, mutually assigned source,
+public TCP-only transport and target, fresh ready landing receipt, and the
+originally recorded peer identity. Both identity checks around the real public
+SS2022/exit probe must succeed. Missing, stale, changed or foreign evidence
+leaves the owned peer fence closed; there is no direct or overlay fallback.
+Private transports retain their direct-link checks.
+
+A retained client-managed landing can back the same account/entry pair's new
+server route without inventing an imported host reference. The existing shared
+credential and retained chain association remain authoritative, including
+after that old client chain is disabled. Other accounts and unregistered exits
+are rejected. Normal node enrollment and exact-source enforcement still apply.

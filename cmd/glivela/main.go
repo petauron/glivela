@@ -363,6 +363,11 @@ func runConfiguration(ctx context.Context, cfg configuration) error {
 			return err
 		}
 		defer client.Close()
+		if entry, ok := driver.(interface {
+			SetPublicPeerVerifier(control.PublicPeerVerifier)
+		}); ok {
+			entry.SetPublicPeerVerifier(client.VerifyPublicPeer)
+		}
 		watchCtx, stopWatch := context.WithCancel(ctx)
 		defer stopWatch()
 		go client.RunNodeUpdates(watchCtx)

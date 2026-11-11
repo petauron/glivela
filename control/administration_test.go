@@ -129,7 +129,7 @@ func TestManagementRouteVerificationOverMutualTLS(t *testing.T) {
 		}
 	}
 	read(false)
-	post(entryHTTP, "/v1/landing-acceptance", landingAcceptanceRequest{p.SnapshotID, p.Revision, p.ConfigSHA256}, http.StatusNotFound)
+	post(entryHTTP, "/v1/landing-acceptance", landingAcceptanceRequest{SnapshotID: p.SnapshotID, Revision: p.Revision, ConfigSHA256: p.ConfigSHA256}, http.StatusNotFound)
 	entry, err := NewClient(listener.URL, entryIdentity, roots)
 	if err != nil {
 		t.Fatal(err)
