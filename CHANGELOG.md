@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.122](https://github.com/petauron/glivela/compare/v0.1.0-alpha.121...v0.1.0-alpha.122) (2026-11-11)
+
+
+### Bug Fixes
+
+* invalidate inactive pending route checks on restart ([#92](https://github.com/petauron/glivela/issues/92)) ([13bc632](https://github.com/petauron/glivela/commit/13bc632c518c68119ddcc5ec9eb9746815c992c4))
+
 ## [0.1.0-alpha.121](https://github.com/petauron/glivela/compare/v0.1.0-alpha.120...v0.1.0-alpha.121) (2026-11-10)
 
 
