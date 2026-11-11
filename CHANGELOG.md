@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.1.0-alpha.127](https://github.com/petauron/glivela/compare/v0.1.0-alpha.126...v0.1.0-alpha.127) (2026-11-11)
+
+
+### Features
+
+* bind client exits within one landing instance ([#90](https://github.com/petauron/glivela/issues/90)) ([7cbd8c1](https://github.com/petauron/glivela/commit/7cbd8c14edc0934bf27a3218c5a8b0224218774a))
+* **control:** configure path MTU per destination ([#30](https://github.com/petauron/glivela/issues/30)) ([e4997c2](https://github.com/petauron/glivela/commit/e4997c26567994dfd3211762b06b8ea9cb515d19))
+* isolate client-only landings on shared hosts ([#88](https://github.com/petauron/glivela/issues/88)) ([99fb51a](https://github.com/petauron/glivela/commit/99fb51ad4e4b8de1d0f29a189b3b9dfdbb5f572f))
+* **panel:** restore node egress controls ([#57](https://github.com/petauron/glivela/issues/57)) ([821cba5](https://github.com/petauron/glivela/commit/821cba5efb3f204d03d6455bdb3bebc59fe12869))
+* **routes:** reuse shared public SS2022 listener for server forwarding ([#95](https://github.com/petauron/glivela/issues/95)) ([3547680](https://github.com/petauron/glivela/commit/3547680e0755848e45144eb64aaf92b14778db55))
+* **runtime:** support OpenRC native nodes ([#55](https://github.com/petauron/glivela/issues/55)) ([50447b6](https://github.com/petauron/glivela/commit/50447b6b4e30d2165f3c145caa1e8e09a2f23fd5))
+* **subscription:** add manual proxy ordering ([#26](https://github.com/petauron/glivela/issues/26)) ([b313733](https://github.com/petauron/glivela/commit/b31373380c6bf5c1644adad7f6255476809017b4))
+* support IPv4 entry to IPv6 relay chains ([489da09](https://github.com/petauron/glivela/commit/489da0966ea3a47d42a4cf2b9ce5338f34e092ef)), closes [#80](https://github.com/petauron/glivela/issues/80)
+* support three-hop client chains ([0c0f55c](https://github.com/petauron/glivela/commit/0c0f55c23204c17101df975295b241d035ab52cb)), closes [#80](https://github.com/petauron/glivela/issues/80)
+
+
+### Bug Fixes
+
+* **control:** allow activation retry for an unused fresh endpoint ([#48](https://github.com/petauron/glivela/issues/48)) ([9570096](https://github.com/petauron/glivela/commit/95700962a7cc8f27513efbda538122848b1b81c3))
+* **control:** authenticate managed public forwarding through node mTLS ([5cb58cb](https://github.com/petauron/glivela/commit/5cb58cb054b0ca9c81fa99855063d6cab6ea470a))
+* **control:** correct IPv6 client-chain latency and route labels ([#52](https://github.com/petauron/glivela/issues/52)) ([7949578](https://github.com/petauron/glivela/commit/79495781948d41046513f07cdbfabe04d7a7ad66))
+* **control:** expire obsolete landing route checks ([#28](https://github.com/petauron/glivela/issues/28)) ([03de2d9](https://github.com/petauron/glivela/commit/03de2d93611d1bb8436dc350cea64870d1718767))
+* **control:** preserve administrator network settings on reenrollment ([#97](https://github.com/petauron/glivela/issues/97)) ([9878712](https://github.com/petauron/glivela/commit/9878712f56a5f7a3f12b56046ca6e670ab1096a1))
+* **control:** preserve owned identity during legacy entry handover ([fa42792](https://github.com/petauron/glivela/commit/fa42792d0270127e32beb80dcbd99b8b9cb80125))
+* **control:** recognize systemd-resolved ownership during entry staging ([f72fe6c](https://github.com/petauron/glivela/commit/f72fe6cdaa694dcd8d6064df9bcc882244124b0c))
+* **control:** recover invalid initial local REALITY targets ([#59](https://github.com/petauron/glivela/issues/59)) ([7dcd307](https://github.com/petauron/glivela/commit/7dcd3079756e409909cc667460410c257201b81d))
+* **control:** reopen partial entry inventories after restart ([#46](https://github.com/petauron/glivela/issues/46)) ([ef0f40a](https://github.com/petauron/glivela/commit/ef0f40a4a575f7cc9d653b249fd9d98240c7d919))
+* **control:** skip unchanged traffic checkpoint writes ([ff5bf3a](https://github.com/petauron/glivela/commit/ff5bf3a4b758469fa6341beb525738cf9b874098))
+* **control:** support explicit userspace private-network dialing ([#78](https://github.com/petauron/glivela/issues/78)) ([333c6b8](https://github.com/petauron/glivela/commit/333c6b830f8630804cd6938163fa26d071e62add))
+* **egress:** handle unreachable IP families in automatic TCP dialing ([#54](https://github.com/petauron/glivela/issues/54)) ([e1b3224](https://github.com/petauron/glivela/commit/e1b32241acbedfb05609a49745fdd1fd9171123e))
+* invalidate inactive pending route checks on restart ([#92](https://github.com/petauron/glivela/issues/92)) ([13bc632](https://github.com/petauron/glivela/commit/13bc632c518c68119ddcc5ec9eb9746815c992c4))
+* preserve operator configuration across release handoff ([#23](https://github.com/petauron/glivela/issues/23)) ([202ca84](https://github.com/petauron/glivela/commit/202ca841334688f030c5b4c62173ff8bae9c89a5))
+* recover landing firewall after public IP changes ([#34](https://github.com/petauron/glivela/issues/34)) ([461cfb6](https://github.com/petauron/glivela/commit/461cfb674d166de8211cede36b415a33f12e83d3))
+* resolve IPv6 landing DNS through its fixed IPv6 exit ([d474679](https://github.com/petauron/glivela/commit/d47467951a08edd744d88f997113ab3cda25640b))
+* resolve pinned runtime assets through the official API ([#71](https://github.com/petauron/glivela/issues/71)) ([87f0a9d](https://github.com/petauron/glivela/commit/87f0a9d7807c917d6f7e3f8d0a1c0af7de83bede))
+* select IPv6 DNS for IPv6-only entries ([#64](https://github.com/petauron/glivela/issues/64)) ([555425f](https://github.com/petauron/glivela/commit/555425fa8f9d6807253b078fcaefb2c31ca47bd5))
+* show bound host names when creating routes ([8cd837b](https://github.com/petauron/glivela/commit/8cd837bf2dbdfc582173896183da527ccc229f9d))
+* show unconfirmed three-hop runtime state ([aa4a7d7](https://github.com/petauron/glivela/commit/aa4a7d74eef055973739fc91d0ce874ea7b70576)), closes [#80](https://github.com/petauron/glivela/issues/80)
+* **subscription:** align labels and default order ([e7714d0](https://github.com/petauron/glivela/commit/e7714d0d321a091f91f564546fa93abf66b6ab97))
+* **subscription:** configure landing region labels without changing routes ([#76](https://github.com/petauron/glivela/issues/76)) ([8e81af4](https://github.com/petauron/glivela/commit/8e81af4195a4531e9cdc6391a92f074df96faf59))
+* support explicit IPv6-only client landings ([#69](https://github.com/petauron/glivela/issues/69)) ([b84073a](https://github.com/petauron/glivela/commit/b84073a80c9e25d28064763935a3cabed9c0328b))
+* sync managed host display names ([b67e286](https://github.com/petauron/glivela/commit/b67e28603aa38a80f80f660dbbc99de2d0be1d62)), closes [#36](https://github.com/petauron/glivela/issues/36)
+* 支持独立落地节点关联主机名称 ([00b39a1](https://github.com/petauron/glivela/commit/00b39a182a9a388efaf3546580fa4b75c8d2a9b4))
+
 ## [0.1.0-alpha.126](https://github.com/petauron/glivela/compare/v0.1.0-alpha.125...v0.1.0-alpha.126) (2026-11-11)
 
 
