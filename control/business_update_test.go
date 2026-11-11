@@ -400,3 +400,35 @@ func TestImportedRealityPreservesNativeDNSTargetAndLegacyPin(t *testing.T) {
 		t.Fatal("legacy fixed target changed")
 	}
 }
+
+func TestOwnedRouteToClientManagedLanding(t *testing.T) {
+	source, direct, _, _ := subscriptionFixture(t, false)
+	routed := withRoutedEntry(t, direct)
+	plan := *direct.Entry
+	plan.Peers = routed.Entry.Peers
+	desired, err := NewEntryDesired(plan, *routed.EntryNetwork)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := source.business.material
+	m.Ownership = nil
+	m.ClientLandings = map[string]glivela.ClientLanding{"landing-example": {AccountID: "account-example", Key: "MDEyMzQ1Njc4OWFiY2RlZg=="}}
+	m.ClientChains = []glivela.ClientChain{{ID: "existing-client-chain", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Name: "Example chain", Port: 24001, Key: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", Transport: glivela.IPv4ClientSS2022, Enabled: true}}
+	s, _, _, _ := ownedSubscriptionFixture(t, m, desired, true)
+	change := RouteChange{ID: "new-server-route", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Enabled: true}
+	for _, account := range m.Plan.Accounts {
+		if account.Account.ID == change.AccountID {
+			change.ExpectedRevision = account.Account.DesiredRevision
+		}
+	}
+	if _, err := s.ChangeRoute(context.Background(), change); err != nil {
+		t.Fatal("enrolled client-managed landing refused server grant:", err)
+	}
+	reloaded, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.LoadBusiness(filepath.Join(filepath.Dir(s.path), "business.key")); err != nil {
+		t.Fatal("new grant did not survive controller reload:", err)
+	}
+}

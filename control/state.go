@@ -355,6 +355,9 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 	node.Receipt = nil
 	if receipt != nil {
 		copyReceipt := receipt.clone()
+		if identity := copyReceipt.ManagementIdentity; identity != nil && (node.Desired.Landing == nil || identity.Validate() != nil || identity.Address != node.Desired.Landing.Address) {
+			copyReceipt.ManagementIdentity = nil
+		}
 		if glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, copyReceipt.AppliedReceipt) == nil {
 			// Bad/incomplete peer data supersedes the previous proof but must
 			// not stop an enrolled node receiving its current desired policy.

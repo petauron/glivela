@@ -13,6 +13,7 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 // ErrStartupAcceptance means verified retained state could not pass startup
@@ -587,6 +588,14 @@ func (r *NativeRuntime) Inspect(ctx context.Context) (Observation, error) {
 	observation := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: a.Revision, ConfigSHA256: a.ConfigSHA256, RuntimeReady: r.Driver.Healthy(ctx, a) == nil}, EntryHealth: r.Driver.EntryHealth(a)}
 	if observation.RuntimeReady {
 		r.startupRetry = nil
+		if a.Landing != nil {
+			checker := landing.NewLinkChecker()
+			identity, identityErr := checker.SelfIdentity(ctx, a.Landing.Address)
+			checker.Close()
+			if identityErr == nil {
+				observation.ManagementIdentity = &identity
+			}
+		}
 	}
 	if entry, ok := r.Driver.(interface {
 		traffic(context.Context, Desired) (*EntryTraffic, error)

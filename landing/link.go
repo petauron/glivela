@@ -37,6 +37,8 @@ type PeerIdentity struct {
 
 // Validate checks the recorded identity shape, not its authenticity. Only a
 // fresh local tailscaled read-back can prove the ID/key/address association.
+// A public peer may instead present that read-back through its own enrolled
+// mTLS receipt and the authenticated controller; reachability alone is no proof.
 func (p PeerIdentity) Validate() error {
 	part := func(value string, limit int) bool {
 		return value != "" && len(value) <= limit && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\r\n\x00")

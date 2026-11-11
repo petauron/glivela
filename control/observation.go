@@ -14,6 +14,7 @@ import (
 // Observation is Glivela's direct node report. The base runtime receipt alone
 // never proves that one of an entry's landing gates is currently usable.
 type Observation struct {
+	ManagementIdentity *landing.PeerIdentity `json:"managementIdentity,omitempty"`
 	glivela.AppliedReceipt
 	EntryHealth *EntryHealthReport `json:"entryHealth,omitempty"`
 	Traffic     *EntryTraffic      `json:"traffic,omitempty"`
@@ -31,6 +32,10 @@ type EntryPeerObservation struct {
 }
 
 func (o Observation) clone() Observation {
+	if o.ManagementIdentity != nil {
+		identity := *o.ManagementIdentity
+		o.ManagementIdentity = &identity
+	}
 	o.Traffic = o.Traffic.clone()
 	if o.EntryHealth != nil {
 		h := *o.EntryHealth
