@@ -5,6 +5,7 @@ package landing
 import (
 	"bytes"
 	"context"
+	glivela "github.com/petauron/glivela"
 	"os"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func TestKernelEntryGateLifecycle(t *testing.T) {
 	peer := PeerIdentity{ID: "anonymous-entry-gate", PublicKey: "nodekey:anonymous", Address: "100.64.0.8"}
 	bridge, _ := NewBridgeGate(peer, "br-fixture", 1)
 	host, _ := NewHostGate(peer, 12345, 1)
-	public, _ := NewHostGate(peer, 12345, 1, "8.8.8.8")
+	public, _ := NewHostGate(peer, 12345, 1, glivela.PrivateTransport{PublicAddress: "8.8.8.8"})
 	for _, gate := range []*TrafficGate{bridge, host, public} {
 		t.Run(gate.scopeChain(), func(t *testing.T) {
 			if err := gate.Install(ctx); err != nil {
@@ -62,12 +63,12 @@ func TestKernelEntryGateLifecycle(t *testing.T) {
 				replacement, _ = NewBridgeGate(peer, gate.bridge, 2)
 				unrelated, _ = NewBridgeGate(otherPeer, gate.bridge, 1)
 			} else {
-				replacement, _ = NewHostGate(peer, gate.gid, 2, gate.publicAddress)
+				replacement, _ = NewHostGate(peer, gate.gid, 2, glivela.PrivateTransport{PublicAddress: gate.publicAddress})
 				otherEndpoint := ""
 				if gate.publicAddress != "" {
 					otherEndpoint = "8.8.4.4"
 				}
-				unrelated, _ = NewHostGate(otherPeer, gate.gid, 1, otherEndpoint)
+				unrelated, _ = NewHostGate(otherPeer, gate.gid, 1, glivela.PrivateTransport{PublicAddress: otherEndpoint})
 			}
 			if err := unrelated.Install(ctx); err != nil {
 				t.Fatal(err)

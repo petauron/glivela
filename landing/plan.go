@@ -65,6 +65,9 @@ func (p Plan) Validate() error {
 	if p.Revision == 0 || !tailnetIPv4(p.Address) || !ValidEgressIP(p.EgressIP) || len(p.Sources) > 128 || len(p.ClientListeners) > 1000 || p.Transport.Validate() != nil {
 		return errors.New("landing: invalid plan")
 	}
+	if p.Transport.Port != 0 && (!p.HasServerListener() || slices.ContainsFunc(p.Sources, func(s Source) bool { return !s.TCPOnly })) {
+		return errors.New("landing: shared public server port requires an active TCP-only IPv4 listener")
+	}
 	egress, _ := netip.ParseAddr(p.EgressIP)
 	if p.IPv6OnlyAddress != "" && (!glivela.PublicTransportIPv6(p.IPv6OnlyAddress) || !egress.Is6() || p.PublicSSH.RequireHost(p.IPv6OnlyAddress) != nil) {
 		return errors.New("landing: exact IPv6 listener and fixed IPv6 egress required")
@@ -106,6 +109,14 @@ func (p Plan) Validate() error {
 		previous, duplicate := seenPorts[c.Port]
 		if p.Transport.PublicAddress == "" && (p.IPv6OnlyAddress == "" || c.Transport != "ipv6-ss2022") || !glivela.ValidIdentifier(c.ID) || seenIDs[c.ID] || c.Port < 24000 || c.Port > 24999 || duplicate && (!previous.Shared || !c.Shared || previous.Key != c.Key || previous.EgressIP != c.EgressIP) || c.Shared && c.Port != 24000 || err != nil || !validTransport {
 			return errors.New("landing: invalid client listener")
+		}
+		// One socket may serve the retained client chain and its replacement
+		// server route only when authentication and the exact-source TCP policy
+		// are identical. Never choose one of two conflicting listeners.
+		if p.HasServerListener() && c.Address == "" && c.Port == p.Transport.ListenerPort() {
+			if !c.Shared || c.Transport != glivela.IPv4ClientSS2022 || c.Key != p.Transport.Key || c.EgressIP != "" && c.EgressIP != p.EgressIP || slices.ContainsFunc(p.Sources, func(s Source) bool { return !s.TCPOnly }) {
+				return errors.New("landing: shared server listener policy differs")
+			}
 		}
 		seenPorts[c.Port] = c
 		seenIDs[c.ID] = true
@@ -211,7 +222,7 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		}
 		route("landing", address+"/32", network, p.EgressIP)
 	}
-	inbound := map[string]any{"tag": "landing", "listen": p.Address, "port": SOCKSPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": udp, "ip": p.Address}}
+	inbound := map[string]any{"tag": "landing", "listen": p.Address, "port": p.Transport.ListenerPort(), "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": udp, "ip": p.Address}}
 	if p.Transport.Protocol == "ss2022" {
 		inbound["listen"] = p.Transport.Endpoint(p.Address)
 		network := "tcp"
@@ -227,6 +238,9 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 	}
 	sharedInbounds := map[string]bool{}
 	for _, c := range p.ActiveClientListeners() {
+		if p.HasServerListener() && c.Address == "" && c.Port == p.Transport.ListenerPort() {
+			continue // Validate bound this source/key/exit to the same server socket.
+		}
 		tag := "client-chain-" + c.ID
 		address, method, prefix := p.Transport.PublicAddress, "aes-256-gcm", "/32"
 		if c.Transport == glivela.IPv4ClientSS2022 || c.Transport == glivela.IPv4RelaySS2022 {
@@ -308,7 +322,7 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 	if err := p.Validate(); err != nil {
 		return ServerFirewall{}, err
 	}
-	result := ServerFirewall{PublicSSH: p.PublicSSH.Clone(), Revision: p.Revision, IPv6Only: p.IPv6OnlyAddress != "", Address: p.ListenerAddress(), EgressIP: p.EgressIP, UID: uid, Interface: iface, Public: p.Transport.PublicAddress != "" || p.IPv6OnlyAddress != ""}
+	result := ServerFirewall{Port: p.Transport.Port, PublicSSH: p.PublicSSH.Clone(), Revision: p.Revision, IPv6Only: p.IPv6OnlyAddress != "", Address: p.ListenerAddress(), EgressIP: p.EgressIP, UID: uid, Interface: iface, Public: p.Transport.PublicAddress != "" || p.IPv6OnlyAddress != ""}
 	for _, source := range p.Sources {
 		if p.IPv6OnlyAddress != "" {
 			continue

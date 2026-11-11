@@ -15,12 +15,12 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
 }) {
  const [query,setQuery]=useState("");const [filter,setFilter]=useState("all");const [modeFilter,setModeFilter]=useState("all");const [selected,setSelected]=useState("");const [deleteKey,setDeleteKey]=useState("");
  const speed = useLinkSpeed(loadSpeeds, active);
- const rows=[...inventory.routes.map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,relayId:"",egressId:value.egressId,enabled:value.enabled,shared:false,port:1080,unavailableReason:"",transport:"",sourceIpv6:"",serverIpv6:"",egressIp:"",mode:"server",state:value.state,name:"",ipv4EgressId:value.ipv4EgressId,value})),...(inventory.clientChains??[]).map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,relayId:value.relayId??"",egressId:value.egressId,enabled:value.enabled,shared:value.shared??false,port:value.port,unavailableReason:value.unavailableReason??"",transport:value.transport??"",sourceIpv6:value.sourceIpv6??"",serverIpv6:value.serverIpv6??"",egressIp:value.egressIp??"",mode:"client",state:value.enabled?"configured":"disabled",name:value.name,ipv4EgressId:undefined,value}))];
+ const rows=[...inventory.routes.map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,relayId:"",egressId:value.egressId,enabled:value.enabled,shared:false,port:value.port,ipv4Port:value.ipv4Port,unavailableReason:"",transport:"",sourceIpv6:"",serverIpv6:"",egressIp:"",mode:"server",state:value.state,name:"",ipv4EgressId:value.ipv4EgressId,value})),...(inventory.clientChains??[]).map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,relayId:value.relayId??"",egressId:value.egressId,enabled:value.enabled,shared:value.shared??false,port:value.port,ipv4Port:undefined,unavailableReason:value.unavailableReason??"",transport:value.transport??"",sourceIpv6:value.sourceIpv6??"",serverIpv6:value.serverIpv6??"",egressIp:value.egressIp??"",mode:"client",state:value.enabled?"configured":"disabled",name:value.name,ipv4EgressId:undefined,value}))];
  const nodeName=(id:string)=>names.get(id)??id;
  const label=(row:typeof rows[number])=>row.name||`${nodeName(row.entryId)} → ${nodeName(row.egressId)}`;
  const accountName=(id:string)=>inventory.accounts.find(a=>a.account.id===id)?.account.displayName??id;
  const landingIds=(row:typeof rows[number])=>[...new Set([row.egressId,row.ipv4EgressId].filter((id):id is string=>!!id))];
- const routeLatency=(row:typeof rows[number],landingId:string)=>row.relayId||row.transport==="ipv6-ss2022"&&(!row.sourceIpv6||!row.serverIpv6)?undefined:latency.values.get(latencyKey(row.entryId,landingId,row.port,row.transport==="ipv6-ss2022"?row.sourceIpv6:"",row.transport==="ipv6-ss2022"?row.serverIpv6:""));
+ const routeLatency=(row:typeof rows[number],landingId:string)=>row.relayId||row.transport==="ipv6-ss2022"&&(!row.sourceIpv6||!row.serverIpv6)?undefined:latency.values.get(latencyKey(row.entryId,landingId,landingId===row.ipv4EgressId?row.ipv4Port??0:row.port,row.transport==="ipv6-ss2022"?row.sourceIpv6:"",row.transport==="ipv6-ss2022"?row.serverIpv6:""));
  const state=(row:typeof rows[number])=>row.mode==="client"&&row.enabled?"已配置 · 待客户端验证":routeLabels[row.state]??"未确认";
  const paused=(id:string)=>{
   const pause=inventory.availability?.nodes[id];
@@ -66,11 +66,11 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  };
  const toggle=(row:typeof rows[number])=>{
   const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account)return;
-  void save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined}),enabled:!row.enabled,expectedRevision:account.account.desiredRevision});
+  void save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined,port:undefined,ipv4Port:undefined}),enabled:!row.enabled,expectedRevision:account.account.desiredRevision});
  };
  const remove=async(row:typeof rows[number])=>{
   const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account||row.enabled)return;
-  const ok=await save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined}),enabled:false,delete:true,expectedRevision:account.account.desiredRevision});
+  const ok=await save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined,port:undefined,ipv4Port:undefined}),enabled:false,delete:true,expectedRevision:account.account.desiredRevision});
   if(ok){setDeleteKey("");setSelected("");}
  };
  return <div className="gl-split gl-route-split"><div className="gl-primary">

@@ -92,6 +92,8 @@ type BusinessInventory struct {
 }
 
 type BusinessRoute struct {
+	Port         int    `json:"port"`
+	IPv4Port     int    `json:"ipv4Port,omitempty"`
 	ID           string `json:"id"`
 	AccountID    string `json:"accountId"`
 	EntryID      string `json:"entryId"`
@@ -332,7 +334,21 @@ func (s *Store) Business() BusinessInventory {
 			if s.suspended(grant.EntryID, now) || s.suspended(grant.EgressID, now) || s.suspended(grant.IPv4EgressID, now) {
 				state = "temporarily-suspended"
 			}
-			view.Routes = append(view.Routes, BusinessRoute{ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
+			port, ipv4Port := 0, 0
+			for _, entry := range s.nodes {
+				if entry.ID != grant.EntryID || entry.Desired.Entry == nil {
+					continue
+				}
+				for _, peer := range entry.Desired.Entry.Peers {
+					if peer.EgressID == grant.EgressID {
+						port = peer.Port
+					}
+					if peer.EgressID == grant.IPv4EgressID {
+						ipv4Port = peer.Port
+					}
+				}
+			}
+			view.Routes = append(view.Routes, BusinessRoute{Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
 		}
 	}
 	for _, node := range s.nodes {

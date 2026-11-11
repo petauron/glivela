@@ -86,7 +86,7 @@ func (n EntryNetwork) validate(plan glivela.XrayPlan) error {
 	for _, peer := range n.Peers {
 		route, found := configured[peer.EgressID]
 		exit, err := netip.ParseAddr(peer.ExpectedExit)
-		if !used[peer.EgressID] || !found || peer.Identity.Validate() != nil || route.ExitFamily.Validate() != nil || route.Port != landing.SOCKSPort || route.Address != peer.Identity.Address ||
+		if !used[peer.EgressID] || !found || peer.Identity.Validate() != nil || route.ExitFamily.Validate() != nil || route.Port != route.Transport.ListenerPort() || route.Address != peer.Identity.Address ||
 			peer.Identity.ID == n.Source.ID || peer.Identity.PublicKey == n.Source.PublicKey || peer.Identity.Address == n.Source.Address ||
 			ids[peer.Identity.ID] || keys[peer.Identity.PublicKey] || addresses[peer.Identity.Address] || err != nil || exit.String() != peer.ExpectedExit || !landing.PublicIP(exit) || !validRouteTarget(peer.Target) {
 			return invalid

@@ -134,6 +134,7 @@ func TestOfficialLandingConfiguration(t *testing.T) {
 	if binary == "" {
 		t.Skip("verified official Xray required")
 	}
+	testOfficialSharedPublicServerSocket(t, binary)
 	for _, ipv6 := range []bool{false, true} {
 		p := fixturePlan()
 		if ipv6 {

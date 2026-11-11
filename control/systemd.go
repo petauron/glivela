@@ -435,7 +435,7 @@ func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 		return err
 	}
 	if desired.Landing.HasServerListener() {
-		if err := verifyOwnedListener(desired.Landing.ListenerAddress(), landing.SOCKSPort, d.WorkerUID); err != nil {
+		if err := verifyOwnedListener(desired.Landing.ListenerAddress(), uint16(desired.Landing.Transport.ListenerPort()), d.WorkerUID); err != nil {
 			return err
 		}
 	}

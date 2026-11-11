@@ -62,3 +62,5 @@ Apache-2.0. Bundled third-party programs retain their own licenses and notices.
 
 Retaining issued subscription labels and an existing host guard during upgrades:
 [operator-owned configuration](docs/operator-configuration.md).
+
+- [Server forwarding through a shared public SS2022 listener](docs/server-public-transport.md)

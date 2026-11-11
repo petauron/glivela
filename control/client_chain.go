@@ -61,7 +61,8 @@ type ClientChainView struct {
 }
 
 // The existing public transport's enrolled source is an authorization boundary,
-// not a key to disclose. Shared client credentials never reuse the server key.
+// not permission to disclose its key. A server-route migration may explicitly
+// reuse an already-issued shared client key, never the retained server-only key.
 func chainLanding(nodes map[string]Node, c glivela.ClientChain) (Node, string, error) {
 	if c.Transport == "ipv6-ss2022" {
 		if c.Validate() != nil {
