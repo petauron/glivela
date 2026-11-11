@@ -226,8 +226,10 @@ func (s *Store) put(node Node, previousVerifierCertificate string) error {
 		if old.EntryQuota != nil {
 			return errors.New("control: staged quota enrollment cannot replace retained counters or policy")
 		}
-		// The administrator-owned listener setting is not an enrollment input.
+		// Enrollment changes proxy policy, not administrator-owned listener or
+		// network settings, pending commands, results and path MTU records.
 		node.PrivateListenerPort = old.PrivateListenerPort
+		node.Network = old.Network
 		if (old.Desired.Entry == nil) != (node.Desired.Entry == nil) {
 			return errors.New("control: changing node role requires explicit handover")
 		}
