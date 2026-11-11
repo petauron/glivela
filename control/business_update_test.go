@@ -424,6 +424,17 @@ func TestOwnedRouteToClientManagedLanding(t *testing.T) {
 	if _, err := s.ChangeRoute(context.Background(), change); err != nil {
 		t.Fatal("enrolled client-managed landing refused server grant:", err)
 	}
+	before := businessBytes(t, s)
+	other := change
+	other.ID, other.AccountID = "foreign-server-route", "account-other"
+	for _, account := range s.business.material.Plan.Accounts {
+		if account.Account.ID == other.AccountID {
+			other.ExpectedRevision = account.Account.DesiredRevision
+		}
+	}
+	if _, err := s.ChangeRoute(context.Background(), other); err == nil || !bytes.Equal(before, businessBytes(t, s)) {
+		t.Fatal("shared landing granted to another account or changed its ledger")
+	}
 	reloaded, err := OpenStore(s.path)
 	if err != nil {
 		t.Fatal(err)

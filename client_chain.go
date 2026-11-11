@@ -75,7 +75,8 @@ func (c ClientChain) Validate() error {
 	return nil
 }
 
-// ClientLanding is a client-only credential owned by one account. Original
+// ClientLanding is a shared transport credential owned by one account. It
+// survives that account's client-to-server forwarding migration; original
 // per-chain configuration stays retained for explicit forward recovery.
 type ClientLanding struct {
 	AccountID string `json:"accountId"`
