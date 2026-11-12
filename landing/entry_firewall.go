@@ -51,7 +51,7 @@ func (p EntryFirewall) validate() error {
 	}
 	seen = map[string]bool{}
 	for _, address := range p.Peers {
-		if !(tailnetIPv4(address) || glivela.PublicTransportIPv4(address)) || seen[address] {
+		if !(tailnetIPv4(address) || glivela.PublicTransportIPv4(address) || glivela.PublicTransportIPv6(address)) || seen[address] {
 			return errors.New("landing: invalid native entry peer")
 		}
 		seen[address] = true
