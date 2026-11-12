@@ -47,6 +47,28 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	if ai < 0 {
 		return AccountChangeResult{}, invalid
 	}
+	if change.Enabled {
+		for _, entry := range s.nodes {
+			if entry.ID != change.EntryID || entry.Desired.Entry == nil {
+				continue
+			}
+			for _, peer := range entry.Desired.Entry.Peers {
+				if peer.EgressID != change.EgressID || peer.Transport.ClientListenerID == "" {
+					continue
+				}
+				authorized := false
+				for _, target := range s.nodes {
+					if target.ID == change.EgressID {
+						chain, ok := s.boundClientListener(entry, target, peer)
+						authorized = ok && chain.AccountID == change.AccountID
+					}
+				}
+				if !authorized {
+					return AccountChangeResult{}, invalid
+				}
+			}
+		}
+	}
 	account := &accounts[ai]
 	gi := slices.IndexFunc(account.Grants, func(g glivela.RouteGrant) bool { return g.ID == change.ID })
 	deleted := next.DeletedRoutes[change.ID]
@@ -153,6 +175,9 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	}
 	projected, err := projectManagedRoutes(s.nodes, next, change.EntryID)
 	if err != nil {
+		return AccountChangeResult{}, err
+	}
+	if _, err := projectClientLandings(projected, next, time.Now()); err != nil {
 		return AccountChangeResult{}, err
 	}
 	if change.Delete && !reflect.DeepEqual(projected, s.nodes) {
@@ -269,6 +294,14 @@ func (s *Store) managedRouteLandingCertificate(change RouteChange) (string, erro
 		}
 		for targetCert, target := range s.nodes {
 			if target.ID == proof.LandingID {
+				for _, peer := range entry.Desired.Entry.Peers {
+					if peer.EgressID == target.ID && peer.Transport.ClientListenerID != "" {
+						c, ok := s.boundClientListener(entry, target, peer)
+						if !ok || c.AccountID != change.AccountID {
+							return "", refused
+						}
+					}
+				}
 				return targetCert, nil
 			}
 		}

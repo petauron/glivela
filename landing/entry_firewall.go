@@ -57,7 +57,7 @@ func (p EntryFirewall) validate() error {
 		seen[address] = true
 	}
 	for address, port := range p.PeerPorts {
-		if !seen[address] || !glivela.PublicTransportIPv4(address) || port != 24000 {
+		if !seen[address] || (!glivela.PublicTransportIPv4(address) && !glivela.PublicTransportIPv6(address)) || port < 24000 || port > 24999 {
 			return errors.New("landing: invalid public entry peer port")
 		}
 	}
@@ -134,10 +134,14 @@ func (p EntryFirewall) renderObjects(table, marker string, legacy bool) []map[st
 		if selected := p.PeerPorts[address]; selected != 0 {
 			port = selected
 		}
-		rule("destinations", match(payload("ip", "daddr"), address), match(payload("tcp", "dport"), port), nftObject{"return": nil})
+		family := "ip"
+		if ip, _ := netip.ParseAddr(address); ip.Is6() {
+			family = "ip6"
+		}
+		rule("destinations", match(payload(family, "daddr"), address), match(payload("tcp", "dport"), port), nftObject{"return": nil})
 		// The landing independently retains its source-specific UDP policy.
-		if glivela.PublicTransportIPv4(address) {
-			rule("destinations", match(payload("ip", "daddr"), address), match(payload("udp", "dport"), port), nftObject{"return": nil})
+		if glivela.PublicTransportIPv4(address) || glivela.PublicTransportIPv6(address) {
+			rule("destinations", match(payload(family, "daddr"), address), match(payload("udp", "dport"), port), nftObject{"return": nil})
 		} else {
 			rule("destinations", match(payload("ip", "daddr"), address), match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"), nftObject{"return": nil})
 		}

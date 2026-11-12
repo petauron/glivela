@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -33,11 +34,11 @@ func NewHostGate(peer PeerIdentity, gid uint32, revision uint64, transport ...gl
 	if len(transport) == 1 {
 		endpoint, port = transport[0].PublicAddress, transport[0].ListenerPort()
 	}
-	if port != SOCKSPort && (port != 24000 || endpoint == "") {
+	if port != SOCKSPort && (port < 24000 || port > 24999 || endpoint == "") {
 		return nil, errors.New("landing: invalid public listener port")
 	}
 	if endpoint != "" {
-		if !glivela.PublicTransportIPv4(endpoint) {
+		if !glivela.PublicTransportIPv4(endpoint) && !glivela.PublicTransportIPv6(endpoint) {
 			return nil, errors.New("landing: invalid public endpoint")
 		}
 		identity = append(identity, []byte("\npublic:"+endpoint)...)
@@ -78,9 +79,13 @@ func (g *TrafficGate) validOwnership(name, marker string) bool {
 }
 
 func (g *TrafficGate) hostObjects() []map[string]nftObject {
+	network, addressType := "ip", "ipv4_addr"
+	if ip, err := netip.ParseAddr(g.endpoint()); err == nil && ip.Is6() {
+		network, addressType = "ip6", "ipv6_addr"
+	}
 	objects := []map[string]nftObject{
 		{"table": {"family": "inet", "name": g.table, "comment": g.marker}},
-		{"set": {"family": "inet", "table": g.table, "name": "allowed", "type": "ipv4_addr", "flags": []string{"timeout"}, "timeout": int(gateDefaultLifetime.Seconds()), "size": 1}},
+		{"set": {"family": "inet", "table": g.table, "name": "allowed", "type": addressType, "flags": []string{"timeout"}, "timeout": int(gateDefaultLifetime.Seconds()), "size": 1}},
 		{"chain": {"family": "inet", "table": g.table, "name": "output", "type": "filter", "hook": "output", "prio": 10, "policy": "accept"}},
 		{"chain": {"family": "inet", "table": g.table, "name": "input", "type": "filter", "hook": "input", "prio": -10, "policy": "accept"}},
 		{"chain": {"family": "inet", "table": g.table, "name": "outbound"}},
@@ -97,8 +102,8 @@ func (g *TrafficGate) hostObjects() []map[string]nftObject {
 		objects = append(objects, map[string]nftObject{"rule": {"family": "inet", "table": g.table, "chain": chain, "expr": expr}})
 	}
 	for _, protocol := range []string{"tcp", "udp"} {
-		outbound := []any{match(nftObject{"meta": nftObject{"key": "skgid"}}, g.gid), match(payload("ip", "daddr"), g.endpoint())}
-		inbound := []any{match(ctMark, hostGateConnectionMark), match(payload("ip", "saddr"), g.endpoint())}
+		outbound := []any{match(nftObject{"meta": nftObject{"key": "skgid"}}, g.gid), match(payload(network, "daddr"), g.endpoint())}
+		inbound := []any{match(ctMark, hostGateConnectionMark), match(payload(network, "saddr"), g.endpoint())}
 		if protocol == "tcp" {
 			outbound = append(outbound, match(payload("tcp", "dport"), g.listenerPort()))
 			inbound = append(inbound, match(payload("tcp", "sport"), g.listenerPort()))
@@ -113,9 +118,9 @@ func (g *TrafficGate) hostObjects() []map[string]nftObject {
 		rule("input", append(inbound, nftObject{"jump": nftObject{"target": "inbound"}})...)
 	}
 	rule("outbound", nftObject{"mangle": nftObject{"key": ctMark, "value": hostGateConnectionMark}})
-	rule("outbound", match(payload("ip", "daddr"), "@allowed"), nftObject{"return": nil})
+	rule("outbound", match(payload(network, "daddr"), "@allowed"), nftObject{"return": nil})
 	rule("outbound", nftObject{"drop": nil})
-	rule("inbound", match(payload("ip", "saddr"), "@allowed"), nftObject{"return": nil})
+	rule("inbound", match(payload(network, "saddr"), "@allowed"), nftObject{"return": nil})
 	rule("inbound", nftObject{"drop": nil})
 	return objects
 }

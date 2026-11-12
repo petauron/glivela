@@ -28,7 +28,8 @@ func TestKernelEntryGateLifecycle(t *testing.T) {
 	bridge, _ := NewBridgeGate(peer, "br-fixture", 1)
 	host, _ := NewHostGate(peer, 12345, 1)
 	public, _ := NewHostGate(peer, 12345, 1, glivela.PrivateTransport{PublicAddress: "8.8.8.8"})
-	for _, gate := range []*TrafficGate{bridge, host, public} {
+	public6, _ := NewHostGate(peer, 12345, 1, glivela.PrivateTransport{PublicAddress: "2606:4700:4700::1111", Port: 24008})
+	for _, gate := range []*TrafficGate{bridge, host, public, public6} {
 		t.Run(gate.scopeChain(), func(t *testing.T) {
 			if err := gate.Install(ctx); err != nil {
 				t.Fatal("install", err)
@@ -63,12 +64,15 @@ func TestKernelEntryGateLifecycle(t *testing.T) {
 				replacement, _ = NewBridgeGate(peer, gate.bridge, 2)
 				unrelated, _ = NewBridgeGate(otherPeer, gate.bridge, 1)
 			} else {
-				replacement, _ = NewHostGate(peer, gate.gid, 2, glivela.PrivateTransport{PublicAddress: gate.publicAddress})
+				replacement, _ = NewHostGate(peer, gate.gid, 2, glivela.PrivateTransport{PublicAddress: gate.publicAddress, Port: gate.port})
 				otherEndpoint := ""
 				if gate.publicAddress != "" {
 					otherEndpoint = "8.8.4.4"
+					if gate.publicAddress == "2606:4700:4700::1111" {
+						otherEndpoint = "2606:4700:4700::1001"
+					}
 				}
-				unrelated, _ = NewHostGate(otherPeer, gate.gid, 1, glivela.PrivateTransport{PublicAddress: otherEndpoint})
+				unrelated, _ = NewHostGate(otherPeer, gate.gid, 1, glivela.PrivateTransport{PublicAddress: otherEndpoint, Port: gate.port})
 			}
 			if err := unrelated.Install(ctx); err != nil {
 				t.Fatal(err)

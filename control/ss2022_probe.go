@@ -14,8 +14,6 @@ import (
 	"net/url"
 	"os/exec"
 	"time"
-
-	glivela "github.com/petauron/glivela"
 )
 
 // ProbeWithCore uses the installed, digest-verified Xray to implement SS2022,
@@ -53,7 +51,7 @@ func probeWithCore(ctx context.Context, p RouteProbe, binary, digest string, roo
 	config := map[string]any{
 		"log":       map[string]any{"loglevel": "none"},
 		"inbounds":  []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "socks", "settings": map[string]any{"auth": "password", "accounts": []any{map[string]any{"user": "probe", "pass": password}}, "udp": false}}},
-		"outbounds": []any{map[string]any{"protocol": "shadowsocks", "settings": map[string]any{"servers": []any{map[string]any{"address": endpoint.Addr().String(), "port": endpoint.Port(), "method": glivela.SS2022Method, "password": p.Transport.Key}}}}},
+		"outbounds": []any{map[string]any{"protocol": "shadowsocks", "settings": map[string]any{"servers": []any{map[string]any{"address": endpoint.Addr().String(), "port": endpoint.Port(), "method": p.Transport.Method(), "password": p.Transport.Key}}}}},
 	}
 	raw, err := json.Marshal(config)
 	if err != nil {

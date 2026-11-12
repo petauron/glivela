@@ -57,8 +57,16 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 			continue
 		}
 		if target.Desired.Landing == nil || !s.availableRuntime(target, now) || target.Receipt.ManagementIdentity == nil ||
-			*target.Receipt.ManagementIdentity != peer.Identity || !reflect.DeepEqual(route.Transport, target.Desired.Landing.Transport) ||
-			route.Port != target.Desired.Landing.Transport.ListenerPort() || peer.Identity.Address != target.Desired.Landing.Address {
+			*target.Receipt.ManagementIdentity != peer.Identity || peer.Identity.Address != target.Desired.Landing.Address {
+			return publicPeerProof{}, refused
+		}
+		if route.Transport.ClientListenerID != "" {
+			if _, ok := s.boundClientListener(entry, target, route); !ok {
+				return publicPeerProof{}, refused
+			}
+			return publicPeerProof{entry.ID, target.ID, entry.Desired.Revision, entry.Desired.ConfigSHA256, peer.Identity, target.Desired.Revision, target.Desired.ConfigSHA256, now}, nil
+		}
+		if !reflect.DeepEqual(route.Transport, target.Desired.Landing.Transport) || route.Port != target.Desired.Landing.Transport.ListenerPort() {
 			return publicPeerProof{}, refused
 		}
 		authorized, found := target.RouteEntries[entry.ID]

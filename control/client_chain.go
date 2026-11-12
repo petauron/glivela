@@ -361,7 +361,7 @@ func projectClientLandings(nodes map[string]Node, m glivela.ImportMaterial, now 
 		if err != nil {
 			return false, err
 		}
-		if !c.Enabled {
+		if !c.Enabled && !clientListenerUsedByServer(nodes, m, c, now) {
 			continue
 		}
 		active := false
