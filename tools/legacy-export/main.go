@@ -161,7 +161,10 @@ func privateFile(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	i, err := os.Lstat(path)
-	if err != nil || !i.Mode().IsRegular() || i.Mode().Perm()&0077 != 0 || i.Size() > limit {
+	if err != nil {
+		return nil, err
+	}
+	if !i.Mode().IsRegular() || i.Mode().Perm()&0077 != 0 || i.Size() > limit {
 		return nil, errors.New("unsafe file")
 	}
 	f, err := os.Open(path)
