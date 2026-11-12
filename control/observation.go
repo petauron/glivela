@@ -114,6 +114,12 @@ func validateStoredEntryHealth(desired Desired, health *EntryHealthReport) error
 // other landings that share the entry process. Missing/mismatched/future evidence
 // fails closed; configuration flags and process readiness are insufficient.
 func entryPeerFresh(entry Node, target Node, now time.Time) bool {
+	return entryPeerFreshSource(entry, target, now, target.RouteEntries[entry.ID].Address)
+}
+
+// Bound public listeners authorize their source through the original client
+// enrollment; legacy server transports retain their RouteEntries requirement.
+func entryPeerFreshSource(entry Node, target Node, now time.Time, source string) bool {
 	if entry.Desired.Entry == nil || entry.Desired.EntryNetwork == nil || entry.Receipt == nil || entry.Receipt.EntryHealth == nil || validateEntryHealth(entry.Desired, entry.Receipt.EntryHealth) != nil {
 		return false
 	}
@@ -121,7 +127,7 @@ func entryPeerFresh(entry Node, target Node, now time.Time) bool {
 	if health.SampledAt.After(now) {
 		return false
 	}
-	if target.Desired.Landing == nil || health.Source == nil || health.Source.Address != target.RouteEntries[entry.ID].Address {
+	if target.Desired.Landing == nil || health.Source == nil || health.Source.Address != source {
 		return false
 	}
 	peer, found := health.Peers[target.ID]

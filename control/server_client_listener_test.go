@@ -4,6 +4,7 @@ import (
 	"context"
 	glivela "github.com/petauron/glivela"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,6 +42,19 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := s.nodes[targetCert]
+	// A public IPv6 client listener does not need a legacy IPv4 source grant.
+	landingPlan := *target.Desired.Landing
+	landingPlan.Revision++
+	landingPlan.Sources = nil
+	target.Desired, err = NewDesired(landingPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.RouteEntries = nil
+	if err = s.Put(target); err != nil {
+		t.Fatal(err)
+	}
+	target = s.nodes[targetCert]
 	before := *target.Desired.Landing
 	identity := entry.Desired.EntryNetwork.Peers[0].Identity
 	if _, err = s.Exchange(context.Background(), targetCert, &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: target.Desired.Revision, ConfigSHA256: target.Desired.ConfigSHA256, RuntimeReady: true}, ManagementIdentity: &identity}); err != nil {
@@ -71,11 +85,43 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 	if _, err = s.ChangeRoute(context.Background(), grant); err != nil {
 		t.Fatal("server grant", err)
 	}
+
+	checkPublished := func() {
+		t.Helper()
+		_, grants, err := effectiveBusinessCredentials(s.business.material, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		protocolID := s.business.material.ProtocolSecrets[grants[grant.ID].Route.ID]
+		response := getSubscription(t, s, "/sub/example-token?format=mihomo", "Mihomo")
+		if protocolID == "" || response.Code != 200 || !strings.Contains(response.Body.String(), protocolID) {
+			t.Fatal("bound server VLESS missing from actual subscription", response.Code)
+		}
+		targets := s.latencyTargetsLocked()
+		target, ok := targets[latencyPathKey(grant.EntryID, grant.EgressID, c.Port, c.SourceIPv6, c.ServerIPv6)]
+		if !ok || target.Source != c.SourceIPv6 || target.Address != c.ServerIPv6 || target.Port != c.Port {
+			t.Fatal("bound listener latency path lost")
+		}
+		node := s.nodes[entryCert]
+		observation := healthyEntryObservation(node.Desired, time.Now())
+		for id, peer := range observation.EntryHealth.Peers {
+			peer.Status.LinkState = "authenticated"
+			observation.EntryHealth.Peers[id] = peer
+		}
+		if _, err = s.Exchange(context.Background(), entryCert, &observation); err != nil {
+			t.Fatal(err)
+		}
+		if !s.subscriptionPeerReady(s.nodes[entryCert], grant.EgressID, time.Now()) {
+			t.Fatal("current bound startup acceptance not reflected")
+		}
+	}
+	checkPublished()
 	change.ExpectedRevision = revision()
 	change.Enabled = false
 	if _, err = s.ChangeClientChain(context.Background(), change); err != nil {
 		t.Fatal("withdraw client publication", err)
 	}
+	checkPublished()
 	after := *s.nodes[targetCert].Desired.Landing
 	after.Revision = before.Revision
 	if !reflect.DeepEqual(before, after) {
