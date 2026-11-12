@@ -54,6 +54,9 @@ func tailnetIPv4(value string) bool {
 }
 
 func (p Plan) Validate() error {
+	if p.Transport.ClientListenerID != "" {
+		return errors.New("landing: client binding belongs to the entry")
+	}
 	if err := p.PublicSSH.Validate(); err != nil {
 		return err
 	}

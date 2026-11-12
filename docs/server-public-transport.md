@@ -65,3 +65,20 @@ server route without inventing an imported host reference. The existing shared
 credential and retained chain association remain authoritative, including
 after that old client chain is disabled. Other accounts and unregistered exits
 are rejected. Normal node enrollment and exact-source enforcement still apply.
+
+## Reuse an enrolled client listener
+
+An entry may explicitly bind `transport.clientListenerId` to an existing direct
+client chain owned by the same account and entry. The peer must use that
+listener's exact public IPv4/IPv6 address, port (24000–24999), canonical key,
+SS2022 cipher and configured exit. The controller verifies the original mTLS
+entry/landing enrollment and the current source-restricted listener; a reachable
+socket alone does not authorize a route. Relay chains are not eligible.
+
+Create and verify the server grant before disabling the client publication.
+An effective server grant retains the original listener after that publication
+is disabled. Account or server-grant revocation withdraws its retained listener
+when no enabled client publication still needs it. This does not install a
+second listener, widen its sources, expose server credentials in subscriptions,
+or create a direct fallback. Native entry filtering and probes use the same
+IPv6 family and exact destination port as the worker.

@@ -15,18 +15,23 @@ const SS2022Method = "2022-blake3-aes-128-gcm"
 type PrivateTransport struct {
 	// Port is explicit only for the shared public SS2022 listener. Zero reads
 	// retained server policies at their original port; it is not dial fallback.
-	Port          int    `json:"port,omitempty"`
-	Protocol      string `json:"protocol,omitempty"`
-	Key           string `json:"key,omitempty"`
-	PublicAddress string `json:"publicAddress,omitempty"`
+	ClientListenerID string `json:"clientListenerId,omitempty"`
+	Port             int    `json:"port,omitempty"`
+	Protocol         string `json:"protocol,omitempty"`
+	Key              string `json:"key,omitempty"`
+	PublicAddress    string `json:"publicAddress,omitempty"`
 }
 
 func (t PrivateTransport) Validate() error {
-	if t.Protocol == "" && t.Key == "" && t.PublicAddress == "" && t.Port == 0 {
+	if t.Protocol == "" && t.Key == "" && t.PublicAddress == "" && t.Port == 0 && t.ClientListenerID == "" {
 		return nil
 	}
 	key, err := base64.StdEncoding.Strict().DecodeString(t.Key)
-	if t.Port != 0 && (t.Port != 24000 || t.PublicAddress == "") || t.Protocol != "ss2022" || err != nil || len(key) != 16 || base64.StdEncoding.EncodeToString(key) != t.Key || t.PublicAddress != "" && !PublicTransportIPv4(t.PublicAddress) {
+	bound := t.ClientListenerID != ""
+	public := PublicTransportIPv4(t.PublicAddress) || bound && PublicTransportIPv6(t.PublicAddress)
+	validKey := len(key) == 16 || bound && len(key) == 32
+	validPort := t.Port == 0 || t.Port == 24000 || bound && t.Port >= 24000 && t.Port <= 24999
+	if bound && (!ValidIdentifier(t.ClientListenerID) || t.Port == 0 || !public) || !validPort || t.Port != 0 && t.PublicAddress == "" || t.Protocol != "ss2022" || err != nil || !validKey || base64.StdEncoding.EncodeToString(key) != t.Key || t.PublicAddress != "" && !public {
 		return errors.New("glivela: invalid private transport")
 	}
 	return nil
@@ -55,6 +60,15 @@ func PublicTransportIPv6(value string) bool {
 	return err == nil && ip.Is6() && ip.String() == value && CompositePublicIP(ip)
 }
 
+// Method reuses the cipher implied by the issued listener's canonical key.
+func (t PrivateTransport) Method() string {
+	key, _ := base64.StdEncoding.DecodeString(t.Key)
+	if t.ClientListenerID != "" && len(key) == 32 {
+		return IPv4ClientSS2022Method
+	}
+	return SS2022Method
+}
+
 func (t PrivateTransport) ListenerPort() int {
 	if t.Port != 0 {
 		return t.Port
@@ -74,7 +88,7 @@ func (p RoutePeer) outbound(tag string) map[string]any {
 	protocol := "socks"
 	if p.Transport.Protocol == "ss2022" {
 		protocol = "shadowsocks"
-		server["method"], server["password"] = SS2022Method, p.Transport.Key
+		server["method"], server["password"] = p.Transport.Method(), p.Transport.Key
 	}
 	return map[string]any{"protocol": protocol, "tag": tag, "settings": map[string]any{"servers": []any{server}}}
 }
