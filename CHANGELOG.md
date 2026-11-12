@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.128](https://github.com/petauron/glivela/compare/v0.1.0-alpha.127...v0.1.0-alpha.128) (2026-11-12)
+
+
+### Bug Fixes
+
+* **retirement:** purge expired host history from retained archives ([#109](https://github.com/petauron/glivela/issues/109)) ([9fb7c9f](https://github.com/petauron/glivela/commit/9fb7c9f69089e5681a4160d42dc66cc74cea75b8))
+
 ## [0.1.0-alpha.127](https://github.com/petauron/glivela/compare/v0.1.0-alpha.126...v0.1.0-alpha.127) (2026-11-12)
 
 
