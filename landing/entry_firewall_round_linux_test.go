@@ -18,7 +18,7 @@ func TestEntryFirewallRoundSafety(t *testing.T) {
 		t.Fatal("refusing non-isolated firewall mutation")
 	}
 	ctx := context.Background()
-	p := EntryFirewall{UID: 1234, Revision: 201, DNS: []string{"1.1.1.1"}}
+	p := EntryFirewall{UID: 1234, Revision: 201, DNS: []string{"1.1.1.1"}, Peers: []string{"2606:4700:4700::1111"}, PeerPorts: map[string]int{"2606:4700:4700::1111": 24008}}
 	if err := p.Install(ctx); err != nil {
 		t.Fatal(err)
 	}
