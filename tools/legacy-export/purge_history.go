@@ -678,6 +678,7 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	nodes := f.String("node-ids", "", "comma-separated exact retired identities")
 	confirmed := f.Bool("confirm-stopped-writers", false, "both writers are stopped; permanently remove target historical secrets")
 	audit := f.String("audit-file", "", "new private file for nonrecoverable token fingerprints")
+	historyFiles := f.String("history-file-list", "", "private JSON list of explicit inactive history JSON files")
 	if f.Parse(args) != nil || f.NArg() != 0 || os.Geteuid() != 0 || !*confirmed || *directory == "" || *center == "" {
 		return errors.New("confirmed offline root history purge required")
 	}
@@ -784,6 +785,57 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	checkpoint.Sealed, err = glivela.SealImportMaterial(m, key, checkpoint.SnapshotID)
 	if err != nil {
 		return err
+	}
+	if *historyFiles != "" {
+		raw, e := privateFile(*historyFiles, 1<<20)
+		if e != nil {
+			return e
+		}
+		var paths []string
+		if json.Unmarshal(raw, &paths) != nil {
+			return errors.New("history file list invalid")
+		}
+		for _, path := range paths {
+			if !filepath.IsAbs(path) || filepath.Clean(path) != path || !strings.HasSuffix(path, ".json") || path == filepath.Join(*directory, "business.json") {
+				return errors.New("history file scope invalid")
+			}
+			before, e := privateFile(path, 90<<20)
+			if e != nil {
+				return e
+			}
+			if !json.Valid(before) {
+				return errors.New("history JSON invalid")
+			}
+			after, e := r.payload(before, 0)
+			if e != nil {
+				return e
+			}
+			if bytes.Equal(before, after) {
+				continue
+			}
+			tmp, e := os.CreateTemp(filepath.Dir(path), ".redacted-history-")
+			if e != nil {
+				return e
+			}
+			name := tmp.Name()
+			if e = tmp.Chmod(0600); e == nil {
+				_, e = tmp.Write(after)
+			}
+			if e == nil {
+				e = tmp.Sync()
+			}
+			closeErr := tmp.Close()
+			if e == nil {
+				e = closeErr
+			}
+			if e == nil {
+				e = os.Rename(name, path)
+			}
+			_ = os.Remove(name)
+			if e != nil {
+				return e
+			}
+		}
 	}
 	// Complete Center first: an interrupted retry can still derive the exact
 	// scope from the not-yet-replaced controller archive, without a new backup.
