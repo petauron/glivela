@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.129](https://github.com/petauron/glivela/compare/v0.1.0-alpha.128...v0.1.0-alpha.129) (2026-11-12)
+
+
+### Bug Fixes
+
+* **retirement:** allow creation of a new redaction audit ([6572ea8](https://github.com/petauron/glivela/commit/6572ea88a831f21f58638e044efdc098bccbcec5))
+
 ## [0.1.0-alpha.128](https://github.com/petauron/glivela/compare/v0.1.0-alpha.127...v0.1.0-alpha.128) (2026-11-12)
 
 
