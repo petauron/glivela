@@ -157,10 +157,20 @@ func (m ImportMaterial) validateReferences() error {
 			return invalid
 		}
 	}
+	managed := map[string]bool{}
 	for _, a := range m.Plan.Accounts {
 		for _, g := range a.Grants {
+			if cert, ok := m.ManagedRouteLandings[g.ID]; ok {
+				if len(cert) != 64 || strings.Trim(cert, "0123456789abcdef") != "" || g.IPv4EgressID != "" {
+					return invalid
+				}
+				managed[g.ID] = true
+			}
 			knownExit := func(id string) bool {
 				if _, imported := r.Nodes[id]; imported {
+					return true
+				}
+				if managed[g.ID] && id == g.EgressID {
 					return true
 				}
 				// A managed client landing can be retained as the same account's
@@ -174,6 +184,9 @@ func (m ImportMaterial) validateReferences() error {
 				return invalid
 			}
 		}
+	}
+	if len(managed) != len(m.ManagedRouteLandings) {
+		return invalid
 	}
 	if s := r.LandingSelection; s != nil {
 		if s.Revision == 0 || s.NodeIDs == nil || len(s.NodeIDs)+len(s.RetiringNodeIDs) > 10000 {
