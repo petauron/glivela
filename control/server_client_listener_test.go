@@ -96,4 +96,13 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 	if len(s.nodes[targetCert].Desired.Landing.ClientListeners) != 1 {
 		t.Fatal("listener lost")
 	}
+	grant.ExpectedRevision = revision()
+	grant.Enabled = false
+	if _, err = s.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatal("server revoke", err)
+	}
+	if len(s.nodes[targetCert].Desired.Landing.ClientListeners) != 0 {
+		t.Fatal("revoked final publication retained socket")
+	}
+
 }

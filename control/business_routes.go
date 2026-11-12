@@ -177,6 +177,9 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	if err != nil {
 		return AccountChangeResult{}, err
 	}
+	if _, err := projectClientLandings(projected, next, time.Now()); err != nil {
+		return AccountChangeResult{}, err
+	}
 	if change.Delete && !reflect.DeepEqual(projected, s.nodes) {
 		return AccountChangeResult{}, errors.New("control: deletion would change an entry runtime")
 	}
