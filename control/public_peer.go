@@ -32,6 +32,10 @@ type publicPeerProof struct {
 func (s *Store) publicPeerAcceptance(cert string, request landingAcceptanceRequest) (publicPeerProof, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.publicPeerAcceptanceLocked(cert, request)
+}
+
+func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanceRequest) (publicPeerProof, error) {
 	refused := errors.New("control: public peer identity unavailable")
 	entry, ok := s.nodes[cert]
 	if !ok || entry.Desired.Entry == nil || entry.Desired.EntryNetwork == nil || entry.Desired.EntryNetwork.Source == nil ||

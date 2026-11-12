@@ -105,6 +105,7 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 	next.HysteriaSecrets = maps.Clone(m.HysteriaSecrets)
 	next.TrafficCounters = maps.Clone(m.TrafficCounters)
 	next.DeletedRoutes = maps.Clone(m.DeletedRoutes)
+	next.ManagedRouteLandings = maps.Clone(m.ManagedRouteLandings)
 	accounts := slices.Clone(m.Plan.Accounts)
 	removedRoutes := map[string]bool{}
 	for i := range accounts {
@@ -119,6 +120,7 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 			}
 			removedRoutes[grant.ID] = true
 			delete(next.DeletedRoutes, grant.ID)
+			delete(next.ManagedRouteLandings, grant.ID)
 		}
 		a.Grants = slices.DeleteFunc(a.Grants, func(g glivela.RouteGrant) bool { return removedRoutes[g.ID] })
 		removedCredentials := map[string]bool{}

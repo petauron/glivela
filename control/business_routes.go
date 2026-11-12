@@ -75,6 +75,12 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				return AccountChangeResult{}, invalid
 			}
 			if !change.Delete {
+				if change.Enabled && next.ManagedRouteLandings[change.ID] != "" {
+					cert, err := s.managedRouteLandingCertificate(change)
+					if err != nil || cert != next.ManagedRouteLandings[change.ID] {
+						return AccountChangeResult{}, invalid
+					}
+				}
 				grant.Enabled, grant.HideNative = change.Enabled, change.HideNative
 				grant.DesiredRev++
 				grant.AppliedRev, grant.RuntimeGood = 0, false
@@ -102,6 +108,26 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 			grant := glivela.RouteGrant{ID: change.ID, AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, IPv4EgressID: change.IPv4EgressID, InboundTag: next.Endpoints[ei].Reality.InboundTag, Base: account.Credentials[base], Route: credential, Mode: glivela.FixedMode, Enabled: true, HideNative: change.HideNative, DesiredRev: 1}
 			if grant.Validate() != nil {
 				return AccountChangeResult{}, invalid
+			}
+			if _, imported := next.References.Nodes[change.EgressID]; !imported {
+				shared, client := next.ClientLandings[change.EgressID]
+				if client && shared.AccountID != change.AccountID {
+					return AccountChangeResult{}, invalid
+				}
+				client = client && slices.ContainsFunc(next.ClientChains, func(c glivela.ClientChain) bool {
+					return c.AccountID == change.AccountID && c.EntryID == change.EntryID && c.EgressID == change.EgressID
+				})
+				if !client {
+					cert, err := s.managedRouteLandingCertificate(change)
+					if err != nil {
+						return AccountChangeResult{}, err
+					}
+					next.ManagedRouteLandings = maps.Clone(next.ManagedRouteLandings)
+					if next.ManagedRouteLandings == nil {
+						next.ManagedRouteLandings = map[string]string{}
+					}
+					next.ManagedRouteLandings[change.ID] = cert
+				}
 			}
 			account.Grants = append(account.Grants, grant)
 			account.Credentials = append(slices.Clone(account.Credentials), credential)
@@ -224,4 +250,28 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 		return nil, errors.New("control: entry not enrolled")
 	}
 	return next, nil
+}
+
+// The caller holds the store lock. Reuse exactly the public peer mTLS/source
+// authority check; a runtime observation alone never grants an account access.
+func (s *Store) managedRouteLandingCertificate(change RouteChange) (string, error) {
+	refused := errors.New("control: managed server landing enrollment unavailable")
+	if change.IPv4EgressID != "" {
+		return "", refused
+	}
+	for cert, entry := range s.nodes {
+		if entry.ID != change.EntryID {
+			continue
+		}
+		proof, err := s.publicPeerAcceptanceLocked(cert, landingAcceptanceRequest{SnapshotID: entry.ID, PeerID: change.EgressID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256})
+		if err != nil {
+			return "", refused
+		}
+		for targetCert, target := range s.nodes {
+			if target.ID == proof.LandingID {
+				return targetCert, nil
+			}
+		}
+	}
+	return "", refused
 }

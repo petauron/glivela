@@ -104,3 +104,21 @@ retained renderer to the newer automatic-family fallback format.
 带独立出口的计划使用格式 6；旧节点拒绝该格式，须先完成已授权的受管更新，再修改线路。未配置独立出口的计划保留原格式和配置字节。每个出站固定来源地址并强制解析对应地址族，失败不切换其他出口；内核规则只允许该 worker 使用明确的本地来源，继续阻断解析后的私网和保留地址。IPv6 中转仍使用默认 IPv6 来源。
 
 签名目录中的附加客户端落地配方已被单实例能力取代；历史发布记录不改写，新配置不使用额外身份或运行服务。
+
+### Independently enrolled server landings
+
+A server route can use a standalone managed public SS2022 landing without an
+imported-host alias or a client-chain record. Creating the grant requires an
+owned native entry credential and the existing current mutual enrollment proof:
+the enrolled landing certificate, management identity, exact source binding and
+public transport must agree. The encrypted business material records the landing
+certificate against the immutable grant ID. Re-enabling the grant rechecks that
+same enrollment; disabling remains possible while the landing is offline.
+
+This enrollment does not add a source, open a port or establish that the proxy
+path works. Real public-path acceptance is still required before withdrawing a
+previous route. Route credentials, accounting and subscriptions retain their
+existing ownership rules. Logical deletion retains the binding with history;
+explicit landing retirement removes it with the retired grants. An older
+controller that cannot validate this new material must not be used to downgrade
+an enrolled installation.

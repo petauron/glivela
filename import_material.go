@@ -22,6 +22,10 @@ type RetiredLanding struct {
 // offline retirement operation may redact expired-host history while retaining
 // its source identity header. Never send this material in a receipt or logs.
 type ImportMaterial struct {
+	// Grant ID to enrolled landing certificate. Bound by the immutable grant
+	// account/entry/exit; captured only after current mutual enrollment proof.
+	ManagedRouteLandings map[string]string `json:"managedRouteLandings,omitempty"`
+
 	RetiredLandings    map[string]RetiredLanding    `json:"retiredLandings,omitempty"`
 	SubscriptionOrders map[string]SubscriptionOrder `json:"subscriptionOrders,omitempty"`
 	// Deleted entries remain disabled and retained for identity and accounting history.
