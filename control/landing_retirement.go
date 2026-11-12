@@ -380,8 +380,11 @@ func (s *Store) cleanLandingHistoryLocked(id string) error {
 			delete(s.latencies, key)
 		}
 	}
-	delete(s.networkReports, id)
-	delete(s.pathMTUNodes, id)
-	delete(s.pathMTUReports, id)
+	// Volatile diagnostics are keyed by the runtime certificate, not host ID.
+	certificate := s.business.material.RetiredLandings[id].CertificateID
+	delete(s.qualityPolls, certificate)
+	delete(s.networkReports, certificate)
+	delete(s.pathMTUNodes, certificate)
+	delete(s.pathMTUReports, certificate)
 	return nil
 }
