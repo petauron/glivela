@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	glivela "github.com/petauron/glivela"
@@ -65,7 +66,7 @@ func (r historyRedaction) value(v any, depth int) any {
 				continue
 			}
 			z := r.value(v, depth+1)
-			if z != nil {
+			if z != nil || v == nil {
 				m[k] = z
 			}
 		}
@@ -77,7 +78,7 @@ func (r historyRedaction) value(v any, depth int) any {
 				continue
 			}
 			z := r.value(v, depth+1)
-			if z != nil {
+			if z != nil || v == nil {
 				a = append(a, z)
 			}
 		}
@@ -393,9 +394,11 @@ func purgeArchiveHistory(a archive, ids map[string]bool, sourceKey []byte, prote
 		return a, r, err
 	}
 	raw, err = r.payload(raw, 0)
-	if err != nil || json.Unmarshal(raw, &a.References) != nil {
+	var references glivela.ImportReferences
+	if err != nil || json.Unmarshal(raw, &references) != nil {
 		return a, r, errors.New("redacted references invalid")
 	}
+	a.References = references
 	a.HistoryRedacted = true
 	return a, r, nil
 }
@@ -674,6 +677,20 @@ func redactPlainCenterHistory(ctx context.Context, tx *sql.Tx, r historyRedactio
 	return changed, nil
 }
 
+// Root performs offline maintenance, while the live application may use a
+// restricted service UID. Atomic replacement must retain its established owner.
+func preserveHistoryOwner(file *os.File, path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return errors.New("private history owner unavailable")
+	}
+	return file.Chown(int(stat.Uid), int(stat.Gid))
+}
+
 func purgeHistoryCommand(ctx context.Context, args []string) error {
 	f := flag.NewFlagSet("purge-retired-history", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
@@ -823,6 +840,9 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 			}
 			name := tmp.Name()
 			if e = tmp.Chmod(0600); e == nil {
+				e = preserveHistoryOwner(tmp, path)
+			}
+			if e == nil {
 				_, e = tmp.Write(after)
 			}
 			if e == nil {
@@ -862,6 +882,9 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	name := tmp.Name()
 	defer os.Remove(name)
 	if err = tmp.Chmod(0600); err == nil {
+		err = preserveHistoryOwner(tmp, path)
+	}
+	if err == nil {
 		_, err = tmp.Write(after)
 	}
 	if err == nil {
