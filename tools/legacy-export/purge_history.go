@@ -66,7 +66,7 @@ func (r historyRedaction) value(v any, depth int) any {
 				continue
 			}
 			z := r.value(v, depth+1)
-			if z != nil {
+			if z != nil || v == nil {
 				m[k] = z
 			}
 		}
@@ -78,7 +78,7 @@ func (r historyRedaction) value(v any, depth int) any {
 				continue
 			}
 			z := r.value(v, depth+1)
-			if z != nil {
+			if z != nil || v == nil {
 				a = append(a, z)
 			}
 		}
@@ -394,9 +394,11 @@ func purgeArchiveHistory(a archive, ids map[string]bool, sourceKey []byte, prote
 		return a, r, err
 	}
 	raw, err = r.payload(raw, 0)
-	if err != nil || json.Unmarshal(raw, &a.References) != nil {
+	var references glivela.ImportReferences
+	if err != nil || json.Unmarshal(raw, &references) != nil {
 		return a, r, errors.New("redacted references invalid")
 	}
+	a.References = references
 	a.HistoryRedacted = true
 	return a, r, nil
 }
