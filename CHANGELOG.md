@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.135](https://github.com/petauron/glivela/compare/v0.1.0-alpha.134...v0.1.0-alpha.135) (2026-11-12)
+
+
+### Bug Fixes
+
+* **routes:** admit canonical public IPv6 entry peers ([#123](https://github.com/petauron/glivela/issues/123)) ([b8b93f9](https://github.com/petauron/glivela/commit/b8b93f906e0e1a08a85e615352ff2c3a7a7c3aac))
+
 ## [0.1.0-alpha.134](https://github.com/petauron/glivela/compare/v0.1.0-alpha.133...v0.1.0-alpha.134) (2026-11-12)
 
 
