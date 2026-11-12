@@ -128,11 +128,23 @@ func (s *Store) latencyTargetsLocked() map[string]latencyTarget {
 		}
 		for _, peer := range entry.Desired.Entry.Peers {
 			node, ok := landings[peer.EgressID]
-			if !ok || !node.Desired.Landing.HasServerListener() {
+			if !ok || node.Desired.Landing == nil {
+				continue
+			}
+			if peer.Transport.ClientListenerID != "" {
+				chain, authorized := s.boundClientListener(entry, node, peer)
+				if !authorized {
+					continue
+				}
+				target := latencyTarget{Certificate: cert, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Transport.Endpoint(peer.Address), EntryID: entry.ID, LandingID: node.ID, Port: peer.Port}
+				if chain.Transport == "ipv6-ss2022" {
+					target.Source = chain.SourceIPv6
+				}
+				out[latencyTargetKey(target)] = target
 				continue
 			}
 			enrolled, ok := node.RouteEntries[entry.ID]
-			if !ok || enrolled.CertificateID != cert || peer.Transport != node.Desired.Landing.Transport || peer.Address != node.Desired.Landing.Address {
+			if !ok || !node.Desired.Landing.HasServerListener() || enrolled.CertificateID != cert || peer.Transport != node.Desired.Landing.Transport || peer.Address != node.Desired.Landing.Address {
 				continue
 			}
 			target := latencyTarget{Certificate: cert, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Transport.Endpoint(peer.Address), EntryID: entry.ID, LandingID: node.ID, Port: peer.Port}

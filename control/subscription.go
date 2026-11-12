@@ -313,8 +313,17 @@ func (s *Store) subscriptionNodeEnabled(node Node, now time.Time) bool {
 
 func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now time.Time) bool {
 	for _, node := range s.nodes {
-		if node.ID != landingID || node.Desired.Landing == nil || !node.Desired.Landing.HasServerListener() || !s.subscriptionNodeEnabled(node, now) {
+		if node.ID != landingID || node.Desired.Landing == nil || !s.subscriptionNodeEnabled(node, now) {
 			continue
+		}
+		for _, peer := range entry.Desired.Entry.Peers {
+			if peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
+				_, authorized := s.boundClientListener(entry, node, peer)
+				return authorized
+			}
+		}
+		if !node.Desired.Landing.HasServerListener() {
+			return false
 		}
 		authorized, ok := node.RouteEntries[entry.ID]
 		if !ok || authorized.CertificateID != entry.CertificateID || s.nodes[authorized.CertificateID].ID != entry.ID || entry.Desired.EntryNetwork.Source == nil || authorized.Address != entry.Desired.EntryNetwork.Source.Address {
@@ -336,8 +345,17 @@ func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now tim
 // authorize the new owned subscription.
 func (s *Store) subscriptionPeerReady(entry Node, landingID string, now time.Time) bool {
 	for _, node := range s.nodes {
-		if node.ID != landingID || !s.availableRuntime(entry, now) || !s.availableRuntime(node, now) || !entryPeerFresh(entry, node, now) {
+		if node.ID != landingID || !s.availableRuntime(entry, now) || !s.availableRuntime(node, now) {
 			continue
+		}
+		for _, peer := range entry.Desired.Entry.Peers {
+			if peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
+				_, err := s.publicPeerAcceptanceLocked(entry.CertificateID, landingAcceptanceRequest{SnapshotID: entry.ID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256, PeerID: landingID})
+				return err == nil && entryPeerFreshSource(entry, node, now, entry.Desired.EntryNetwork.Source.Address)
+			}
+		}
+		if !entryPeerFresh(entry, node, now) {
+			return false
 		}
 		authorized, ok := node.RouteEntries[entry.ID]
 		check, hasCheck := node.Checks[entry.ID]
