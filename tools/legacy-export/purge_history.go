@@ -622,7 +622,11 @@ func redactPlainCenterHistory(ctx context.Context, tx *sql.Tx, r historyRedactio
 					owner[c] = v
 				}
 			}
-			if r.owned(owner) {
+			pair, _ := owner["pair_key"].(string)
+			if r.owned(owner) || r.text(pair, 0) != pair {
+				if state, ok := owner["state"].(string); ok && (state == "pending" || state == "running") {
+					return changed, errors.New("active history owner requires completion before redaction")
+				}
 				if _, e = tx.ExecContext(ctx, "DELETE FROM "+name+" WHERE rowid=?", record[0]); e != nil {
 					return changed, e
 				}
