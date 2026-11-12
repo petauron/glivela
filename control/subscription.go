@@ -134,7 +134,7 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 	if account == nil || !account.Account.Plan.Enabled || account.Account.Plan.ExpiryTime > 0 && account.Account.Plan.ExpiryTime <= now.UnixMilli() {
 		return subscriptionContent{}, errSubscriptionMissing
 	}
-	quota, err := glivela.ProjectQuota(account.Account.Plan, account.Usage)
+	quota, err := account.Quota()
 	if err != nil || !quota.Enabled {
 		return subscriptionContent{}, errSubscriptionMissing
 	}

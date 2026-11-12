@@ -1,6 +1,6 @@
 import type { Account } from "./control-types";
 export function amount(value: string) { return `${(Number(BigInt(value) / 1048576n) / 1024).toFixed(2)} GiB`; }
-export function used(account: Account) { return account.usage.reduce((sum, item) => sum + BigInt(item.observed) - BigInt(item.baseline), 0n).toString(); }
+export function used(account: Account) { return account.usage.reduce((sum, item) => sum + BigInt(item.observed) - BigInt(item.baseline), BigInt(account.retiredUsageBytes ?? "0")).toString(); }
 export function reported(value: string) {
  const at=Date.parse(value); if (!Number.isFinite(at) || value.startsWith("0001-")) return "尚无上报";
  const seconds=Math.max(0,(Date.now()-at)/1000);

@@ -75,6 +75,7 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 			}
 			if !due.After(now) {
 				account.Usage = glivela.ResetUsage(account.Usage)
+				account.RetiredUsageBytes = 0
 				for _, credential := range account.Credentials {
 					counter := next.TrafficCounters[credential.ID]
 					counter.UploadBytes, counter.DownloadBytes = 0, 0
