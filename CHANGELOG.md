@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.136](https://github.com/petauron/glivela/compare/v0.1.0-alpha.135...v0.1.0-alpha.136) (2026-11-12)
+
+
+### Bug Fixes
+
+* **routes:** publish bound SS2022 server listeners end to end ([#125](https://github.com/petauron/glivela/issues/125)) ([b071dc1](https://github.com/petauron/glivela/commit/b071dc13079681c6593d01e04a8a877334fa9353))
+
 ## [0.1.0-alpha.135](https://github.com/petauron/glivela/compare/v0.1.0-alpha.134...v0.1.0-alpha.135) (2026-11-12)
 
 
