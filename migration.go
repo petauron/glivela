@@ -11,6 +11,9 @@ import (
 )
 
 type ImportAccount struct {
+	// RetiredUsageBytes preserves this period's account-wide consumption after
+	// dedicated route credentials and per-node watermarks have been erased.
+	RetiredUsageBytes            int64             `json:"retiredUsageBytes,omitempty"`
 	Account                      Account           `json:"account"`
 	SubscriptionTokenFingerprint string            `json:"subscriptionTokenFingerprint"`
 	Credentials                  []Credential      `json:"credentials"`
@@ -45,7 +48,7 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 	seenGrantIDs := map[string]bool{}
 	for accountIndex := range plan.Accounts {
 		item := &plan.Accounts[accountIndex]
-		if item.Account.Validate() != nil || seenAccounts[item.Account.ID] || !validTokenFingerprint(item.SubscriptionTokenFingerprint) || seenTokens[item.SubscriptionTokenFingerprint] || len(item.Credentials) > 1024 {
+		if item.RetiredUsageBytes < 0 || item.Account.Validate() != nil || seenAccounts[item.Account.ID] || !validTokenFingerprint(item.SubscriptionTokenFingerprint) || seenTokens[item.SubscriptionTokenFingerprint] || len(item.Credentials) > 1024 {
 			return ImportPlan{}, errors.New("glivela: conflicting import account")
 		}
 		seenAccounts[item.Account.ID], seenTokens[item.SubscriptionTokenFingerprint] = true, true
@@ -94,7 +97,7 @@ func PlanImport(accounts []ImportAccount) (ImportPlan, error) {
 		// observation. Live quota/subscription projection still rejects an empty
 		// credential inventory; importing it does not grant network access.
 		if len(item.Credentials) > 0 {
-			if _, err := ProjectQuota(item.Account.Plan, item.Usage); err != nil {
+			if _, err := item.Quota(); err != nil {
 				return ImportPlan{}, err
 			}
 		}

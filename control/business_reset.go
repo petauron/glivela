@@ -31,6 +31,7 @@ func (s *Store) ResetAccountUsage(ctx context.Context, id string, expected uint6
 		return AccountChangeResult{}, invalid
 	}
 	accounts[index].Usage = glivela.ResetUsage(accounts[index].Usage)
+	accounts[index].RetiredUsageBytes = 0
 	accounts[index].Account.DesiredRevision++
 	var err error
 	next.Plan, err = glivela.PlanImport(accounts)

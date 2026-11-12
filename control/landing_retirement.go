@@ -94,20 +94,72 @@ func (s *Store) RetireLanding(ctx context.Context, change RetireLandingChange) e
 }
 
 func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange) (glivela.ImportMaterial, map[string]bool, error) {
-	refused := errors.New("control: disable dependent client chains and remove server routes first")
+	refused := errors.New("control: disable dependent client chains and server routes first")
 	for _, endpoint := range m.Endpoints {
 		if endpoint.Reality.EntryID == change.ID {
 			return m, nil, refused
 		}
 	}
-	for _, account := range m.Plan.Accounts {
-		for _, grant := range account.Grants {
-			if grant.EgressID == change.ID || grant.IPv4EgressID == change.ID {
+	next := m
+	next.ProtocolSecrets = maps.Clone(m.ProtocolSecrets)
+	next.HysteriaSecrets = maps.Clone(m.HysteriaSecrets)
+	next.TrafficCounters = maps.Clone(m.TrafficCounters)
+	next.DeletedRoutes = maps.Clone(m.DeletedRoutes)
+	accounts := slices.Clone(m.Plan.Accounts)
+	removedRoutes := map[string]bool{}
+	for i := range accounts {
+		a := &accounts[i]
+		a.Grants = slices.Clone(a.Grants)
+		for _, grant := range a.Grants {
+			if grant.EgressID != change.ID && grant.IPv4EgressID != change.ID {
+				continue
+			}
+			if grant.Enabled {
 				return m, nil, refused
 			}
+			removedRoutes[grant.ID] = true
+			delete(next.DeletedRoutes, grant.ID)
 		}
+		a.Grants = slices.DeleteFunc(a.Grants, func(g glivela.RouteGrant) bool { return removedRoutes[g.ID] })
+		removedCredentials := map[string]bool{}
+		a.Credentials = slices.Clone(a.Credentials)
+		for _, c := range a.Credentials {
+			if c.EgressID != change.ID {
+				continue
+			}
+			if c.Kind != glivela.RouteCredential {
+				return m, nil, refused
+			}
+			// A composite route's other exit cannot be silently changed.
+			for _, grant := range a.Grants {
+				if grant.Route.ID == c.ID || grant.Base.ID == c.ID {
+					return m, nil, refused
+				}
+			}
+			removedCredentials[c.ID] = true
+			delete(next.ProtocolSecrets, c.ID)
+			delete(next.HysteriaSecrets, c.ID)
+			delete(next.TrafficCounters, c.ID)
+		}
+		a.Credentials = slices.DeleteFunc(a.Credentials, func(c glivela.Credential) bool { return removedCredentials[c.ID] })
+		a.Usage = slices.Clone(a.Usage)
+		for _, u := range a.Usage {
+			if !removedCredentials[u.CredentialID] {
+				continue
+			}
+			amount := u.Observed - u.Baseline
+			if amount < 0 || a.RetiredUsageBytes > math.MaxInt64-amount {
+				return m, nil, errors.New("control: retired usage overflow")
+			}
+			a.RetiredUsageBytes += amount
+		}
+		a.Usage = slices.DeleteFunc(a.Usage, func(u glivela.UsageMember) bool { return removedCredentials[u.CredentialID] })
 	}
-	next := m
+	var err error
+	next.Plan, err = glivela.PlanImport(accounts)
+	if err != nil {
+		return m, nil, err
+	}
 	removed := map[string]bool{}
 	next.ClientChains = make([]glivela.ClientChain, 0, len(m.ClientChains))
 	next.DeletedClientChains = maps.Clone(m.DeletedClientChains)
@@ -133,7 +185,7 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 	next.SubscriptionOrders = maps.Clone(m.SubscriptionOrders)
 	for id, order := range next.SubscriptionOrders {
 		ids := slices.DeleteFunc(slices.Clone(order.IDs), func(id string) bool {
-			return removed[strings.TrimPrefix(id, "chain/")] && strings.HasPrefix(id, "chain/")
+			return removed[strings.TrimPrefix(id, "chain/")] && strings.HasPrefix(id, "chain/") || removedRoutes[strings.TrimPrefix(id, "route/")] && strings.HasPrefix(id, "route/")
 		})
 		if len(ids) != len(order.IDs) {
 			if order.Revision == math.MaxUint64 {
@@ -209,6 +261,8 @@ func projectRetiredLandings(nodes map[string]Node, m glivela.ImportMaterial) (ma
 		}
 		desired := node.Desired.clone()
 		retired := func(id string) bool { _, ok := m.RetiredLandings[id]; return ok }
+		desired.Entry.Credentials = slices.DeleteFunc(desired.Entry.Credentials, func(c glivela.CredentialMaterial) bool { return retired(c.Credential.EgressID) })
+		desired.Entry.Grants = slices.DeleteFunc(desired.Entry.Grants, func(g glivela.RouteGrant) bool { return retired(g.EgressID) || retired(g.IPv4EgressID) })
 		desired.Entry.Peers = slices.DeleteFunc(desired.Entry.Peers, func(p glivela.RoutePeer) bool { return retired(p.EgressID) })
 		desired.EntryNetwork.Peers = slices.DeleteFunc(desired.EntryNetwork.Peers, func(p EntryPeer) bool { return retired(p.EgressID) })
 		desired.EntryNetwork.SpeedPeers = slices.DeleteFunc(desired.EntryNetwork.SpeedPeers, func(p EntrySpeedPeer) bool { return retired(p.LandingID) })

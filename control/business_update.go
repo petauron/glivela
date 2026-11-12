@@ -143,7 +143,7 @@ func effectiveBusinessCredentials(m glivela.ImportMaterial, now time.Time) (map[
 		if len(a.Credentials) == 0 {
 			continue
 		}
-		quota, err := glivela.ProjectQuota(a.Account.Plan, a.Usage)
+		quota, err := a.Quota()
 		if err != nil {
 			return nil, nil, err
 		}

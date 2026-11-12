@@ -28,10 +28,11 @@ type businessState struct {
 }
 
 type BusinessAccount struct {
-	Account  glivela.Account                          `json:"account"`
-	Schedule glivela.ImportResetSchedule              `json:"schedule"`
-	Usage    []glivela.UsageMember                    `json:"usage"`
-	Traffic  map[string]glivela.ImportTrafficCounters `json:"traffic"`
+	RetiredUsageBytes int64                                    `json:"retiredUsageBytes,string"`
+	Account           glivela.Account                          `json:"account"`
+	Schedule          glivela.ImportResetSchedule              `json:"schedule"`
+	Usage             []glivela.UsageMember                    `json:"usage"`
+	Traffic           map[string]glivela.ImportTrafficCounters `json:"traffic"`
 }
 
 // Browser clients must not round original 64-bit ledger values through a
@@ -62,11 +63,12 @@ func (a BusinessAccount) MarshalJSON() ([]byte, error) {
 		RawDownloadBytes int64 `json:"rawDownloadBytes,string"`
 	}
 	view := struct {
-		Account  account                     `json:"account"`
-		Schedule glivela.ImportResetSchedule `json:"schedule"`
-		Usage    []usage                     `json:"usage"`
-		Traffic  map[string]traffic          `json:"traffic"`
-	}{Account: account{a.Account, plan{a.Account.Plan, a.Account.Plan.TotalBytes, a.Account.Plan.ExpiryTime}, a.Account.DesiredRevision, a.Account.AppliedRevision}, Schedule: a.Schedule, Usage: []usage{}, Traffic: map[string]traffic{}}
+		RetiredUsageBytes int64                       `json:"retiredUsageBytes,string"`
+		Account           account                     `json:"account"`
+		Schedule          glivela.ImportResetSchedule `json:"schedule"`
+		Usage             []usage                     `json:"usage"`
+		Traffic           map[string]traffic          `json:"traffic"`
+	}{RetiredUsageBytes: a.RetiredUsageBytes, Account: account{a.Account, plan{a.Account.Plan, a.Account.Plan.TotalBytes, a.Account.Plan.ExpiryTime}, a.Account.DesiredRevision, a.Account.AppliedRevision}, Schedule: a.Schedule, Usage: []usage{}, Traffic: map[string]traffic{}}
 	for _, member := range a.Usage {
 		view.Usage = append(view.Usage, usage{member, member.Baseline, member.Observed})
 	}
@@ -306,7 +308,7 @@ func (s *Store) Business() BusinessInventory {
 	now := time.Now().UTC()
 	credentials, grants, projectionErr := effectiveBusinessCredentials(m, now)
 	for _, item := range m.Plan.Accounts {
-		account := BusinessAccount{Account: item.Account, Schedule: m.ResetSchedules[item.Account.ID], Usage: append([]glivela.UsageMember{}, item.Usage...), Traffic: map[string]glivela.ImportTrafficCounters{}}
+		account := BusinessAccount{RetiredUsageBytes: item.RetiredUsageBytes, Account: item.Account, Schedule: m.ResetSchedules[item.Account.ID], Usage: append([]glivela.UsageMember{}, item.Usage...), Traffic: map[string]glivela.ImportTrafficCounters{}}
 		for _, credential := range item.Credentials {
 			account.Traffic[credential.ID] = m.TrafficCounters[credential.ID]
 		}

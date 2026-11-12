@@ -49,6 +49,23 @@ func ProjectQuota(plan AccountPlan, members []UsageMember) (QuotaProjection, err
 	return projection, nil
 }
 
+// Quota retains consumed bytes from permanently retired routes without
+// retaining their credentials or attributing them to another live counter.
+func (a ImportAccount) Quota() (QuotaProjection, error) {
+	q, err := ProjectQuota(a.Account.Plan, a.Usage)
+	if err != nil || a.RetiredUsageBytes < 0 || q.UsedBytes > math.MaxInt64-a.RetiredUsageBytes {
+		return QuotaProjection{}, errors.New("glivela: invalid retired usage")
+	}
+	q.UsedBytes += a.RetiredUsageBytes
+	q.Enabled = q.Enabled && (a.Account.Plan.TotalBytes == 0 || q.UsedBytes < a.Account.Plan.TotalBytes)
+	if !q.Enabled {
+		for i := range q.Gates {
+			q.Gates[i].Enabled = false
+		}
+	}
+	return q, nil
+}
+
 func ObserveUsage(members []UsageMember, counters map[string]int64) ([]UsageMember, error) {
 	result := slices.Clone(members)
 	for index, member := range result {
