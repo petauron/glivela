@@ -13,6 +13,9 @@ func TestExistingIPv6ListenerHostGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !g.matchesTarget(fixtureNFT(t, g), g.table) {
+		t.Fatal("IPv6 owned target not recognized for cleanup")
+	}
 	raw, _ := json.Marshal(g.hostObjects())
 	s := string(raw)
 	if !strings.Contains(s, "ipv6_addr") || !strings.Contains(s, "ip6") || !strings.Contains(s, "24008") || strings.Contains(s, "ipv4_addr") {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -266,6 +267,10 @@ func (g *TrafficGate) RemoveClosedConflicts(ctx context.Context) error {
 }
 
 func (g *TrafficGate) matchesTarget(document nftDocument, table string) bool {
+	protocol := "ip"
+	if ip, err := netip.ParseAddr(g.endpoint()); err == nil && ip.Is6() {
+		protocol = "ip6"
+	}
 	for _, object := range document.Objects {
 		rule := object["rule"]
 		if rule == nil || rule["family"] != "inet" || rule["table"] != table || rule["chain"] != g.scopeChain() {
@@ -292,7 +297,7 @@ func (g *TrafficGate) matchesTarget(document nftDocument, table string) bool {
 			if meta, ok := left["meta"].(map[string]any); ok && (g.gid == 0 && meta["key"] == "iifname" && match["right"] == g.bridge || g.gid != 0 && meta["key"] == "skgid" && match["right"] == float64(g.gid)) {
 				bridge = true
 			}
-			if payload, ok := left["payload"].(map[string]any); ok && payload["protocol"] == "ip" && payload["field"] == "daddr" && match["right"] == g.endpoint() {
+			if payload, ok := left["payload"].(map[string]any); ok && payload["protocol"] == protocol && payload["field"] == "daddr" && match["right"] == g.endpoint() {
 				address = true
 			}
 		}
