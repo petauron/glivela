@@ -585,7 +585,16 @@ func (r *NativeRuntime) Inspect(ctx context.Context) (Observation, error) {
 	if err := r.verifyConfig(a); err != nil {
 		return Observation{AppliedReceipt: glivela.AppliedReceipt{}}, err
 	}
-	observation := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: a.Revision, ConfigSHA256: a.ConfigSHA256, RuntimeReady: r.Driver.Healthy(ctx, a) == nil}, EntryHealth: r.Driver.EntryHealth(a)}
+	observation := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: a.Revision, ConfigSHA256: a.ConfigSHA256}}
+	entry, combined := r.Driver.(interface {
+		observe(context.Context, Desired) (bool, *EntryTraffic)
+	})
+	if combined {
+		observation.RuntimeReady, observation.Traffic = entry.observe(ctx, a)
+	} else {
+		observation.RuntimeReady = r.Driver.Healthy(ctx, a) == nil
+	}
+	observation.EntryHealth = r.Driver.EntryHealth(a)
 	if observation.RuntimeReady {
 		r.startupRetry = nil
 		if a.Landing != nil {
@@ -599,7 +608,7 @@ func (r *NativeRuntime) Inspect(ctx context.Context) (Observation, error) {
 	}
 	if entry, ok := r.Driver.(interface {
 		traffic(context.Context, Desired) (*EntryTraffic, error)
-	}); ok && observation.RuntimeReady {
+	}); ok && !combined && observation.RuntimeReady {
 		// Accounting failure is not permission to restart an otherwise healthy
 		// proxy. A missing sample stays missing, never becomes zero usage.
 		observation.Traffic, _ = entry.traffic(ctx, a)

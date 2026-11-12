@@ -17,6 +17,10 @@ func (*NativeEntryDriver) traffic(context.Context, Desired) (*EntryTraffic, erro
 	return nil, errors.New("control: native entry requires Linux")
 }
 
+func (*NativeEntryDriver) trafficFromProcess(context.Context, Desired, nativeEntryProcess) (*EntryTraffic, error) {
+	return nil, errors.New("control: native entry requires Linux")
+}
+
 func (*NativeEntryDriver) drainTransport(context.Context, Desired) (*EntryTraffic, error) {
 	return nil, errors.New("control: native transport drain requires Linux")
 }

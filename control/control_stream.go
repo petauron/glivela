@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -60,13 +61,53 @@ func (h *speedHub) remove(cert string, s *speedStreamSession) {
 		delete(h.nodes, cert)
 	}
 }
-func (h *speedHub) wake() {
+
+// Wake only named enrolled sessions. Normal receipts must not fan out to
+// unrelated nodes; every awakened stream still performs its mTLS/session checks.
+func (h *speedHub) wake(certificates ...string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, s := range h.nodes {
-		select {
-		case s.wake <- struct{}{}:
-		default:
+	for _, cert := range certificates {
+		if s := h.nodes[cert]; s != nil {
+			select {
+			case s.wake <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+// The caller owns Store.mu. Both endpoints may need to act when a task changes
+// stage, loses freshness, or its policy changes. Completed tasks need no wake.
+func (s *Store) wakeSpeedParticipantsLocked(certificate string) {
+	if s.speedHub == nil {
+		return
+	}
+	for _, job := range s.speedJobs {
+		if job.Phase == "done" {
+			continue
+		}
+		if certificate == "" || certificate == job.Target.Certificate || certificate == job.LandingCertificate {
+			s.speedHub.wake(job.Target.Certificate, job.LandingCertificate)
+		}
+	}
+}
+
+// Keep immediate identity/configuration invalidation, while ordinary health
+// receipts wake only endpoints with unfinished speed work. Periodic identity
+// and expiry checks in Connect are unchanged.
+func (s *Store) wakeSpeedNodeChangesLocked(next map[string]Node) {
+	if s.speedHub == nil {
+		return
+	}
+	for cert, previous := range s.nodes {
+		current, exists := next[cert]
+		policyChanged := !exists || previous.ID != current.ID || previous.Desired.Revision != current.Desired.Revision || previous.Desired.ConfigSHA256 != current.Desired.ConfigSHA256 || previous.AvailabilityRevision != current.AvailabilityRevision || previous.PublicationSuspended != current.PublicationSuspended || !reflect.DeepEqual(previous.RouteEntries, current.RouteEntries)
+		if policyChanged {
+			s.speedHub.wake(cert)
+		}
+		if policyChanged || previous.ReportedAt != current.ReportedAt {
+			s.wakeSpeedParticipantsLocked(cert)
 		}
 	}
 }

@@ -469,10 +469,8 @@ func (s *Store) commit(nodes map[string]Node) error {
 			}
 		}
 	}
+	s.wakeSpeedNodeChangesLocked(nodes)
 	s.nodes = nodes
-	if s.speedHub != nil {
-		s.speedHub.wake()
-	}
 	directory, err := os.Open(filepath.Dir(s.path))
 	if err != nil {
 		return err

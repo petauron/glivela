@@ -110,30 +110,28 @@ func verifyNativeEntryProcess(driver SystemdDriver, state nativeEntryProcess, de
 }
 
 func (d *NativeEntryDriver) traffic(ctx context.Context, desired Desired) (*EntryTraffic, error) {
-	if err := d.readyProcess(ctx, desired); err != nil {
+	before, err := d.verifiedProcess(ctx, desired)
+	if err != nil {
 		d.invalidateExecutableVerification()
 		return nil, err
 	}
-	before, err := inspectNativeEntry(ctx, d.SystemdDriver)
-	if err != nil {
-		return nil, err
-	}
+	return d.trafficFromProcess(ctx, desired, before)
+}
+
+func (d *NativeEntryDriver) trafficFromProcess(ctx context.Context, desired Desired, before nativeEntryProcess) (*EntryTraffic, error) {
 	if err := d.verifyTrafficExecutable(before, desired); err != nil {
-		return nil, err
+		return nil, errors.Join(errNativeEntryChanged, err)
 	}
-	raw, err := nativeEntryCommand(ctx, d.Binary, "api", "statsquery", "--server=127.0.0.1:10085")
-	if err != nil {
-		return nil, err
+	raw, queryErr := nativeEntryCommand(ctx, d.Binary, "api", "statsquery", "--server=127.0.0.1:10085")
+	// Check even when the API failed, so a restart cannot retain a healthy receipt.
+	if err := d.verifySameProcess(ctx, before); err != nil {
+		d.invalidateExecutableVerification()
+		return nil, errors.Join(errNativeEntryChanged, err)
 	}
-	sample, err := parseEntryTraffic(raw, desired, before.StartedAt)
-	if err != nil {
-		return nil, err
+	if queryErr != nil {
+		return nil, queryErr
 	}
-	after, err := inspectNativeEntry(ctx, d.SystemdDriver)
-	if err != nil || before != after {
-		return nil, errors.New("control: native entry restarted during traffic sampling")
-	}
-	return sample, nil
+	return parseEntryTraffic(raw, desired, before.StartedAt)
 }
 
 // A cached digest is bounded to 30 seconds and the exact installed inode,

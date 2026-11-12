@@ -205,16 +205,16 @@ func localTLSReadbackExpression(expression any) any {
 // reconcileDNS replaces only the owned destination-chain rules when the
 // root-owned resolver inventory changes. Every preexisting object must match
 // the complete old policy before the atomic transaction is allowed.
-func (p EntryFirewall) reconcileDNS(ctx context.Context) error {
+func (p EntryFirewall) reconcileDNS(ctx context.Context) (bool, error) {
 	table, _ := p.identity()
 	data, err := runNFT(ctx, nil, "--json", "list", "ruleset")
 	var document nftDocument
 	if err != nil || len(data) > nftOutputLimit || json.Unmarshal(data, &document) != nil || document.Objects == nil {
-		return errors.New("landing: cannot inspect entry firewall for DNS reconciliation")
+		return false, errors.New("landing: cannot inspect entry firewall for DNS reconciliation")
 	}
 	found, currentErr := validateNFTPolicy(document, table, p.objects(), false)
 	if currentErr == nil {
-		return nil
+		return found, nil
 	} // absent or already exact
 	old := p
 	old.DNS = nil
@@ -227,7 +227,7 @@ func (p EntryFirewall) reconcileDNS(ctx context.Context) error {
 		}
 		handle, ok := rule["handle"].(float64)
 		if !ok || handle <= 0 || handle != float64(uint64(handle)) {
-			return errors.New("landing: entry firewall rule handle unavailable")
+			return false, errors.New("landing: entry firewall rule handle unavailable")
 		}
 		handles = append(handles, uint64(handle))
 		expressions, ok := rule["expr"].([]any)
@@ -265,11 +265,11 @@ func (p EntryFirewall) reconcileDNS(ctx context.Context) error {
 		}
 	}
 	if err := old.validate(); err != nil {
-		return currentErr
+		return false, currentErr
 	}
 	found, err = validateNFTPolicy(document, table, old.objects(), false)
 	if err != nil || !found || len(handles) == 0 {
-		return currentErr
+		return false, currentErr
 	}
 	commands := make([]any, 0, len(handles)+len(p.objects()))
 	for _, handle := range handles {
@@ -282,12 +282,13 @@ func (p EntryFirewall) reconcileDNS(ctx context.Context) error {
 	}
 	batch, err := json.Marshal(nftObject{"nftables": commands})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if _, err := runNFT(ctx, batch, "--json", "--file", "-"); err != nil {
-		return err
+		return false, err
 	}
-	return verifyOwnedFirewall(ctx, table, p.objects())
+	err = verifyOwnedFirewall(ctx, table, p.objects())
+	return err == nil, err
 }
 
 func (p EntryFirewall) Install(ctx context.Context) error {
@@ -295,7 +296,7 @@ func (p EntryFirewall) Install(ctx context.Context) error {
 		return err
 	}
 	table, _ := p.identity()
-	if err := p.reconcileDNS(ctx); err != nil {
+	if _, err := p.reconcileDNS(ctx); err != nil {
 		return err
 	}
 	if err := installOwnedFirewall(ctx, runNFT, table, p.objects()); err != nil {
@@ -308,18 +309,24 @@ func (p EntryFirewall) Verify(ctx context.Context) error {
 	if err := p.validate(); err != nil {
 		return err
 	}
-	table, _ := p.identity()
-	if err := p.reconcileDNS(ctx); err != nil {
+	// reconcileDNS already validates the full live ruleset. A DNS update also
+	// reads back the transaction before returning. Never reuse it across rounds.
+	found, err := p.reconcileDNS(ctx)
+	if err != nil {
 		return err
 	}
-	return verifyOwnedFirewall(ctx, table, p.objects())
+	if !found {
+		return errors.New("landing: native firewall is missing or changed")
+	}
+	return nil
 }
+
 func (p EntryFirewall) Remove(ctx context.Context) error {
 	if err := p.validate(); err != nil {
 		return err
 	}
 	table, _ := p.identity()
-	if err := p.reconcileDNS(ctx); err != nil {
+	if _, err := p.reconcileDNS(ctx); err != nil {
 		return err
 	}
 	if err := removeOwnedFirewall(ctx, runNFT, table, p.objects()); err != nil {

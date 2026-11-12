@@ -65,7 +65,11 @@ func TestInstalledTransportFailureRecovery(t *testing.T) {
 	if err != nil || initialErr != nil || current == initial || os.Geteuid() != 0 {
 		t.Fatal("separate root network namespace required")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
+	timeout := 80 * time.Second
+	if os.Getenv("GLIVELA_OBSERVATION_BENCH") == "1" {
+		timeout = 180 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	command := func(name string, args ...string) {
 		t.Helper()
@@ -77,13 +81,25 @@ func TestInstalledTransportFailureRecovery(t *testing.T) {
 	for _, addr := range []string{"100.64.0.3/32", "93.184.216.34/32"} {
 		command("ip", "addr", "add", addr, "dev", "lo")
 	}
-	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if os.Getenv("GLIVELA_OBSERVATION_BENCH") == "1" {
+			fmt.Fprint(w, "ip=93.184.216.34\n")
+		} else {
+			w.WriteHeader(204)
+		}
+	}))
 	target.Listener.Close()
 	target.Listener, err = net.Listen("tcp", "93.184.216.34:443")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target.Listener = transportTargetListener{target.Listener}
+	if os.Getenv("GLIVELA_OBSERVATION_BENCH") == "1" {
+		// A normal FIN retains the authenticated HTTP response; the transport-drain
+		// fixture's abortive close would discard it and produce a spurious EOF.
+		configureObservationTarget(t, ctx, target)
+	} else {
+		target.Listener = transportTargetListener{target.Listener}
+	}
 	target.EnableHTTP2 = true
 	target.StartTLS()
 	defer target.Close()
@@ -130,6 +146,11 @@ func TestInstalledTransportFailureRecovery(t *testing.T) {
 	driver.UnitSHA256 = hex.EncodeToString(unitDigest[:])
 	command("/usr/bin/systemctl", "daemon-reload")
 	q, old, _ := quotaFixture(t)
+	if os.Getenv("GLIVELA_OBSERVATION_BENCH") == "1" {
+		// Measure a supported standalone entry, not the transport fixture's fake
+		// private peers. Unit/process identity and real authenticated TLS stay live.
+		old = entryArtifact(t, "entry-example", 1)
+	}
 	plan := old.clone().Entry
 	plan.RealityEndpoints[0].Target = "93.184.216.34:443"
 	plan.RealityEndpoints[0].ServerNames = []string{"example.com"}
@@ -145,6 +166,10 @@ func TestInstalledTransportFailureRecovery(t *testing.T) {
 		t.Fatal("initial installed worker", err)
 	}
 	r.Driver = driver
+	if os.Getenv("GLIVELA_OBSERVATION_BENCH") == "1" {
+		compareNativeObservationCPU(t, ctx, r)
+		return
+	}
 	s := store(t)
 	cert := strings.Repeat("a", 64)
 	landCert := strings.Repeat("b", 64)
