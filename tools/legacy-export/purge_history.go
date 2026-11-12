@@ -161,7 +161,7 @@ func collectHistoricalSecrets(raw []byte) []string {
 		case map[string]any:
 			for k, v := range x {
 				key := strings.ToLower(strings.ReplaceAll(k, "_", ""))
-				if s, ok := v.(string); ok && len(s) >= 8 && (key == "key" || key == "serverkey" || key == "transportkey" || strings.Contains(key, "privatekey") || strings.Contains(key, "password") || strings.Contains(key, "secret") || strings.Contains(key, "credential") || key == "auth" || key == "token") {
+				if s, ok := v.(string); ok && len(s) >= 8 && (key == "key" || key == "serverkey" || key == "transportkey" || key == "privatekey" || key == "privatekeypem" || strings.HasSuffix(key, "password") || key == "secret" || key == "secretvalue" || strings.HasSuffix(key, "credential") || strings.HasSuffix(key, "authkey") || key == "auth" || key == "hy2auth" || key == "token" || key == "protocolid") {
 					if json.Valid([]byte(s)) {
 						walkJSON := collectHistoricalSecrets([]byte(s))
 						words = append(words, walkJSON...)
