@@ -142,6 +142,20 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			store.manageNetwork(w, r)
 		case "/v1/admin/path-mtu":
 			store.managePathMTU(w, r)
+		case "/v1/admin/retire-landing":
+			var input RetireLandingChange
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
+				http.Error(w, "invalid retirement request", http.StatusBadRequest)
+				return
+			}
+			if store.RetireLanding(r.Context(), input) != nil {
+				http.Error(w, "landing retirement not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				Retired bool `json:"retired"`
+			}{true})
 		case "/v1/admin/retire-entry":
 			var input RetireEntryChange
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {

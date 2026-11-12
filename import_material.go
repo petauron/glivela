@@ -11,10 +11,17 @@ import (
 	"io"
 )
 
+// RetiredLanding retains only a revocation fence, never a reusable credential.
+type RetiredLanding struct {
+	CertificateID string `json:"certificateId"`
+	Revision      uint64 `json:"revision,string"`
+}
+
 // ImportMaterial is one atomic, sensitive handover checkpoint. RetainedSource
 // is immutable migration evidence/history, never a second live configuration
 // source. Do not send this material in a node receipt or publish it in logs.
 type ImportMaterial struct {
+	RetiredLandings    map[string]RetiredLanding    `json:"retiredLandings,omitempty"`
 	SubscriptionOrders map[string]SubscriptionOrder `json:"subscriptionOrders,omitempty"`
 	// Deleted entries remain disabled and retained for identity and accounting history.
 	DeletedRoutes       map[string]bool `json:"deletedRoutes,omitempty"`
@@ -36,6 +43,33 @@ type ImportMaterial struct {
 }
 
 func (m ImportMaterial) Validate() error {
+	if len(m.RetiredLandings) > 10000 {
+		return errors.New("glivela: too many retired landings")
+	}
+	for id, retired := range m.RetiredLandings {
+		_, referenced := m.References.Nodes[id]
+		_, shared := m.ClientLandings[id]
+		if !ValidIdentifier(id) || !ValidIdentity(retired.CertificateID) || retired.Revision == 0 || referenced || shared {
+			return errors.New("glivela: invalid retired landing")
+		}
+		for _, chain := range m.ClientChains {
+			if chain.EntryID == id || chain.EgressID == id || chain.Relay != nil && chain.Relay.NodeID == id {
+				return errors.New("glivela: retired landing still referenced")
+			}
+		}
+		for _, endpoint := range m.Endpoints {
+			if endpoint.Reality.EntryID == id {
+				return errors.New("glivela: retired landing is an entry")
+			}
+		}
+		for _, account := range m.Plan.Accounts {
+			for _, grant := range account.Grants {
+				if grant.EgressID == id || grant.IPv4EgressID == id {
+					return errors.New("glivela: retired landing has server routes")
+				}
+			}
+		}
+	}
 	seenChains, seenPorts := map[string]bool{}, map[string]bool{}
 	if len(m.ClientChains) > 1000 {
 		return errors.New("glivela: too many client chains")

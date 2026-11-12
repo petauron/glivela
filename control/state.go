@@ -448,6 +448,11 @@ func (s *Store) commit(nodes map[string]Node) error {
 	if err = os.Rename(file.Name(), s.path); err != nil {
 		return err
 	}
+	for cert := range s.nodes {
+		if _, exists := nodes[cert]; !exists {
+			s.nodeEvents.wake(cert, nodeSignalDesired)
+		}
+	}
 	// Notify only new commands or revisions; ordinary receipts do not trigger an observation loop.
 	for cert, current := range nodes {
 		previous, existed := s.nodes[cert]

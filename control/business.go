@@ -105,13 +105,14 @@ type BusinessRoute struct {
 }
 
 type BusinessRuntime struct {
-	HostID       string    `json:"hostId,omitempty"`
-	ID           string    `json:"id"`
-	Role         string    `json:"role"`
-	Revision     uint64    `json:"revision,string"`
-	RuntimeReady bool      `json:"runtimeReady"`
-	ReportedAt   time.Time `json:"reportedAt"`
-	Peers        []string  `json:"peers"`
+	CertificateID string    `json:"certificateId"`
+	HostID        string    `json:"hostId,omitempty"`
+	ID            string    `json:"id"`
+	Role          string    `json:"role"`
+	Revision      uint64    `json:"revision,string"`
+	RuntimeReady  bool      `json:"runtimeReady"`
+	ReportedAt    time.Time `json:"reportedAt"`
+	Peers         []string  `json:"peers"`
 }
 
 type BusinessNode struct {
@@ -271,7 +272,7 @@ func (s *Store) Business() BusinessInventory {
 			for id := range node.RouteEntries {
 				names[id] = true
 			}
-			view.Runtimes = append(view.Runtimes, BusinessRuntime{ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+			view.Runtimes = append(view.Runtimes, BusinessRuntime{CertificateID: node.CertificateID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
 			if node.EntryQuota != nil {
 				view.Endpoints = append(view.Endpoints, BusinessEndpoint{ID: node.ID, EntryID: node.ID, Name: node.ID, NextResetAt: node.EntryQuota.NextResetAt.Format(time.RFC3339)})
 			}
@@ -371,7 +372,7 @@ func (s *Store) Business() BusinessInventory {
 			}
 		}
 		slices.Sort(peers)
-		view.Runtimes = append(view.Runtimes, BusinessRuntime{HostID: hostID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+		view.Runtimes = append(view.Runtimes, BusinessRuntime{CertificateID: node.CertificateID, HostID: hostID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
 	}
 	slices.SortFunc(view.Nodes, func(a, b BusinessNode) int { return strings.Compare(a.ID, b.ID) })
 	slices.SortFunc(view.Runtimes, func(a, b BusinessRuntime) int { return strings.Compare(a.ID, b.ID) })

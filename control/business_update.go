@@ -215,11 +215,11 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 	if err != nil {
 		return nil, false, err
 	}
-	next := make(map[string]Node, len(nodes))
-	for cert, node := range nodes {
-		next[cert] = node
+	next, changed, err := projectRetiredLandings(nodes, m)
+	if err != nil {
+		return nil, false, err
 	}
-	changed := false
+	nodes = next
 	for cert, node := range nodes {
 		if node.Desired.Entry == nil || entryRetired(m, node.ID) {
 			continue
