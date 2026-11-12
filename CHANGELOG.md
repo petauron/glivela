@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.0-alpha.127](https://github.com/petauron/glivela/compare/v0.1.0-alpha.126...v0.1.0-alpha.127) (2026-11-12)
+
+
+### Bug Fixes
+
+* **retirement:** clear volatile diagnostics by enrolled certificate ([#107](https://github.com/petauron/glivela/issues/107)) ([47cc65e](https://github.com/petauron/glivela/commit/47cc65e027299b99a08f988360bdfffaf29633bf))
+* **retirement:** purge disabled route secrets without resetting shared usage ([#106](https://github.com/petauron/glivela/issues/106)) ([a666138](https://github.com/petauron/glivela/commit/a66613876365603fb63b8601cdb4ba69935f5abb))
+* **retirement:** revoke and purge explicitly returned landings ([#104](https://github.com/petauron/glivela/issues/104)) ([6eb3b4b](https://github.com/petauron/glivela/commit/6eb3b4b72e1702a08b0c50814e29f026409d0bdc))
+
 ## [0.1.0-alpha.126](https://github.com/petauron/glivela/compare/v0.1.0-alpha.125...v0.1.0-alpha.126) (2026-11-11)
 
 
