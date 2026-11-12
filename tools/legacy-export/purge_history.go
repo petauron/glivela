@@ -336,6 +336,9 @@ func purgeArchiveHistory(a archive, ids map[string]bool, sourceKey []byte, prote
 		for i, row := range t.Rows {
 			for j, c := range row {
 				if name == "task_executions" && c.Kind == "blob" && (t.Columns[j] == "sealed_task" || t.Columns[j] == "sealed_result") {
+					if len(c.Blob) == 0 {
+						continue
+					}
 					prefix := "execution-task:"
 					if t.Columns[j] == "sealed_result" {
 						prefix = "execution-result:"
@@ -412,6 +415,9 @@ func redactCenterHistory(ctx context.Context, directory string, r historyRedacti
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	if _, err = db.ExecContext(ctx, `PRAGMA secure_delete=ON`); err != nil {
+		return 0, err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -573,7 +579,11 @@ func redactCenterHistory(ctx context.Context, directory string, r historyRedacti
 	if broken {
 		return changed, errors.New("Center history references invalid")
 	}
-	return changed, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return changed, err
+	}
+	_, err = db.ExecContext(ctx, `VACUUM`)
+	return changed, err
 }
 func redactPlainCenterHistory(ctx context.Context, tx *sql.Tx, r historyRedaction) (int, error) {
 	changed := 0
@@ -723,6 +733,10 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	for _, values := range []map[string]string{m.ProtocolSecrets, m.HysteriaSecrets, m.SubscriptionTokens} {
 		for _, value := range values {
 			protected[value] = true
+			if len(value) == 36 && strings.Count(value, "-") == 4 {
+				protected[strings.ToUpper(value)] = true
+				protected[strings.ToLower(value)] = true
+			}
 		}
 	}
 	for _, landing := range m.ClientLandings {
@@ -753,7 +767,13 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 		if e != nil {
 			return e
 		}
-		if e = writeNewPrivate(*audit, raw); e != nil {
+		if old, e := privateFile(*audit, 1<<20); e == nil {
+			if !bytes.Equal(old, raw) {
+				return errors.New("existing redaction audit differs")
+			}
+		} else if !errors.Is(e, os.ErrNotExist) {
+			return e
+		} else if e = writeNewPrivate(*audit, raw); e != nil {
 			return e
 		}
 	}
