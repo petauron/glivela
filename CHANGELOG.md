@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.133](https://github.com/petauron/glivela/compare/v0.1.0-alpha.132...v0.1.0-alpha.133) (2026-11-12)
+
+
+### Bug Fixes
+
+* **control:** authorize independently enrolled server landings ([bc96bc5](https://github.com/petauron/glivela/commit/bc96bc5a5538ac968d91a90da319245250e7d0f0))
+
 ## [0.1.0-alpha.132](https://github.com/petauron/glivela/compare/v0.1.0-alpha.131...v0.1.0-alpha.132) (2026-11-12)
 
 
