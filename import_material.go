@@ -18,8 +18,9 @@ type RetiredLanding struct {
 }
 
 // ImportMaterial is one atomic, sensitive handover checkpoint. RetainedSource
-// is immutable migration evidence/history, never a second live configuration
-// source. Do not send this material in a node receipt or publish it in logs.
+// is migration history, never a second live configuration source. An explicit
+// offline retirement operation may redact expired-host history while retaining
+// its source identity header. Never send this material in a receipt or logs.
 type ImportMaterial struct {
 	RetiredLandings    map[string]RetiredLanding    `json:"retiredLandings,omitempty"`
 	SubscriptionOrders map[string]SubscriptionOrder `json:"subscriptionOrders,omitempty"`
