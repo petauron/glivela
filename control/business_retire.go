@@ -14,6 +14,9 @@ import (
 // entryRetired only interprets the existing owned endpoint policy. It does not
 // delete the enrollment, account credentials, route records or ledger.
 func entryRetired(m glivela.ImportMaterial, id string) bool {
+	if _, retired := m.RetiredLandings[id]; retired {
+		return true
+	}
 	return slices.ContainsFunc(m.Endpoints, func(e glivela.ImportEndpoint) bool {
 		return e.Reality.EntryID == id && e.Retired
 	})
