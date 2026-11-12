@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.131](https://github.com/petauron/glivela/compare/v0.1.0-alpha.130...v0.1.0-alpha.131) (2026-11-12)
+
+
+### Performance Improvements
+
+* **control:** reduce native inspection and speed wake overhead ([#115](https://github.com/petauron/glivela/issues/115)) ([68b7074](https://github.com/petauron/glivela/commit/68b70746dc6d6ad65b3138bd13effa32a74ec8d5)), closes [#108](https://github.com/petauron/glivela/issues/108)
+
 ## [0.1.0-alpha.130](https://github.com/petauron/glivela/compare/v0.1.0-alpha.129...v0.1.0-alpha.130) (2026-11-12)
 
 
