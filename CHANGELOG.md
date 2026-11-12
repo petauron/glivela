@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.132](https://github.com/petauron/glivela/compare/v0.1.0-alpha.131...v0.1.0-alpha.132) (2026-11-12)
+
+
+### Bug Fixes
+
+* **retirement:** preserve non-target history and service file owners ([#117](https://github.com/petauron/glivela/issues/117)) ([a2a8b1b](https://github.com/petauron/glivela/commit/a2a8b1ba8e0f50a1b8aed9257cb66e47c9cd5a85))
+
 ## [0.1.0-alpha.131](https://github.com/petauron/glivela/compare/v0.1.0-alpha.130...v0.1.0-alpha.131) (2026-11-12)
 
 
