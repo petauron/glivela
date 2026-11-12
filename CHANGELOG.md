@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.130](https://github.com/petauron/glivela/compare/v0.1.0-alpha.129...v0.1.0-alpha.130) (2026-11-12)
+
+
+### Bug Fixes
+
+* **retirement:** remove diagnostic history for retired pairs ([fda3b39](https://github.com/petauron/glivela/commit/fda3b39382b9a4bbf09d0f06409c993d66ed66e5))
+
 ## [0.1.0-alpha.129](https://github.com/petauron/glivela/compare/v0.1.0-alpha.128...v0.1.0-alpha.129) (2026-11-12)
 
 
