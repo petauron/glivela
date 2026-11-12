@@ -394,3 +394,37 @@ func TestStartupActivationFailureStopsWorkerWithoutChangingRevision(t *testing.T
 		t.Fatal("failed startup changed committed revision", err)
 	}
 }
+
+// The native adapter shares one guarded observation instead of performing
+// separate health and counter inspections. Each call must obtain fresh evidence.
+type observationDriverFixture struct {
+	*driverFixture
+	observations int
+	ready        bool
+	sample       *EntryTraffic
+}
+
+func (d *observationDriverFixture) observe(context.Context, Desired) (bool, *EntryTraffic) {
+	d.observations++
+	return d.ready, d.sample
+}
+func TestNativeObservationSharesOnlyCurrentRound(t *testing.T) {
+	r, original := nativeFixture(t)
+	ctx := context.Background()
+	if err := r.Apply(ctx, artifact(1)); err != nil {
+		t.Fatal(err)
+	}
+	d := &observationDriverFixture{driverFixture: original, ready: true, sample: &EntryTraffic{}}
+	d.onHealth = func() { t.Fatal("combined observation repeated independent health inspection") }
+	r.Driver = d
+	first, err := r.Inspect(ctx)
+	if err != nil || !first.RuntimeReady || first.Traffic != d.sample || d.observations != 1 {
+		t.Fatal("combined observation not used", err)
+	}
+	d.ready = false
+	d.sample = nil
+	second, err := r.Inspect(ctx)
+	if err != nil || second.RuntimeReady || second.Traffic != nil || d.observations != 2 {
+		t.Fatal("previous observation was reused", err)
+	}
+}
