@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.137](https://github.com/petauron/glivela/compare/v0.1.0-alpha.136...v0.1.0-alpha.137) (2026-11-13)
+
+
+### Bug Fixes
+
+* **routes:** retry one timed-out startup identity proof ([#127](https://github.com/petauron/glivela/issues/127)) ([5f6b4ab](https://github.com/petauron/glivela/commit/5f6b4abb4b9e4ef35990df612c56d7de6ff2df8c))
+
 ## [0.1.0-alpha.136](https://github.com/petauron/glivela/compare/v0.1.0-alpha.135...v0.1.0-alpha.136) (2026-11-12)
 
 
