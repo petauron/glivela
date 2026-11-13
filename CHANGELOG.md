@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.138](https://github.com/petauron/glivela/compare/v0.1.0-alpha.137...v0.1.0-alpha.138) (2026-11-13)
+
+
+### Features
+
+* **routes:** retain three-hop SS2022 paths in server forwarding ([#130](https://github.com/petauron/glivela/issues/130)) ([9c870c9](https://github.com/petauron/glivela/commit/9c870c9cd223ded440d3fc1c4155a1f61a8ac7d0))
+
 ## [0.1.0-alpha.137](https://github.com/petauron/glivela/compare/v0.1.0-alpha.136...v0.1.0-alpha.137) (2026-11-13)
 
 
