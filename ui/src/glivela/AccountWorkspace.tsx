@@ -3,6 +3,7 @@ import { UserRound, X, ExternalLink, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PlanEditor } from "./ControlForms";
+import { SubscriptionAccess } from "./SubscriptionAccess";
 import { SubscriptionOrderEditor } from "./SubscriptionOrder";
 import { amount, used } from "./control-format";
 import type { Inventory } from "./control-types";
@@ -31,6 +32,6 @@ export function AccountWorkspace({inventory,active,disabled,save,token,tokenAcco
  <section className="gl-account-editor"><label className="gl-readonly-field">账户名称<Input readOnly value={current.account.displayName} title="当前接口不提供账户改名"/></label><PlanEditor key={`${current.account.id}/${current.account.desiredRevision}`} initial={current.account.plan} disabled={disabled} onDirtyChange={value=>{setDirty(value);if(!value)setPendingSelection(null);}} onSave={plan=>save("account-plan",{accountId:current.account.id,expectedRevision:current.account.desiredRevision,plan})}/></section>
  <section><h3>重置当前周期用量</h3><p>仅重置当前周期，保留原始计数、身份与历史。</p><Button className="gl-wide" variant="outline" disabled={disabled} onClick={()=>{if(window.confirm("只重置此账户当前周期用量？原始计数、身份和历史保留。"))void save("account-reset",{accountId:current.account.id,expectedRevision:current.account.desiredRevision});}}>重置当前周期用量</Button></section>
  <SubscriptionOrderEditor key={current.account.id} accountId={current.account.id} active={active} disabled={disabled} save={save} onDirtyChange={orderChanged}/>
- <section><h3><Link2/>订阅访问</h3><p>订阅链接含访问凭据，请私下保存。</p><Button variant="outline" className="gl-wide" disabled={disabled} onClick={()=>subscription(current.account.id)}><ExternalLink/>查看订阅链接</Button>{token&&tokenAccountId===current.account.id?<label className="gl-secret-field">订阅链接或新账户标识<Input aria-label="订阅链接或新账户标识" readOnly value={token} autoComplete="off"/></label>:null}</section>
+ <section><h3><Link2/>订阅访问</h3><p>订阅链接含访问凭据，请私下保存。</p><Button variant="outline" className="gl-wide" disabled={disabled} onClick={()=>subscription(current.account.id)}><ExternalLink/>查看订阅链接</Button>{token&&tokenAccountId===current.account.id?<SubscriptionAccess key={tokenAccountId+token} token={token}/>:null}</section>
  </aside>:null}</div>;
 }

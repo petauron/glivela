@@ -86,3 +86,9 @@ DNS-provider key or host-manager administrator session, does not read its databa
 and retains its own identities, permissions and task state. This optional portable
 provisioning input does not add a runtime dependency on Vastora. DNS propagation
 and real subscription access must be verified before accepting a migration.
+
+### Subscription profiles
+
+The account panel offers **仅节点** (the existing format negotiation and node order) and **Aethersailor 重度分流** (OpenClash/Mihomo). Both links use the same subscription identity and published inventory. The optional profile uses `?format=mihomo&profile=aethersailor`; `profile=nodes` or no profile retains existing behavior. URI output with the Full profile is rejected.
+
+The Full profile includes policy groups and rules, without DNS, TUN, listeners or local network settings. It does not edit installed client profiles. Keep local company/private-network overrides ahead of imported rules; clients need compatible geosite/geoip data and access to rule-provider downloads. See [template provenance and adaptation](subscription_profiles/README.md).

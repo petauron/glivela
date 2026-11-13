@@ -64,7 +64,7 @@ func SubscriptionHandler(store *Store) http.Handler {
 			return
 		}
 		for key, values := range query {
-			if (key != "format" && key != "target") || len(values) != 1 {
+			if (key != "format" && key != "target" && key != "profile") || len(values) != 1 {
 				http.Error(w, "invalid format", http.StatusBadRequest)
 				return
 			}
@@ -74,7 +74,12 @@ func SubscriptionHandler(store *Store) http.Handler {
 			http.Error(w, "invalid format", http.StatusBadRequest)
 			return
 		}
-		mihomo := format == "mihomo" || target != "" || format == "" && (strings.Contains(strings.ToLower(r.UserAgent()), "clash") || strings.Contains(strings.ToLower(r.UserAgent()), "mihomo"))
+		profile := query.Get("profile")
+		if profile != "" && profile != "nodes" && profile != "aethersailor" || profile == "aethersailor" && format == "links" {
+			http.Error(w, "invalid profile", http.StatusBadRequest)
+			return
+		}
+		mihomo := profile == "aethersailor" || format == "mihomo" || target != "" || format == "" && (strings.Contains(strings.ToLower(r.UserAgent()), "clash") || strings.Contains(strings.ToLower(r.UserAgent()), "mihomo"))
 		content, err := store.subscription(r.Context(), token, mihomo)
 		if errors.Is(err, errSubscriptionMissing) {
 			http.NotFound(w, r)
@@ -83,6 +88,13 @@ func SubscriptionHandler(store *Store) http.Handler {
 		if err != nil {
 			http.Error(w, "subscription temporarily unavailable", http.StatusServiceUnavailable)
 			return
+		}
+		if profile == "aethersailor" {
+			content.body, err = glivela.RenderAethersailorProfile(content.body, content.items)
+			if err != nil {
+				http.Error(w, "subscription profile unavailable", http.StatusServiceUnavailable)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", content.contentType)
 		w.Header().Set("Subscription-Userinfo", content.userInfo)
