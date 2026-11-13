@@ -15,7 +15,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
 }) {
  const [query,setQuery]=useState("");const [filter,setFilter]=useState("all");const [modeFilter,setModeFilter]=useState("all");const [selected,setSelected]=useState("");const [deleteKey,setDeleteKey]=useState("");
  const speed = useLinkSpeed(loadSpeeds, active);
- const rows=[...inventory.routes.map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,relayId:"",egressId:value.egressId,enabled:value.enabled,shared:false,port:value.port,ipv4Port:value.ipv4Port,unavailableReason:"",transport:"",sourceIpv6:"",serverIpv6:"",egressIp:"",mode:"server",state:value.state,name:"",ipv4EgressId:value.ipv4EgressId,value})),...(inventory.clientChains??[]).map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,relayId:value.relayId??"",egressId:value.egressId,enabled:value.enabled,shared:value.shared??false,port:value.port,ipv4Port:undefined,unavailableReason:value.unavailableReason??"",transport:value.transport??"",sourceIpv6:value.sourceIpv6??"",serverIpv6:value.serverIpv6??"",egressIp:value.egressIp??"",mode:"client",state:value.enabled?"configured":"disabled",name:value.name,ipv4EgressId:undefined,value}))];
+ const rows=[...inventory.routes.map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,relayId:value.relayId??"",egressId:value.egressId,enabled:value.enabled,shared:false,port:value.port,ipv4Port:value.ipv4Port,unavailableReason:"",transport:"",sourceIpv6:"",serverIpv6:"",egressIp:"",mode:"server",state:value.state,name:"",ipv4EgressId:value.ipv4EgressId,value})),...(inventory.clientChains??[]).map(value=>({id:value.id,accountId:value.accountId,entryId:value.entryId,relayId:value.relayId??"",egressId:value.egressId,enabled:value.enabled,shared:value.shared??false,port:value.port,ipv4Port:undefined,unavailableReason:value.unavailableReason??"",transport:value.transport??"",sourceIpv6:value.sourceIpv6??"",serverIpv6:value.serverIpv6??"",egressIp:value.egressIp??"",mode:"client",state:value.enabled?"configured":"disabled",name:value.name,ipv4EgressId:undefined,value}))];
  const nodeName=(id:string)=>names.get(id)??id;
  const label=(row:typeof rows[number])=>row.name||`${nodeName(row.entryId)} → ${nodeName(row.egressId)}`;
  const accountName=(id:string)=>inventory.accounts.find(a=>a.account.id===id)?.account.displayName??id;
@@ -48,6 +48,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  const current=shown.find(row=>landingIds(row).some(landingId=>itemKey(row,landingId)===selected));
  const reason=(row:typeof rows[number],landingId:string)=>{
   if (!row.enabled) return "该线路已停用。";
+  if (row.relayId) return "暂不支持三跳测速。";
   if (!listState(row).enabled) return listState(row).detail;
   const authorized=row.mode==="client"
    ? (inventory.clientChains??[]).some(chain=>chain.id===row.id&&chain.enabled&&chain.entryId===row.entryId&&chain.egressId===landingId)
@@ -66,11 +67,11 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  };
  const toggle=(row:typeof rows[number])=>{
   const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account)return;
-  void save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined,port:undefined,ipv4Port:undefined}),enabled:!row.enabled,expectedRevision:account.account.desiredRevision});
+  void save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined,port:undefined,ipv4Port:undefined,relayId:undefined}),enabled:!row.enabled,expectedRevision:account.account.desiredRevision});
  };
  const remove=async(row:typeof rows[number])=>{
   const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account||row.enabled)return;
-  const ok=await save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined,port:undefined,ipv4Port:undefined}),enabled:false,delete:true,expectedRevision:account.account.desiredRevision});
+  const ok=await save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined,port:undefined,ipv4Port:undefined,relayId:undefined}),enabled:false,delete:true,expectedRevision:account.account.desiredRevision});
   if(ok){setDeleteKey("");setSelected("");}
  };
  return <div className="gl-split gl-route-split"><div className="gl-primary">
@@ -105,7 +106,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  {current.mode==="client"?<p className="gl-context-copy">仅 TCP · 落地端口 {current.port}{current.shared?" · 共享凭据":""}。停用或配置变更后，请刷新客户端订阅并验证。</p>:null}
  <details className="gl-context-details gl-route-verification"><summary>查看验证信息</summary><p>{state(current)}</p></details>
  {current.relayId?<p className="gl-context-copy">三跳线路暂不显示直连测速或 MTU 结果；请通过客户端验证。</p>:<><section className="gl-route-latencies"><h3>TCP 连接记录</h3>{landingIds(current).map(landingId=><div className="gl-route-latency-detail" key={landingId}><p>{nodeName(landingId)}</p><LatencyCell value={routeLatency(current,landingId)} now={latency.now} failed={!!latency.error}/></div>)}</section>
- {landingIds(current).map(landingId=><PathMTU key={`mtu/${current.mode}/${current.id}/${landingId}`} routeId={current.id} mode={current.mode} landingId={landingId} landingName={nodeName(landingId)} disabled={disabled}/>)}
+ {!current.relayId && landingIds(current).map(landingId=><PathMTU key={`mtu/${current.mode}/${current.id}/${landingId}`} routeId={current.id} mode={current.mode} landingId={landingId} landingName={nodeName(landingId)} disabled={disabled}/>)}
  {landingIds(current).map(landingId=><LinkSpeed key={`${current.id}/${landingId}`} entryId={current.entryId} entryName={nodeName(current.entryId)} landingId={landingId} landingName={nodeName(landingId)} reason={reason(current,landingId)} disabled={disabled} control={speed}/>)}</>}
  <section>{current.mode==="client"&&!current.shared?<Button className="gl-wide" variant="outline" disabled={disabled} onClick={()=>shareLanding(current)}>落地统一 24000</Button>:null}<Button className="gl-wide" variant="outline" disabled={disabled||!inventory.accounts.some(a=>a.account.id===current.accountId)} onClick={()=>toggle(current)}>{current.enabled?(listState(current).enabled?"停用线路":"关闭线路开关"):"启用线路"}</Button>
   {deleteKey===selected?<div className="gl-route-delete-confirm" role="group" aria-label="确认删除线路"><p>删除后线路将从列表和新订阅中移除，历史流量保留。{current.ipv4EgressId?"这条线路的两个落地会一并删除。":""}</p><div><Button variant="outline" disabled={disabled} onClick={()=>setDeleteKey("")}>取消</Button><Button variant="destructive" disabled={disabled||current.enabled} onClick={()=>void remove(current)}>确认删除</Button></div></div>:<Button className="gl-wide gl-route-delete-button" variant="ghost" disabled={disabled||current.enabled} onClick={()=>setDeleteKey(selected)}>删除线路</Button>}

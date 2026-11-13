@@ -94,16 +94,18 @@ type BusinessInventory struct {
 }
 
 type BusinessRoute struct {
-	Port         int    `json:"port"`
-	IPv4Port     int    `json:"ipv4Port,omitempty"`
-	ID           string `json:"id"`
-	AccountID    string `json:"accountId"`
-	EntryID      string `json:"entryId"`
-	EgressID     string `json:"egressId"`
-	IPv4EgressID string `json:"ipv4EgressId,omitempty"`
-	Enabled      bool   `json:"enabled"`
-	HideNative   bool   `json:"hideNative"`
-	State        string `json:"state"`
+	ClientChainID string `json:"clientChainId,omitempty"`
+	RelayID       string `json:"relayId,omitempty"`
+	Port          int    `json:"port"`
+	IPv4Port      int    `json:"ipv4Port,omitempty"`
+	ID            string `json:"id"`
+	AccountID     string `json:"accountId"`
+	EntryID       string `json:"entryId"`
+	EgressID      string `json:"egressId"`
+	IPv4EgressID  string `json:"ipv4EgressId,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	HideNative    bool   `json:"hideNative"`
+	State         string `json:"state"`
 }
 
 type BusinessRuntime struct {
@@ -329,7 +331,7 @@ func (s *Store) Business() BusinessInventory {
 					if projectionErr != nil || entry.ID != grant.EntryID || entry.Desired.Entry == nil || !effective.Deployable() || !s.availableRuntime(entry, now) {
 						continue
 					}
-					if slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Base.ID]) && slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Route.ID]) && slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, effective) }) && s.subscriptionPeerReady(entry, grant.EgressID, now) && (grant.IPv4EgressID == "" || s.subscriptionPeerReady(entry, grant.IPv4EgressID, now)) {
+					if slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Base.ID]) && slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Route.ID]) && slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, effective) }) && s.subscriptionPeerReady(entry, grant.EgressID, now, grant.PeerKey()) && (grant.IPv4EgressID == "" || s.subscriptionPeerReady(entry, grant.IPv4EgressID, now)) {
 						state = "verified"
 					}
 				}
@@ -338,20 +340,28 @@ func (s *Store) Business() BusinessInventory {
 				state = "temporarily-suspended"
 			}
 			port, ipv4Port := 0, 0
+			relayID := ""
 			for _, entry := range s.nodes {
 				if entry.ID != grant.EntryID || entry.Desired.Entry == nil {
 					continue
 				}
 				for _, peer := range entry.Desired.Entry.Peers {
-					if peer.EgressID == grant.EgressID {
+					if peer.PeerKey() == grant.PeerKey() {
 						port = peer.Port
+						if peer.Relay != nil {
+							relayID = peer.Relay.NodeID
+							port = peer.Relay.Port
+						}
 					}
 					if peer.EgressID == grant.IPv4EgressID {
 						ipv4Port = peer.Port
 					}
 				}
 			}
-			view.Routes = append(view.Routes, BusinessRoute{Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
+			if relayID != "" && s.suspended(relayID, now) {
+				state = "temporarily-suspended"
+			}
+			view.Routes = append(view.Routes, BusinessRoute{ClientChainID: grant.ClientChainID, RelayID: relayID, Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
 		}
 	}
 	for _, node := range s.nodes {

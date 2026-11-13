@@ -14,6 +14,7 @@ import (
 const maxSubscriptionBytes = 4 << 20
 
 type PublishedRoute struct {
+	Name                   string       `json:"name,omitempty"`
 	Grant                  RouteGrant   `json:"grant"`
 	Protocol               ProtocolKind `json:"protocol"`
 	EntryName              string       `json:"entryName"`
@@ -398,6 +399,9 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 }
 
 func validatePublishedRouteScope(item PublishedRoute, accountID string) error {
+	if item.Name != "" && (item.Grant.ClientChainID == "" || !validDisplayName(item.Name)) {
+		return errors.New("glivela: invalid server chain name")
+	}
 	if item.EgressNameSuffix != "" && (!validDisplayName(item.EgressNameSuffix) || strings.ContainsAny(item.EgressNameSuffix, "|｜")) {
 		return errors.New("glivela: invalid landing name suffix")
 	}
@@ -436,6 +440,9 @@ func compactSubscriptionName(name string) string {
 }
 
 func routeName(item PublishedRoute) string {
+	if item.Name != "" {
+		return item.Name
+	}
 	entry := strings.TrimSpace(item.EntryName)
 	if _, name, ok := strings.Cut(entry, "｜"); ok && strings.TrimSpace(name) != "" {
 		entry = name

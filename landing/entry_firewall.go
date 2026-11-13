@@ -20,11 +20,12 @@ import (
 type EntryFirewall struct {
 	LocalTLSOrigin bool `json:"localTLSOrigin,omitempty"`
 
-	PublicSSH *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
-	UID       uint32
-	Revision  uint64
-	PeerPorts map[string]int `json:"peerPorts,omitempty"`
-	Peers     []string
+	PublicSSH      *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
+	UID            uint32
+	Revision       uint64
+	ExtraPeerPorts map[string][]int `json:"extraPeerPorts,omitempty"`
+	PeerPorts      map[string]int   `json:"peerPorts,omitempty"`
+	Peers          []string
 	// Local, root-owned resolver configuration only; never supplied by peers.
 	// Exclude from the stable table identity so resolver changes are reconciled
 	// in the same owned table without conflicting output chains.
@@ -59,6 +60,18 @@ func (p EntryFirewall) validate() error {
 	for address, port := range p.PeerPorts {
 		if !seen[address] || (!glivela.PublicTransportIPv4(address) && !glivela.PublicTransportIPv6(address)) || port < 24000 || port > 24999 {
 			return errors.New("landing: invalid public entry peer port")
+		}
+	}
+	for address, ports := range p.ExtraPeerPorts {
+		if !seen[address] || p.PeerPorts[address] == 0 || len(ports) > 1000 {
+			return errors.New("landing: invalid additional peer ports")
+		}
+		used := map[int]bool{p.PeerPorts[address]: true}
+		for _, port := range ports {
+			if port < 24000 || port > 24999 || used[port] {
+				return errors.New("landing: invalid additional peer port")
+			}
+			used[port] = true
 		}
 	}
 	return nil
@@ -137,6 +150,11 @@ func (p EntryFirewall) renderObjects(table, marker string, legacy bool) []map[st
 		family := "ip"
 		if ip, _ := netip.ParseAddr(address); ip.Is6() {
 			family = "ip6"
+		}
+		extra := slices.Clone(p.ExtraPeerPorts[address])
+		slices.Sort(extra)
+		for _, extraPort := range extra {
+			rule("destinations", match(payload(family, "daddr"), address), match(payload("tcp", "dport"), extraPort), nftObject{"return": nil})
 		}
 		rule("destinations", match(payload(family, "daddr"), address), match(payload("tcp", "dport"), port), nftObject{"return": nil})
 		// The landing independently retains its source-specific UDP policy.
