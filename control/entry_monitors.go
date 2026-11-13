@@ -3,16 +3,20 @@ package control
 import (
 	"context"
 	"errors"
-	"github.com/petauron/glivela/landing"
 	"log"
 	"net"
 	"reflect"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/petauron/glivela/landing"
 )
 
 type entryMonitorGroup struct {
+	cancel   context.CancelFunc
+	done     chan struct{}
+	stopping bool
 	desired  Desired
 	statuses map[string]landing.MonitorStatus
 }
@@ -24,14 +28,35 @@ type entryMonitors struct {
 
 func (m *entryMonitors) close(ctx context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.group = nil
+	g := m.group
+	if g != nil {
+		g.stopping = true
+		if g.cancel != nil {
+			g.cancel()
+		}
+	}
+	m.mu.Unlock()
+	if g == nil {
+		return nil
+	}
+	if g.done != nil {
+		select {
+		case <-ctx.Done():
+			return errors.New("control: entry startup retry still stopping")
+		case <-g.done:
+		}
+	}
+	m.mu.Lock()
+	if m.group == g {
+		m.group = nil
+	}
+	m.mu.Unlock()
 	return nil
 }
 func (m *entryMonitors) verify(d Desired) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.group == nil || m.group.desired.Revision != d.Revision || m.group.desired.ConfigSHA256 != d.ConfigSHA256 || !reflect.DeepEqual(m.group.desired.EntryNetwork, d.EntryNetwork) {
+	if m.group == nil || m.group.stopping || m.group.desired.Revision != d.Revision || m.group.desired.ConfigSHA256 != d.ConfigSHA256 || !reflect.DeepEqual(m.group.desired.EntryNetwork, d.EntryNetwork) {
 		return errors.New("control: entry startup acceptance unavailable")
 	}
 	return nil
@@ -54,7 +79,7 @@ func (m *entryMonitors) health(d Desired) *EntryHealthReport {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	g := m.group
-	if g == nil || g.desired.Revision != d.Revision || g.desired.ConfigSHA256 != d.ConfigSHA256 {
+	if g == nil || g.stopping || g.desired.Revision != d.Revision || g.desired.ConfigSHA256 != d.ConfigSHA256 || !reflect.DeepEqual(g.desired.EntryNetwork, d.EntryNetwork) {
 		return nil
 	}
 	h := &EntryHealthReport{SampledAt: time.Now().UTC(), Peers: map[string]EntryPeerObservation{}}
@@ -68,14 +93,32 @@ func (m *entryMonitors) health(d Desired) *EntryHealthReport {
 	return h
 }
 func (d *EntryDriver) startMonitors(ctx context.Context, desired Desired, gates []*landing.TrafficGate) error {
-	return d.monitors.start(ctx, desired, gates, d.Container.ApplicationID, d.readyProcess, d.links)
+	before, err := d.inspect(ctx, desired)
+	if err != nil {
+		return err
+	}
+	ready := func(check context.Context, want Desired) error {
+		if err := d.readyProcess(check, want); err != nil {
+			return err
+		}
+		after, err := d.inspect(check, want)
+		if err != nil || after.State != before.State {
+			return errors.New("control: entry changed during startup recovery")
+		}
+		return nil
+	}
+	return d.monitors.start(ctx, desired, gates, d.Container.ApplicationID, ready, d.links)
 }
 func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*landing.TrafficGate, entryID string, ready func(context.Context, Desired) error, links func() *landing.LinkChecker, coreProbe ...func(context.Context, RouteProbe) (RouteProbeResult, error)) error {
 	if len(gates) != len(desired.EntryNetwork.Peers) {
 		return errors.New("control: startup peer inventory differs")
 	}
+	if err := m.close(ctx); err != nil {
+		return err
+	}
 	g := &entryMonitorGroup{desired: desired.clone(), statuses: map[string]landing.MonitorStatus{}}
-	verifySource := func() error {
+	desired = g.desired
+	verifySource := func(check context.Context) error {
 		if desired.EntryNetwork.Source == nil {
 			return nil
 		}
@@ -85,9 +128,9 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 			checker = links()
 		}
 		defer checker.Close()
-		return verifyStartupSelfIdentity(ctx, *desired.EntryNetwork.Source, checker)
+		return verifyStartupSelfIdentity(check, *desired.EntryNetwork.Source, checker)
 	}
-	if err := verifySource(); err != nil {
+	if err := verifySource(ctx); err != nil {
 		return err
 	}
 	// Landing reachability has its own bounded startup budget. Exhausting it
@@ -100,9 +143,10 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 	}
 	peerContext, cancel := context.WithDeadline(ctx, peerDeadline)
 	defer cancel()
-	// Each peer is checked only during activation. Runtime heartbeats return the
-	// accepted proof; elapsed time and third-party availability cannot revoke it.
-	for index, peer := range desired.EntryNetwork.Peers {
+	// Each attempt uses fresh evidence and a fresh checker. Only peers whose
+	// startup acceptance failed are retried; accepted peers stay untouched.
+	checkPeer := func(check, fence context.Context, index int) (bool, error) {
+		peer := desired.EntryNetwork.Peers[index]
 		entryFailed := false
 		checker := landing.NewLinkChecker()
 		if links != nil {
@@ -154,31 +198,101 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 				}
 				result.TCP, result.ExitIP, result.CheckedAt = observed.Passed, observed.ObservedExit, time.Now()
 				return result, nil
-			}, Report: func(status landing.MonitorStatus) { g.statuses[peer.PeerKey()] = status }}
-		if err := monitor.Run(peerContext); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			}, Report: func(status landing.MonitorStatus) {
+				m.mu.Lock()
+				g.statuses[peer.PeerKey()] = status
+				m.mu.Unlock()
+			}}
+		if err := monitor.Run(check); err != nil {
+			if fence.Err() != nil {
+				return false, fence.Err()
 			}
 			if entryFailed {
-				return err
+				return false, err
 			}
 			// Continue only after reading back this exact owned, closed gate.
 			// A firewall/ownership failure still rejects the whole activation.
-			if blocked := gates[index].Block(ctx); blocked != nil {
-				return errors.Join(err, blocked)
+			if blocked := gates[index].Block(fence); blocked != nil {
+				return false, errors.Join(err, blocked)
 			}
 			log.Printf("Glivela startup check blocked enrolled peer %s; direct entry remains independent: %v", peer.EgressID, err)
+			return true, err
+		}
+		return false, nil
+	}
+	var pending []int
+	for index := range desired.EntryNetwork.Peers {
+		retry, err := checkPeer(peerContext, ctx, index)
+		if err != nil {
+			if !retry {
+				return err
+			}
+			pending = append(pending, index)
 		}
 	}
 	if err := ready(ctx, desired); err != nil {
 		return err
 	}
-	if err := verifySource(); err != nil {
+	if err := verifySource(ctx); err != nil {
 		return err
 	}
+	// The retry lifetime belongs to this applied group, not to the activation
+	// request. close cancels and joins it before configuration or gates change.
+	retryContext, stop := context.WithCancel(context.Background())
+	g.cancel, g.done = stop, make(chan struct{})
 	m.mu.Lock()
 	m.group = g
 	m.mu.Unlock()
+	if len(pending) == 0 {
+		stop()
+		close(g.done)
+		return nil
+	}
+	go func() {
+		defer close(g.done)
+		defer stop()
+		delay := 5 * time.Second
+		for len(pending) > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-retryContext.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			remaining := pending[:0]
+			for _, index := range pending {
+				attempt, cancelAttempt := context.WithTimeout(retryContext, 20*time.Second)
+				err := verifySource(attempt)
+				if err == nil {
+					err = ready(attempt, desired)
+				}
+				if err == nil {
+					// A fresh fence context retains cleanup time when the bounded
+					// business check expires, without outliving group cancellation.
+					fence, cancelFence := context.WithTimeout(retryContext, 25*time.Second)
+					retry, checkErr := checkPeer(attempt, fence, index)
+					cancelFence()
+					err = checkErr
+					if err != nil && !retry {
+						cancelAttempt()
+						return
+					}
+				}
+				cancelAttempt()
+				if retryContext.Err() != nil {
+					return
+				}
+				if err != nil {
+					remaining = append(remaining, index)
+				}
+			}
+			pending = remaining
+			if delay < time.Minute {
+				delay = min(2*delay, time.Minute)
+			}
+		}
+	}()
 	return nil
 }
 
