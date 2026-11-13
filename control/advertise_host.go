@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"net/netip"
@@ -15,10 +16,11 @@ import (
 )
 
 type AdvertiseHostChange struct {
-	EntryID          string `json:"entryId"`
-	Action           string `json:"action"`
-	Host             string `json:"host"`
-	ExpectedRevision uint64 `json:"expectedRevision,string"`
+	Resource         json.RawMessage `json:"resource,omitempty"`
+	EntryID          string          `json:"entryId"`
+	Action           string          `json:"action"`
+	Host             string          `json:"host"`
+	ExpectedRevision uint64          `json:"expectedRevision,string"`
 }
 
 type AdvertiseHostView struct {
@@ -33,6 +35,14 @@ type AdvertiseHostView struct {
 // projection applies the new metadata and retains startup readiness checks.
 // DNS and actual ingress must be verified by the operator before applying it.
 func (s *Store) ChangeAdvertiseHost(ctx context.Context, input AdvertiseHostChange) (AdvertiseHostView, error) {
+	if len(input.Resource) != 0 {
+		host, err := s.managedIngressHost(ctx, input)
+		if err != nil {
+			return AdvertiseHostView{}, err
+		}
+		input.Host = host
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	invalid := errors.New("control: subscription host change refused; refresh the endpoint")
