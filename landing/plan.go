@@ -26,6 +26,7 @@ type Source struct {
 // the external address seen by a website. No automatic source selection is
 // performed while migrating an existing landing.
 type ClientListener struct {
+	Interface string `json:"interface,omitempty"`
 	EgressIP  string `json:"egressIp,omitempty"`
 	Shared    bool   `json:"shared,omitempty"`
 	Transport string `json:"transport,omitempty"`
@@ -109,6 +110,9 @@ func (p Plan) Validate() error {
 		validTransport := (c.Transport == "" || c.Transport == glivela.IPv4ClientSS2022) && c.Address == "" && publicSources[c.Source] && (len(key) == 32 && !c.Shared || len(key) == 16 && c.Shared && c.Transport == glivela.IPv4ClientSS2022) && (c.Transport == "" || base64.StdEncoding.EncodeToString(key) == c.Key) ||
 			c.Transport == glivela.IPv4RelaySS2022 && c.Address == "" && !c.Shared && glivela.PublicTransportIPv4(c.Source) && c.Source != p.Transport.PublicAddress && len(key) == 32 && base64.StdEncoding.EncodeToString(key) == c.Key ||
 			c.Transport == "ipv6-ss2022" && glivela.PublicTransportIPv6(c.Address) && glivela.PublicTransportIPv6(c.Source) && c.Address != c.Source && len(key) == 16 && base64.StdEncoding.EncodeToString(key) == c.Key
+		if c.Interface != "" {
+			validTransport = glivela.PrivateClientIPv4(c.Address) && glivela.PrivateClientIPv4(c.Source) && c.Address != c.Source && bridgeNamePattern.MatchString(c.Interface) && c.Interface != "lo" && (c.Transport == "" || c.Transport == glivela.IPv4ClientSS2022) && (len(key) == 32 && !c.Shared || len(key) == 16 && c.Shared && c.Transport == glivela.IPv4ClientSS2022) && base64.StdEncoding.EncodeToString(key) == c.Key
+		}
 		previous, duplicate := seenPorts[c.Port]
 		if p.Transport.PublicAddress == "" && (p.IPv6OnlyAddress == "" || c.Transport != "ipv6-ss2022") || !glivela.ValidIdentifier(c.ID) || seenIDs[c.ID] || c.Port < 24000 || c.Port > 24999 || duplicate && (!previous.Shared || !c.Shared || previous.Key != c.Key || previous.EgressIP != c.EgressIP) || c.Shared && c.Port != 24000 || err != nil || !validTransport {
 			return errors.New("landing: invalid client listener")
@@ -133,7 +137,7 @@ const legacyManagementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3
 // Render targets official Xray 26.10.31. SOCKS does not receive the core's
 // default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
 // remains mandatory for post-resolution targets and address-family limits.
-const RenderVersion uint8 = 6
+const RenderVersion uint8 = 7
 
 func (p Plan) Render() ([]byte, error) {
 	return p.RenderVersion(RenderVersion)
@@ -141,7 +145,7 @@ func (p Plan) Render() ([]byte, error) {
 
 // RenderVersion reads old signed artifacts without changing their hash.
 func (p Plan) RenderVersion(version uint8) ([]byte, error) {
-	if version > RenderVersion || p.HasClientEgress() && version < 6 || p.IPv6OnlyAddress != "" && version < 3 || version < 4 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
+	if version > RenderVersion || version < 7 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Interface != "" }) || p.HasClientEgress() && version < 6 || p.IPv6OnlyAddress != "" && version < 3 || version < 4 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
 		return nil, errors.New("landing: unsupported render version")
 	}
 	if version >= 1 {
@@ -252,6 +256,9 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		if c.Transport == "ipv6-ss2022" {
 			address, method, prefix = c.Address, glivela.SS2022Method, "/128"
 		}
+		if c.Interface != "" {
+			address = c.Address
+		}
 		if c.Shared {
 			method = glivela.SS2022Method
 			tag = "client-landing-" + address
@@ -340,7 +347,7 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 		}
 	}
 	for _, c := range p.ActiveClientListeners() {
-		result.ClientListeners = append(result.ClientListeners, ClientListenerPolicy{EgressIP: c.EgressIP, Shared: c.Shared, Port: c.Port, Source: c.Source, Transport: c.Transport, Address: c.Address})
+		result.ClientListeners = append(result.ClientListeners, ClientListenerPolicy{Interface: c.Interface, EgressIP: c.EgressIP, Shared: c.Shared, Port: c.Port, Source: c.Source, Transport: c.Transport, Address: c.Address})
 	}
 	return result, result.validate()
 }

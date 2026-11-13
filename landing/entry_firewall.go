@@ -18,7 +18,8 @@ import (
 // native worker UID. Peer liveness is separately fenced by TrafficGate; probes
 // run as the node, not as the worker, and cannot refresh their own permission.
 type EntryFirewall struct {
-	LocalTLSOrigin bool `json:"localTLSOrigin,omitempty"`
+	PrivateClients []glivela.PrivateClientPolicy `json:"privateClients,omitempty"`
+	LocalTLSOrigin bool                          `json:"localTLSOrigin,omitempty"`
 
 	PublicSSH      *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	UID            uint32
@@ -38,6 +39,14 @@ func (p EntryFirewall) validate() error {
 	}
 	if p.UID == 0 || p.UID == 65534 || p.Revision == 0 || len(p.Peers) > 1024 {
 		return errors.New("landing: invalid native entry firewall identity")
+	}
+	if len(p.PrivateClients) > 1000 {
+		return errors.New("landing: too many private client destinations")
+	}
+	for _, link := range p.PrivateClients {
+		if link.PrivateClientLink.Validate() != nil || !glivela.ValidIdentifier(link.ID) || link.Port < 24000 || link.Port > 24999 {
+			return errors.New("landing: invalid private client firewall policy")
+		}
 	}
 	seen := map[string]bool{}
 	if len(p.DNS) > 16 {
@@ -163,6 +172,9 @@ func (p EntryFirewall) renderObjects(table, marker string, legacy bool) []map[st
 		} else {
 			rule("destinations", match(payload("ip", "daddr"), address), match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"), nftObject{"return": nil})
 		}
+	}
+	for _, link := range p.PrivateClients {
+		rule("destinations", match(nftObject{"meta": nftObject{"key": "oifname"}}, link.SourceInterface), match(payload("ip", "saddr"), link.Source), match(payload("ip", "daddr"), link.Address), match(payload("tcp", "dport"), link.Port), nftObject{"return": nil})
 	}
 	for _, cidr := range blockedIPv4 {
 		prefix := netip.MustParsePrefix(cidr)

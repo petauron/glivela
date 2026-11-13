@@ -32,7 +32,10 @@ func NewDesired(plan landing.Plan) (Desired, error) {
 	if slices.ContainsFunc(plan.ClientListeners, func(c landing.ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
 		version = 4
 	}
-	if plan.HasClientEgress() {
+	if slices.ContainsFunc(plan.ClientListeners, func(c landing.ClientListener) bool { return c.Interface != "" }) {
+		version = 7
+	}
+	if plan.HasClientEgress() && version < 6 {
 		version = 6
 	}
 	return newLandingDesiredVersion(plan, version)
@@ -130,6 +133,7 @@ func (d Desired) clone() Desired {
 		plan.HysteriaEndpoints = slices.Clone(plan.HysteriaEndpoints)
 		plan.Credentials = slices.Clone(plan.Credentials)
 		plan.Grants = slices.Clone(plan.Grants)
+		plan.ClientLinks = slices.Clone(plan.ClientLinks)
 		plan.Peers = slices.Clone(plan.Peers)
 		for i := range plan.Peers {
 			if plan.Peers[i].Relay != nil {

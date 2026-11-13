@@ -17,9 +17,10 @@ const IPv4RelaySS2022 = "ipv4-relay-ss2022"
 // ClientChain contains a dedicated user credential, never the server transport key.
 // It is stored only inside the encrypted business material.
 type ClientChain struct {
-	EgressIP string            `json:"egressIp,omitempty"`
-	Shared   bool              `json:"shared,omitempty"`
-	Relay    *ClientChainRelay `json:"relay,omitempty"`
+	PrivateLink *PrivateClientLink `json:"privateLink,omitempty"`
+	EgressIP    string             `json:"egressIp,omitempty"`
+	Shared      bool               `json:"shared,omitempty"`
+	Relay       *ClientChainRelay  `json:"relay,omitempty"`
 	// IPv6SS2022 chains carry separately authorized, exact transport addresses.
 	// Empty transport fields identify existing IPv4 client chains.
 	Transport            string `json:"transport,omitempty"`
@@ -52,6 +53,10 @@ type ClientChainRelay struct {
 }
 
 func (c ClientChain) Validate() error {
+	if c.PrivateLink != nil && (c.PrivateLink.Validate() != nil || c.Transport != "" && c.Transport != IPv4ClientSS2022 || c.Relay != nil) {
+		return errors.New("glivela: private link requires a two-hop IPv4 client chain")
+	}
+
 	if c.EgressIP != "" {
 		ip, err := netip.ParseAddr(c.EgressIP)
 		if err != nil || ip.String() != c.EgressIP || !(PublicTransportIPv4(c.EgressIP) || PublicTransportIPv6(c.EgressIP) || ip.Is4() && ip.IsPrivate()) {

@@ -171,33 +171,38 @@ func (p RoutePeer) Validate() error {
 }
 
 type XrayPlan struct {
-	PublicSSH         *PublicSSHPolicy     `json:"publicSSH,omitempty"`
-	Revision          uint64               `json:"revision"`
-	NativeEgress      EgressPolicy         `json:"nativeEgress,omitempty"`
-	RealityEndpoints  []RealityEndpoint    `json:"realityEndpoints,omitempty"`
-	HysteriaEndpoints []HysteriaEndpoint   `json:"hysteriaEndpoints,omitempty"`
-	Credentials       []CredentialMaterial `json:"credentials"`
-	Grants            []RouteGrant         `json:"grants"`
-	Peers             []RoutePeer          `json:"peers"`
+	ClientLinks       []PrivateClientPolicy `json:"clientLinks,omitempty"`
+	PublicSSH         *PublicSSHPolicy      `json:"publicSSH,omitempty"`
+	Revision          uint64                `json:"revision"`
+	NativeEgress      EgressPolicy          `json:"nativeEgress,omitempty"`
+	RealityEndpoints  []RealityEndpoint     `json:"realityEndpoints,omitempty"`
+	HysteriaEndpoints []HysteriaEndpoint    `json:"hysteriaEndpoints,omitempty"`
+	Credentials       []CredentialMaterial  `json:"credentials"`
+	Grants            []RouteGrant          `json:"grants"`
+	Peers             []RoutePeer           `json:"peers"`
 }
 
 // XrayRenderVersion identifies the deterministic entry configuration format.
 // Bit zero retains the REALITY UDP 443 policy. Bit one removes the retired
 // management-port blacklist. Bit two enables automatic TCP family fallback.
 // Bit three selects IPv6 resolver transport for explicit IPv6-only entries.
-// Versions 0..3 and 7 remain immutable snapshot readers.
-const XrayRenderVersion uint8 = 15
+// Bit four permits explicitly scoped provider-LAN client sockets.
+// Versions 0..3, 7 and 15 remain immutable snapshot readers.
+const XrayRenderVersion uint8 = 31
 
 func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 	return renderXrayConfiguration(plan, XrayRenderVersion)
 }
 
 func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
-	if version > 3 && version != 7 && version != XrayRenderVersion {
+	if version > 3 && version != 7 && version != 15 && version != XrayRenderVersion {
 		return nil, errors.New("glivela: unsupported Xray render version")
 	}
 	if version >= 2 {
 		plan.PublicSSH = nil // Retired field is read only for historical artifacts.
+	}
+	if len(plan.ClientLinks) != 0 && version != XrayRenderVersion {
+		return nil, errors.New("glivela: private client links require the current runtime")
 	}
 	projection, err := prepareXrayProjection(plan)
 	if err != nil {
@@ -308,6 +313,22 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 		addresses := slices.Clone(plan.PublicSSH.HostPublicAddresses)
 		slices.Sort(addresses)
 		rules = append(rules, map[string]any{"type": "field", "network": "tcp", "port": "22", "ip": addresses, "outboundTag": "blocked"})
+	}
+	for _, link := range plan.ClientLinks {
+		tag := "private-client-" + link.ID
+		users := []string{}
+		for _, material := range plan.Credentials {
+			c := material.Credential
+			if c.Enabled && c.Kind == NativeCredential && c.AccountID == link.AccountID {
+				users = append(users, c.User)
+			}
+		}
+		slices.Sort(users)
+		outbounds = append(outbounds, map[string]any{"tag": tag, "protocol": "freedom", "sendThrough": link.Source, "settings": map[string]any{"domainStrategy": "UseIPv4", "finalRules": []any{
+			map[string]any{"action": "allow", "ip": []string{link.Address + "/32"}, "port": strconv.Itoa(link.Port), "network": "tcp"},
+			map[string]any{"action": "block", "ip": []string{"0.0.0.0/0", "::/0"}},
+		}}})
+		rules = append(rules, map[string]any{"type": "field", "user": users, "network": "tcp", "ip": []string{link.Address + "/32"}, "port": strconv.Itoa(link.Port), "outboundTag": tag})
 	}
 	composite := false
 	for _, grant := range projection.grants {
@@ -433,6 +454,19 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	}
 	if plan.Revision == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) > 256 || len(plan.Credentials) > 65536 || len(plan.Grants) > 65536 || len(plan.Peers) > 1024 {
 		return xrayProjection{}, errors.New("glivela: invalid Xray plan")
+	}
+	if len(plan.ClientLinks) > 1000 {
+		return xrayProjection{}, errors.New("glivela: too many private client links")
+	}
+	seenLinks, sockets := map[string]bool{}, map[string]bool{}
+	for _, link := range plan.ClientLinks {
+		socket := link.AccountID + "/" + link.Address + ":" + strconv.Itoa(link.Port)
+		if link.PrivateClientLink.Validate() != nil || !ValidIdentifier(link.ID) || !ValidIdentifier(link.AccountID) || link.Port < 24000 || link.Port > 24999 || seenLinks[link.ID] || sockets[socket] || !slices.ContainsFunc(plan.Credentials, func(m CredentialMaterial) bool {
+			return m.Credential.Enabled && m.Credential.AccountID == link.AccountID && m.Credential.Kind == NativeCredential
+		}) {
+			return xrayProjection{}, errors.New("glivela: invalid private client policy")
+		}
+		seenLinks[link.ID], sockets[socket] = true, true
 	}
 	projection := xrayProjection{credentials: map[string][]CredentialMaterial{}, peers: map[string]RoutePeer{}}
 	entryTags, routeTags, tags, ports := map[string][]string{}, map[string]string{}, map[string]bool{}, map[string]bool{}

@@ -64,3 +64,10 @@ Retaining issued subscription labels and an existing host guard during upgrades:
 [operator-owned configuration](docs/operator-configuration.md).
 
 - [Server forwarding through a shared public SS2022 listener](docs/server-public-transport.md)
+
+
+### Dedicated private IPv4 client links
+
+For two enrolled native nodes with a verified provider LAN, choose **专属内网 IPv4 · SS2022** when creating a client chain, or use **修改落地传输** on its existing route details. Supply the entry source address/interface and landing listener address/interface. Both addresses must be single RFC1918 IPv4 addresses already assigned to the specified interfaces. Only the existing chain's TCP listener is authorized; no subnet access or automatic public fallback is created. Ordinary native traffic and all other public/shared listeners retain their existing policy.
+
+The management `client-chains` request accepts `privateLink: {source, address, sourceInterface, interface}` with the existing chain/account/entry/egress identity and current `expectedRevision`. Omit `privateLink` to preserve an existing link; use `clearPrivateLink: true` explicitly to restore the original public transport. Existing chain credentials and subscription identity remain unchanged. Server-forwarding and three-hop private transport are outside this MVP. Upgrade the selected controller, native entry and landing before applying this policy. Refresh the original Mihomo/OpenClash subscription, verify HTTPS and the final exit, and confirm both-end traffic uses the private interfaces. Private-link web speed/latency measurements are not currently provided.

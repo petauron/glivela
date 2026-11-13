@@ -160,6 +160,9 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 	for _, published := range chains {
 		c := published.Chain
 		validServer := (c.Transport == "" || c.Transport == IPv4ClientSS2022) && PublicTransportIPv4(published.Server) || c.Transport == "ipv6-ss2022" && published.Server == c.ServerIPv6 && PublicTransportIPv6(published.Server)
+		if c.PrivateLink != nil {
+			validServer = published.Server == c.PrivateLink.Address && c.PrivateLink.Validate() == nil
+		}
 		if c.Validate() != nil || (published.EgressRegionPrefix != "" && !validDisplayName(published.EgressRegionPrefix)) || (published.EgressNameSuffix != "" && (!validDisplayName(published.EgressNameSuffix) || strings.ContainsAny(published.EgressNameSuffix, "|｜"))) || !c.Enabled || c.AccountID != accountID || !validServer || published.Base.Protocol != VLESSReality || published.Base.Material.Credential.EntryID != c.EntryID {
 			return nil, nil, errors.New("glivela: invalid published client chain")
 		}

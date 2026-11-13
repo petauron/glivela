@@ -1,3 +1,4 @@
+import { EditPrivateClientLink } from "./PrivateClientLink";
 import { useState } from "react";
 import { Search, X, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -5,7 +6,7 @@ import { SelectControl } from "@/components/SelectControl";
 import { LatencyCell, latencyKey, type RouteLatency } from "./RouteLatency";
 import { LinkSpeed, RouteSpeedSummary, speedKey, useLinkSpeed, type SpeedBody, type SpeedList } from "./LinkSpeed";
 import { routeLabels } from "./control-format";
-import type { Inventory } from "./control-types";
+import type { Inventory,ClientChain } from "./control-types";
 import { PathMTU } from "./PathMTU";
 
 export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds,active}: {
@@ -20,7 +21,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  const label=(row:typeof rows[number])=>row.name||`${nodeName(row.entryId)} → ${nodeName(row.egressId)}`;
  const accountName=(id:string)=>inventory.accounts.find(a=>a.account.id===id)?.account.displayName??id;
  const landingIds=(row:typeof rows[number])=>[...new Set([row.egressId,row.ipv4EgressId].filter((id):id is string=>!!id))];
- const routeLatency=(row:typeof rows[number],landingId:string)=>row.relayId||row.transport==="ipv6-ss2022"&&(!row.sourceIpv6||!row.serverIpv6)?undefined:latency.values.get(latencyKey(row.entryId,landingId,landingId===row.ipv4EgressId?row.ipv4Port??0:row.port,row.transport==="ipv6-ss2022"?row.sourceIpv6:"",row.transport==="ipv6-ss2022"?row.serverIpv6:""));
+ const routeLatency=(row:typeof rows[number],landingId:string)=>row.mode==="client"&&(row.value as ClientChain).privateLink||row.relayId||row.transport==="ipv6-ss2022"&&(!row.sourceIpv6||!row.serverIpv6)?undefined:latency.values.get(latencyKey(row.entryId,landingId,landingId===row.ipv4EgressId?row.ipv4Port??0:row.port,row.transport==="ipv6-ss2022"?row.sourceIpv6:"",row.transport==="ipv6-ss2022"?row.serverIpv6:""));
  const state=(row:typeof rows[number])=>row.mode==="client"&&row.enabled?"已配置 · 待客户端验证":routeLabels[row.state]??"未确认";
  const paused=(id:string)=>{
   const pause=inventory.availability?.nodes[id];
@@ -47,6 +48,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  const itemKey=(row:typeof rows[number],landingId:string)=>`${rowKey(row)}/${landingId}`;
  const current=shown.find(row=>landingIds(row).some(landingId=>itemKey(row,landingId)===selected));
  const reason=(row:typeof rows[number],landingId:string)=>{
+  if(row.mode==="client"&&(row.value as ClientChain).privateLink)return "专属内网暂不支持网页测速，请使用客户端验证。";
   if (!row.enabled) return "该线路已停用。";
   if (row.relayId) return "暂不支持三跳测速。";
   if (!listState(row).enabled) return listState(row).detail;
@@ -103,11 +105,13 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  </div>{current?<aside className="gl-inspector" data-mobile-open="true" aria-label="线路详情"><header><h2>线路详情</h2><button className="gl-icon-button" aria-label="关闭线路详情" onClick={()=>setSelected("")}><X/></button></header>
  <div className="gl-route-definitions">{[["入口",nodeName(current.entryId)],...(current.relayId?[["中转",nodeName(current.relayId)]]:[]),["落地",nodeName(current.egressId)],...(current.mode==="client"&&current.name?[["组合名称",current.name]]:[]),...(current.ipv4EgressId?[["IPv4 落地",nodeName(current.ipv4EgressId)]]:[]),["账户",accountName(current.accountId)],...(current.mode==="client"?[["最终出口",current.egressIp||"落地默认出口"]]:[]),["生成模式",current.mode==="server"?"转发":current.relayId?"三跳链式":"链式"],["状态",listState(current).label??(listState(current).enabled?"启用":"停用")]].map(([title,value])=><div key={title} className={title==="组合名称"?"gl-route-combination-name":undefined}><h3>{title}</h3><p title={value}>{value}</p></div>)}</div>
  <p className="gl-context-copy">{listState(current).detail}</p>
+ {current.mode==="client"&&(current.value as ClientChain).privateLink?<p className="gl-context-copy">专属内网 IPv4 · {((current.value as ClientChain).privateLink)!.source} → {((current.value as ClientChain).privateLink)!.address}</p>:null}
  {current.mode==="client"?<p className="gl-context-copy">仅 TCP · 落地端口 {current.port}{current.shared?" · 共享凭据":""}。停用或配置变更后，请刷新客户端订阅并验证。</p>:null}
  <details className="gl-context-details gl-route-verification"><summary>查看验证信息</summary><p>{state(current)}</p></details>
  {current.relayId?<p className="gl-context-copy">三跳线路暂不显示直连测速或 MTU 结果；请通过客户端验证。</p>:<><section className="gl-route-latencies"><h3>TCP 连接记录</h3>{landingIds(current).map(landingId=><div className="gl-route-latency-detail" key={landingId}><p>{nodeName(landingId)}</p><LatencyCell value={routeLatency(current,landingId)} now={latency.now} failed={!!latency.error}/></div>)}</section>
  {!current.relayId && landingIds(current).map(landingId=><PathMTU key={`mtu/${current.mode}/${current.id}/${landingId}`} routeId={current.id} mode={current.mode} landingId={landingId} landingName={nodeName(landingId)} disabled={disabled}/>)}
  {landingIds(current).map(landingId=><LinkSpeed key={`${current.id}/${landingId}`} entryId={current.entryId} entryName={nodeName(current.entryId)} landingId={landingId} landingName={nodeName(landingId)} reason={reason(current,landingId)} disabled={disabled} control={speed}/>)}</>}
+ {current.mode==="client"?<EditPrivateClientLink key={current.id+JSON.stringify((current.value as ClientChain).privateLink)} chain={current.value as ClientChain} revision={inventory.accounts.find(a=>a.account.id===current.accountId)?.account.desiredRevision??""} disabled={disabled} save={save}/>:null}
  <section>{current.mode==="client"&&!current.shared?<Button className="gl-wide" variant="outline" disabled={disabled} onClick={()=>shareLanding(current)}>落地统一 24000</Button>:null}<Button className="gl-wide" variant="outline" disabled={disabled||!inventory.accounts.some(a=>a.account.id===current.accountId)} onClick={()=>toggle(current)}>{current.enabled?(listState(current).enabled?"停用线路":"关闭线路开关"):"启用线路"}</Button>
   {deleteKey===selected?<div className="gl-route-delete-confirm" role="group" aria-label="确认删除线路"><p>删除后线路将从列表和新订阅中移除，历史流量保留。{current.ipv4EgressId?"这条线路的两个落地会一并删除。":""}</p><div><Button variant="outline" disabled={disabled} onClick={()=>setDeleteKey("")}>取消</Button><Button variant="destructive" disabled={disabled||current.enabled} onClick={()=>void remove(current)}>确认删除</Button></div></div>:<Button className="gl-wide gl-route-delete-button" variant="ghost" disabled={disabled||current.enabled} onClick={()=>setDeleteKey(selected)}>删除线路</Button>}
   {current.enabled?<p className="gl-route-delete-hint">请先停用线路，待节点应用后再删除。</p>:null}
