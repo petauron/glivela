@@ -62,6 +62,8 @@ for arch in amd64 arm64; do
   GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -mod=readonly -trimpath -buildvcs=false \
     -ldflags='-s -w -buildid=' -o "$bundle/glivela" ./cmd/glivela
   cp LICENSE "$bundle/LICENSE.glivela"
+  printf '\nAethersailor Full template (adapted routing data)\n' >> "$bundle/LICENSE.glivela"
+  cat subscription_profiles/README.md subscription_profiles/LICENSE-CC-BY-SA-4.0.txt >> "$bundle/LICENSE.glivela"
   cp "ui/dist/ui-glivela-$version.js" "$bundle/glivela-ui.js"
   cp "ui/dist/ui-glivela-$version.css" "$bundle/glivela-ui.css"
   chmod 0755 "$bundle/glivela" "$bundle/xray" "$bundle/iperf3"
