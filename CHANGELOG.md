@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.0-alpha.140](https://github.com/petauron/glivela/compare/v0.1.0-alpha.139...v0.1.0-alpha.140) (2026-11-13)
+
+
+### Features
+
+* safely add an isolated role to an existing native node ([#74](https://github.com/petauron/glivela/issues/74)) ([61d3b8c](https://github.com/petauron/glivela/commit/61d3b8c4a8869d64b418130855b257697c1e22ac))
+
+
+### Bug Fixes
+
+* **subscription:** use Taiwan flag for TW display prefix ([#135](https://github.com/petauron/glivela/issues/135)) ([00c9c2d](https://github.com/petauron/glivela/commit/00c9c2dd35be349bc592e3a22f5225dc82cba62f))
+
 ## [0.1.0-alpha.139](https://github.com/petauron/glivela/compare/v0.1.0-alpha.138...v0.1.0-alpha.139) (2026-11-13)
 
 
