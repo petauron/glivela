@@ -29,6 +29,38 @@ func TestKernelEntryGateLifecycle(t *testing.T) {
 	host, _ := NewHostGate(peer, 12345, 1)
 	public, _ := NewHostGate(peer, 12345, 1, glivela.PrivateTransport{PublicAddress: "8.8.8.8"})
 	public6, _ := NewHostGate(peer, 12345, 1, glivela.PrivateTransport{PublicAddress: "2606:4700:4700::1111", Port: 24008})
+	// The real kernel must retain a live direct listener while a separate
+	// three-hop listener at the same public IPv6 address is activated.
+	sibling, _ := NewHostGate(peer, 12345, 1, glivela.PrivateTransport{PublicAddress: public6.publicAddress, Port: 24000})
+	if err := public6.Install(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := public6.renew(ctx, time.Now().Add(AllowLifetime)); err != nil {
+		t.Fatal(err)
+	}
+	beforeSibling, err := runNFT(ctx, nil, "--json", "list", "table", "inet", public6.table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sibling.Install(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := sibling.RemoveClosedConflicts(ctx); err != nil {
+		t.Fatal("distinct public port conflict", err)
+	}
+	afterSibling, err := runNFT(ctx, nil, "--json", "list", "table", "inet", public6.table)
+	if err != nil || !bytes.Equal(beforeSibling, afterSibling) {
+		t.Fatal("existing listener gate changed", err)
+	}
+	if err := sibling.Remove(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := public6.Block(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := public6.Remove(ctx); err != nil {
+		t.Fatal(err)
+	}
 	for _, gate := range []*TrafficGate{bridge, host, public, public6} {
 		t.Run(gate.scopeChain(), func(t *testing.T) {
 			if err := gate.Install(ctx); err != nil {

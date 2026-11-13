@@ -147,31 +147,31 @@ func testOfficialSharedPublicServerSocket(t *testing.T, binary string) {
 	}
 }
 
-func TestSharedPublicGateClosesOldPortBeforeRetirement(t *testing.T) {
-	peer := PeerIdentity{ID: "peer", PublicKey: "nodekey:peer", Address: "100.64.0.2"}
-	old, _ := NewHostGate(peer, 12345, 3, glivela.PrivateTransport{PublicAddress: "8.8.8.8"})
-	current, err := NewHostGate(peer, 12345, 4, glivela.PrivateTransport{PublicAddress: "8.8.8.8", Port: 24000})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := json.Marshal(current.objects())
-	if old.table == current.table || !strings.Contains(string(raw), "24000") || strings.Contains(string(raw), "1080") {
-		t.Fatal("gate does not own the explicit port")
-	}
-	document := fixtureNFT(t, old)
-	document.Objects = append(document.Objects, fixtureNFT(t, current).Objects...)
-	writes := 0
-	current.run = func(_ context.Context, input []byte, _ ...string) ([]byte, error) {
-		if input != nil {
-			writes++
-			if !strings.Contains(string(input), old.table) || strings.Contains(string(input), current.table) {
-				t.Fatal("cleanup touched current gate")
+// Different listeners at one authorized public IP are independent paths.
+func TestPublicGatePreservesDistinctListenerPorts(t *testing.T) {
+	for _, ports := range [][2]int{{1080, 24000}, {24006, 24000}} {
+		for _, address := range []string{"8.8.8.8", "2606:4700:4700::1111"} {
+			peer := PeerIdentity{ID: "peer", PublicKey: "nodekey:peer", Address: "100.64.0.2"}
+			other, err := NewHostGate(peer, 12345, 3, glivela.PrivateTransport{PublicAddress: address, Port: ports[0]})
+			if err != nil {
+				t.Fatal(err)
 			}
-			document = fixtureNFT(t, current)
+			current, err := NewHostGate(peer, 12345, 4, glivela.PrivateTransport{PublicAddress: address, Port: ports[1]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			document := fixtureNFT(t, other)
+			document.Objects = append(document.Objects, fixtureNFT(t, current).Objects...)
+			writes := 0
+			current.run = func(_ context.Context, input []byte, _ ...string) ([]byte, error) {
+				if input != nil {
+					writes++
+				}
+				return json.Marshal(document)
+			}
+			if err := current.RemoveClosedConflicts(context.Background()); err != nil || writes != 0 {
+				t.Fatal("distinct listener treated as conflicting", ports, address, err)
+			}
 		}
-		return json.Marshal(document)
-	}
-	if err := current.RemoveClosedConflicts(context.Background()); err != nil || writes != 1 {
-		t.Fatal("closed 1080 gate was not retired", err)
 	}
 }

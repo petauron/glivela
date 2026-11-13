@@ -228,16 +228,6 @@ func (g *TrafficGate) RemoveClosedConflicts(ctx context.Context) error {
 		}
 		candidate := &TrafficGate{peer: g.peer, publicAddress: g.publicAddress, port: g.listenerPort(), bridge: g.bridge, gid: g.gid, revision: g.revision, table: name, marker: marker, run: g.run}
 		found, validationErr := candidate.validate(document)
-		if validationErr != nil && g.gid != 0 && g.publicAddress != "" {
-			// Read only the other supported historical port shape during exact
-			// owned cleanup. This never chooses a runtime connection fallback.
-			if candidate.port == SOCKSPort {
-				candidate.port = 24000
-			} else {
-				candidate.port = SOCKSPort
-			}
-			found, validationErr = candidate.validate(document)
-		}
 		if validationErr != nil || !found || len(candidate.elements(document)) != 0 {
 			return errors.Join(validationErr, errors.New("landing: conflicting gate is not a closed managed policy"))
 		}
@@ -276,7 +266,7 @@ func (g *TrafficGate) matchesTarget(document nftDocument, table string) bool {
 		if rule == nil || rule["family"] != "inet" || rule["table"] != table || rule["chain"] != g.scopeChain() {
 			continue
 		}
-		bridge, address := false, false
+		bridge, address, port := false, false, false
 		expressions, ok := rule["expr"].([]any)
 		if !ok {
 			continue
@@ -300,8 +290,11 @@ func (g *TrafficGate) matchesTarget(document nftDocument, table string) bool {
 			if payload, ok := left["payload"].(map[string]any); ok && payload["protocol"] == protocol && payload["field"] == "daddr" && match["right"] == g.endpoint() {
 				address = true
 			}
+			if payload, ok := left["payload"].(map[string]any); ok && (payload["protocol"] == "tcp" || payload["protocol"] == "udp") && payload["field"] == "dport" && match["right"] == float64(g.listenerPort()) {
+				port = true
+			}
 		}
-		if bridge && address {
+		if bridge && address && port {
 			return true
 		}
 	}
