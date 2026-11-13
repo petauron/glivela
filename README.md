@@ -71,3 +71,18 @@ Retaining issued subscription labels and an existing host guard during upgrades:
 For two enrolled native nodes with a verified provider LAN, choose **专属内网 IPv4 · SS2022** when creating a client chain, or use **修改落地传输** on its existing route details. Supply the entry source address/interface and landing listener address/interface. Both addresses must be single RFC1918 IPv4 addresses already assigned to the specified interfaces. Only the existing chain's TCP listener is authorized; no subnet access or automatic public fallback is created. Ordinary native traffic and all other public/shared listeners retain their existing policy.
 
 The management `client-chains` request accepts `privateLink: {source, address, sourceInterface, interface}` with the existing chain/account/entry/egress identity and current `expectedRevision`. Omit `privateLink` to preserve an existing link; use `clearPrivateLink: true` explicitly to restore the original public transport. Existing chain credentials and subscription identity remain unchanged. Server-forwarding and three-hop private transport are outside this MVP. Upgrade the selected controller, native entry and landing before applying this policy. Refresh the original Mihomo/OpenClash subscription, verify HTTPS and the final exit, and confirm both-end traffic uses the private interfaces. Private-link web speed/latency measurements are not currently provided.
+
+## Managed ingress DNS resources
+
+An administrator may supply a non-secret DNS resource in the authenticated
+`advertise-host` request's `resource` field, alongside `entryId`, `action: apply`
+and the exact `expectedRevision` string. The resource contains `id`, `hostname`,
+`address`, `type` (`A` or `AAAA`), `revision`, `appliedRevision`, and `status`.
+It must be ready, fully applied, and resolve to the same public address as the
+current entry. Exact successful retries are idempotent. SNI remains separate.
+
+The host manager owns domain allocation and provider access. Glivela receives no
+DNS-provider key or host-manager administrator session, does not read its database,
+and retains its own identities, permissions and task state. This optional portable
+provisioning input does not add a runtime dependency on Vastora. DNS propagation
+and real subscription access must be verified before accepting a migration.
