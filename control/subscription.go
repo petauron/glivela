@@ -70,12 +70,12 @@ func SubscriptionHandler(store *Store) http.Handler {
 			}
 		}
 		format, target := strings.ToLower(strings.TrimSpace(query.Get("format"))), strings.ToLower(strings.TrimSpace(query.Get("target")))
-		if format != "" && format != "mihomo" && format != "links" || target != "" && target != "mihomo" && target != "clash" {
+		if format != "" && format != "mihomo" && format != "links" && format != "shadowrocket" || target != "" && target != "mihomo" && target != "clash" {
 			http.Error(w, "invalid format", http.StatusBadRequest)
 			return
 		}
 		profile := query.Get("profile")
-		if profile != "" && profile != "nodes" && profile != "aethersailor" || profile == "aethersailor" && format == "links" {
+		if profile != "" && profile != "nodes" && profile != "aethersailor" || profile == "aethersailor" && format == "links" || format == "shadowrocket" && (profile != "aethersailor" || target != "") {
 			http.Error(w, "invalid profile", http.StatusBadRequest)
 			return
 		}
@@ -91,6 +91,11 @@ func SubscriptionHandler(store *Store) http.Handler {
 		}
 		if profile == "aethersailor" {
 			content.body, err = glivela.RenderAethersailorProfile(content.body, content.items)
+			if err == nil && format == "shadowrocket" {
+				content.body, err = glivela.RenderShadowrocketProfile(content.body)
+				content.contentType = "text/plain; charset=utf-8"
+				w.Header().Set("Content-Disposition", `attachment; filename="glivela-aethersailor.conf"`)
+			}
 			if err != nil {
 				http.Error(w, "subscription profile unavailable", http.StatusServiceUnavailable)
 				return

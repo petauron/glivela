@@ -92,3 +92,5 @@ and real subscription access must be verified before accepting a migration.
 The account panel offers **仅节点** (the existing format negotiation and node order) and **Aethersailor 重度分流** (OpenClash/Mihomo). Both links use the same subscription identity and published inventory. The optional profile uses `?format=mihomo&profile=aethersailor`; `profile=nodes` or no profile retains existing behavior. URI output with the Full profile is rejected.
 
 The Full profile includes policy groups and rules, without DNS, TUN, listeners or local network settings. It does not edit installed client profiles. Keep local company/private-network overrides ahead of imported rules; clients need compatible geosite/geoip data and access to rule-provider downloads. See [template provenance and adaptation](subscription_profiles/README.md).
+
+Shadowrocket 重度分流：在订阅类型选择 Aethersailor 后选择“小火箭”，先在首页导入配套节点订阅，再在配置页下载原生 `.conf`。保留原配置并合并已有 DNS、公司与内网优先规则后使用；下载配置不会自动完成本地合并。
