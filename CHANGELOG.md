@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.145](https://github.com/petauron/glivela/compare/v0.1.0-alpha.144...v0.1.0-alpha.145) (2026-11-13)
+
+
+### Features
+
+* **subscription:** add optional Aethersailor Full profile ([#149](https://github.com/petauron/glivela/issues/149)) ([aa3cb92](https://github.com/petauron/glivela/commit/aa3cb92628091743cbae84b0f2ea5243fdb4361e))
+
 ## [0.1.0-alpha.144](https://github.com/petauron/glivela/compare/v0.1.0-alpha.143...v0.1.0-alpha.144) (2026-11-13)
 
 
