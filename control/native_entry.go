@@ -410,7 +410,13 @@ func (d *NativeEntryDriver) warmupFromProcess(ctx context.Context, desired Desir
 			if err := probeEntryReadiness(ctx, d.Binary, d.BinarySHA256, plan, true); err != nil {
 				return err
 			}
-			return d.monitors.start(ctx, desired, gates, id, d.readyProcess, nil, func(ctx context.Context, p RouteProbe) (RouteProbeResult, error) {
+			ready := func(check context.Context, want Desired) error {
+				if err := d.readyProcess(check, want); err != nil {
+					return err
+				}
+				return d.verifySameProcess(check, before)
+			}
+			return d.monitors.start(ctx, desired, gates, id, ready, nil, func(ctx context.Context, p RouteProbe) (RouteProbeResult, error) {
 				return ProbeWithCore(ctx, p, d.Binary, d.BinarySHA256)
 			})
 		}

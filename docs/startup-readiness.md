@@ -8,6 +8,15 @@ A failed or unverified peer retains its exact owned closed fence and reports
 blocked startup status; it does not reject the direct entry or another accepted
 peer. Entry process/identity changes, cancellation and unconfirmed firewall
 ownership remain activation failures. Overall entry readiness remains bounded to 25 seconds.
+Peers that fail this initial budget remain fenced and retry startup acceptance
+serially in the background, starting after 5 seconds and backing off to at most
+60 seconds between rounds. Each attempt has a 20-second check budget and repeats
+the enrolled identity, exact worker generation/configuration, authorized transport
+and real exit checks. Only successful acceptance removes that peer's owned
+closed fence. Accepted peers leave the retry list; no worker is created when all
+peers pass. Stop or reconfiguration cancels and joins the old retry worker before
+changing its gates. No configuration revision, credential or ledger is rewritten.
+
 Glivela caches acceptance for the exact process, configuration and revision.
 The legacy Agent landing executor also checks once at activation. Closed startup
 fences are removed only after that peer's acceptance; static peer/source firewall
