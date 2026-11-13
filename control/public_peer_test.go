@@ -3,8 +3,11 @@ package control
 import (
 	"context"
 	"crypto/x509"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,7 +122,19 @@ func TestPublicPeerAcceptanceOverMutualTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener := httptest.NewUnstartedServer(server.Handler)
+	var calls atomic.Int32
+	var stallNext atomic.Bool
+	handler := server.Handler
+	listener := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/LandingAcceptance") {
+			calls.Add(1)
+			if stallNext.Swap(false) {
+				<-r.Context().Done()
+				return
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	listener.EnableHTTP2 = true
 	listener.TLS = server.TLSConfig.Clone()
 	listener.Config.HTTP2 = server.HTTP2
@@ -134,12 +149,18 @@ func TestPublicPeerAcceptanceOverMutualTLS(t *testing.T) {
 	if proof := client.VerifyPublicPeer(context.Background(), entry.Desired, peer); proof.State != "authenticated" {
 		t.Fatal("mTLS public identity refused", proof)
 	}
+	stallNext.Store(true)
+	beforeRetry := calls.Load()
+	if proof := client.VerifyPublicPeer(context.Background(), entry.Desired, peer); proof.State != "authenticated" || calls.Load()-beforeRetry != 2 || proof.CheckedAt.Sub(proof.StartedAt) > 3*time.Second {
+		t.Fatal("one transient RPC timeout did not obtain a fresh bounded proof", proof, calls.Load()-beforeRetry)
+	}
 	foreign, err := NewClient(listener.URL, landingIdentity, roots)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer foreign.Close()
-	if proof := foreign.VerifyPublicPeer(context.Background(), entry.Desired, peer); proof.State == "authenticated" {
+	beforeRefusal := calls.Load()
+	if proof := foreign.VerifyPublicPeer(context.Background(), entry.Desired, peer); proof.State == "authenticated" || calls.Load()-beforeRefusal != 1 {
 		t.Fatal("other enrolled role obtained entry-scoped proof")
 	}
 	s.mu.Lock()

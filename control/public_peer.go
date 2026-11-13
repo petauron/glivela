@@ -83,8 +83,6 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 
 func (c *Client) VerifyPublicPeer(ctx context.Context, desired Desired, peer EntryPeer) landing.LinkResult {
 	result := landing.LinkResult{State: "unknown", Reason: "peer_identity_unavailable", StartedAt: time.Now().UTC()}
-	ctx, cancel := context.WithTimeout(ctx, landing.CheckTimeout)
-	defer cancel()
 	if desired.Entry == nil || desired.EntryNetwork == nil {
 		result.CheckedAt = time.Now().UTC()
 		return result
@@ -94,14 +92,26 @@ func (c *Client) VerifyPublicPeer(ctx context.Context, desired Desired, peer Ent
 		result.CheckedAt = time.Now().UTC()
 		return result
 	}
-	var proof publicPeerProof
-	err = c.nodeCall(ctx, pb.NewNodeOperationsClient(c.grpc).LandingAcceptance, landingAcceptanceRequest{SnapshotID: id, Revision: desired.Revision, ConfigSHA256: desired.ConfigSHA256, PeerID: peer.EgressID}, &proof, 4096, 4096)
-	now := time.Now().UTC()
-	if err == nil && ctx.Err() == nil && proof.EntryID == id && proof.LandingID == peer.EgressID && proof.Revision == desired.Revision && proof.ConfigSHA256 == desired.ConfigSHA256 &&
-		proof.Identity == peer.Identity && proof.LandingRevision > 0 && glivela.ValidIdentity(proof.LandingConfigSHA256) && !proof.CheckedAt.Before(result.StartedAt.Add(-5*time.Second)) && !proof.CheckedAt.After(now.Add(5*time.Second)) {
-		result.State, result.Reason = "authenticated", "management_identity_verified"
+	// A transient RPC timeout must not permanently close an otherwise valid
+	// startup. Keep each proof within the same three-second window and the
+	// caller's startup deadline; refusals or mismatched proofs never retry.
+	for attempt := 0; attempt < 2; attempt++ {
+		result.StartedAt = time.Now().UTC()
+		check, stop := context.WithTimeout(ctx, landing.CheckTimeout)
+		var proof publicPeerProof
+		err = c.nodeCall(check, pb.NewNodeOperationsClient(c.grpc).LandingAcceptance, landingAcceptanceRequest{SnapshotID: id, Revision: desired.Revision, ConfigSHA256: desired.ConfigSHA256, PeerID: peer.EgressID}, &proof, 4096, 4096)
+		now := time.Now().UTC()
+		timedOut := err != nil && errors.Is(check.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		if err == nil && check.Err() == nil && proof.EntryID == id && proof.LandingID == peer.EgressID && proof.Revision == desired.Revision && proof.ConfigSHA256 == desired.ConfigSHA256 &&
+			proof.Identity == peer.Identity && proof.LandingRevision > 0 && glivela.ValidIdentity(proof.LandingConfigSHA256) && !proof.CheckedAt.Before(result.StartedAt.Add(-5*time.Second)) && !proof.CheckedAt.After(now.Add(5*time.Second)) {
+			result.State, result.Reason = "authenticated", "management_identity_verified"
+		}
+		stop()
+		result.CheckedAt = now
+		if !timedOut || attempt != 0 {
+			return result
+		}
 	}
-	result.CheckedAt = now
 	return result
 }
 
