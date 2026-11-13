@@ -407,7 +407,7 @@ func importedLandingRegionPrefix(region string) string {
 	case "US":
 		return "🇺🇸 美国"
 	case "TW":
-		return "🇨🇳 台湾"
+		return "🇹🇼 台湾"
 	case "SG":
 		return "🇸🇬 新加坡"
 	default:
