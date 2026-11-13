@@ -19,6 +19,7 @@ import (
 // members. The output chain runs after output DNAT, so post-resolution private
 // addresses (including DNS rebinding) cannot bypass the destination restriction.
 type ClientListenerPolicy struct {
+	EgressIP  string `json:"egressIp,omitempty"`
 	Shared    bool   `json:"shared,omitempty"`
 	Transport string `json:"transport,omitempty"`
 	Address   string `json:"address,omitempty"`
@@ -27,6 +28,7 @@ type ClientListenerPolicy struct {
 }
 
 type ServerFirewall struct {
+	Port            int                      `json:"port,omitempty"`
 	IPv6Only        bool                     `json:"ipv6Only,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	ClientListeners []ClientListenerPolicy   `json:"clientListeners,omitempty"`
@@ -40,6 +42,13 @@ type ServerFirewall struct {
 	UID             uint32                   `json:"uid"`
 }
 
+func (policy ServerFirewall) listenerPort() int {
+	if policy.Port != 0 {
+		return policy.Port
+	}
+	return SOCKSPort
+}
+
 func (policy ServerFirewall) validate() error {
 	if err := policy.PublicSSH.Validate(); err != nil {
 		return err
@@ -50,6 +59,9 @@ func (policy ServerFirewall) validate() error {
 		}
 	}
 	for _, listener := range policy.ClientListeners {
+		if listener.EgressIP != "" && (!ValidEgressIP(listener.EgressIP) || policy.PublicSSH.RequireHost(listener.EgressIP) != nil) {
+			return errors.New("landing: invalid client firewall exit")
+		}
 		if listener.Transport == "ipv6-ss2022" {
 			if err := policy.PublicSSH.RequireHost(listener.Address); err != nil {
 				return err
@@ -63,6 +75,9 @@ func (policy ServerFirewall) validate() error {
 }
 
 func (policy ServerFirewall) validateIdentity() error {
+	if policy.Port != 0 && (policy.Port != 24000 || !policy.Public || policy.IPv6Only || slices.ContainsFunc(policy.Sources, func(source string) bool { return !slices.Contains(policy.TCPOnlySources, source) })) {
+		return errors.New("landing: invalid public listener port")
+	}
 	validAddress := tailnetIPv4
 	if policy.Public {
 		validAddress = glivela.PublicTransportIPv4
@@ -91,13 +106,17 @@ func (policy ServerFirewall) validateIdentity() error {
 	ports := map[int]ClientListenerPolicy{}
 	for _, c := range policy.ClientListeners {
 		validTransport := (c.Transport == "" || c.Transport == glivela.IPv4ClientSS2022) && c.Address == "" && seen[c.Source] ||
+			c.Transport == glivela.IPv4RelaySS2022 && c.Address == "" && !c.Shared && glivela.PublicTransportIPv4(c.Source) && c.Source != policy.Address ||
 			c.Transport == "ipv6-ss2022" && glivela.PublicTransportIPv6(c.Address) && glivela.PublicTransportIPv6(c.Source) && c.Address != c.Source
 		if policy.IPv6Only && (c.Transport != "ipv6-ss2022" || c.Address != policy.Address) {
 			return errors.New("landing: IPv4 listener in IPv6-only firewall")
 		}
 		previous, duplicate := ports[c.Port]
-		if !policy.Public || c.Shared && c.Port != 24000 || c.Port < 24000 || c.Port > 24999 || duplicate && (!previous.Shared || !c.Shared) || !validTransport {
+		if !policy.Public || c.Shared && c.Port != 24000 || c.Port < 24000 || c.Port > 24999 || duplicate && (!previous.Shared || !c.Shared || previous.EgressIP != c.EgressIP) || !validTransport {
 			return errors.New("landing: invalid client listener firewall")
+		}
+		if policy.Port != 0 && c.Address == "" && c.Port == policy.Port && (!c.Shared || c.Transport != glivela.IPv4ClientSS2022 || c.EgressIP != "" && c.EgressIP != policy.EgressIP || len(policy.TCPOnlySources) != len(policy.Sources)) {
+			return errors.New("landing: shared server firewall policy differs")
 		}
 		ports[c.Port] = c
 	}
@@ -143,7 +162,7 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 		if policy.IPv6Only {
 			continue
 		}
-		var port any = SOCKSPort
+		var port any = policy.listenerPort()
 		if protocol == "udp" {
 			if legacy {
 				port = nftObject{"range": []int{1081, 1208}}
@@ -151,8 +170,14 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 		}
 		rule("input", match(payload("ip", "daddr"), policy.Address), match(payload(protocol, "dport"), port), nftObject{"jump": nftObject{"target": "sources"}})
 	}
+	// A shared primary socket is already governed by all exact server sources.
+	// Do not append a client-only terminal drop that would revoke a migrated
+	// source when its old client-chain record is disabled.
+	listeners := slices.DeleteFunc(slices.Clone(policy.ClientListeners), func(c ClientListenerPolicy) bool {
+		return policy.Port != 0 && c.Address == "" && c.Port == policy.Port
+	})
 	shared := map[string]bool{}
-	for i, c := range policy.ClientListeners {
+	for i, c := range listeners {
 		family, address := "ip", policy.Address
 		if c.Transport == "ipv6-ss2022" {
 			family, address = "ip6", c.Address
@@ -166,7 +191,7 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 			shared[address] = true
 		}
 		// Shared accepts are all emitted before the per-address final deny.
-		if i == len(policy.ClientListeners)-1 {
+		if i == len(listeners)-1 {
 			addresses := make([]string, 0, len(shared))
 			for address := range shared {
 				addresses = append(addresses, address)
@@ -210,9 +235,9 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 			if protocol == "udp" && legacy {
 				expr = append(expr, match(payload("udp", "sport"), nftObject{"range": []int{1081, 1208}}))
 			} else if protocol == "tcp" {
-				expr = append(expr, match(payload("tcp", "sport"), SOCKSPort))
+				expr = append(expr, match(payload("tcp", "sport"), policy.listenerPort()))
 			} else if policy.Public {
-				expr = append(expr, match(payload("udp", "sport"), SOCKSPort))
+				expr = append(expr, match(payload("udp", "sport"), policy.listenerPort()))
 			} else {
 				expr = append(expr, match(meta("l4proto"), "udp"))
 			}
@@ -247,23 +272,35 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 			}
 		}
 	}
-	egress, _ := netip.ParseAddr(policy.EgressIP)
-	if egress.Is6() {
+	addresses := []string{policy.EgressIP}
+	for _, c := range policy.ClientListeners {
+		if c.EgressIP != "" && !slices.Contains(addresses, c.EgressIP) {
+			addresses = append(addresses, c.EgressIP)
+		}
+	}
+	if slices.ContainsFunc(addresses, func(ip string) bool { return strings.Contains(ip, ":") }) {
 		for _, cidr := range blockedIPv6 {
 			prefix := netip.MustParsePrefix(cidr)
 			rule("destinations", match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": prefix.Addr().String(), "len": prefix.Bits()}}), nftObject{"drop": nil})
 		}
-		rule("destinations", match(payload("ip6", "saddr"), policy.EgressIP), match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": "2000::", "len": 3}}), match(meta("l4proto"), "tcp"), nftObject{"return": nil})
-	} else {
-		for _, protocol := range []string{"tcp", "udp"} {
-			// EgressIP is mandatory. Its IP payload match enforces IPv4;
-			// nft strips a redundant nfproto condition on kernel read-back.
-			expr := []any{match(meta("l4proto"), protocol), match(payload("ip", "saddr"), policy.EgressIP)}
-			if legacy && policy.EgressIP == "" {
-				// Exact historical read/remove shape; never installed by Xray.
-				expr = []any{match(meta("nfproto"), "ipv4"), match(meta("l4proto"), protocol)}
+	}
+	for _, ip := range addresses {
+		if strings.Contains(ip, ":") {
+			rule("destinations", match(payload("ip6", "saddr"), ip), match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": "2000::", "len": 3}}), match(meta("l4proto"), "tcp"), nftObject{"return": nil})
+		} else {
+			for _, protocol := range []string{"tcp", "udp"} {
+				if protocol == "udp" && ip != policy.EgressIP {
+					continue
+				}
+				// EgressIP is mandatory. Its IP payload match enforces IPv4;
+				// nft strips a redundant nfproto condition on kernel read-back.
+				expr := []any{match(meta("l4proto"), protocol), match(payload("ip", "saddr"), ip)}
+				if legacy && policy.EgressIP == "" {
+					// Exact historical read/remove shape; never installed by Xray.
+					expr = []any{match(meta("nfproto"), "ipv4"), match(meta("l4proto"), protocol)}
+				}
+				rule("destinations", append(expr, nftObject{"return": nil})...)
 			}
-			rule("destinations", append(expr, nftObject{"return": nil})...)
 		}
 	}
 	rule("destinations", nftObject{"drop": nil}) // No other source or family may escape.

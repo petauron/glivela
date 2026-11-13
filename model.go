@@ -86,23 +86,35 @@ func (c Credential) Validate() error {
 }
 
 type RouteGrant struct {
-	ID           string         `json:"id"`
-	AccountID    string         `json:"accountId"`
-	EntryID      string         `json:"entryId"`
-	EgressID     string         `json:"egressId"`
-	IPv4EgressID string         `json:"ipv4EgressId,omitempty"`
-	InboundTag   string         `json:"inboundTag"`
-	Base         Credential     `json:"base"`
-	Route        Credential     `json:"route"`
-	Mode         PublishingMode `json:"mode"`
-	Enabled      bool           `json:"enabled"`
-	HideNative   bool           `json:"hideNative"`
-	DesiredRev   uint64         `json:"desiredRevision"`
-	AppliedRev   uint64         `json:"appliedRevision"`
-	RuntimeGood  bool           `json:"runtimeHealthy"`
+	// ClientChainID selects one retained three-hop path without replacing a direct peer.
+	ClientChainID string         `json:"clientChainId,omitempty"`
+	ID            string         `json:"id"`
+	AccountID     string         `json:"accountId"`
+	EntryID       string         `json:"entryId"`
+	EgressID      string         `json:"egressId"`
+	IPv4EgressID  string         `json:"ipv4EgressId,omitempty"`
+	InboundTag    string         `json:"inboundTag"`
+	Base          Credential     `json:"base"`
+	Route         Credential     `json:"route"`
+	Mode          PublishingMode `json:"mode"`
+	Enabled       bool           `json:"enabled"`
+	HideNative    bool           `json:"hideNative"`
+	DesiredRev    uint64         `json:"desiredRevision"`
+	AppliedRev    uint64         `json:"appliedRevision"`
+	RuntimeGood   bool           `json:"runtimeHealthy"`
+}
+
+func (g RouteGrant) PeerKey() string {
+	if g.ClientChainID != "" {
+		return g.ClientChainID
+	}
+	return g.EgressID
 }
 
 func (g RouteGrant) Validate() error {
+	if g.ClientChainID != "" && (!ValidIdentifier(g.ClientChainID) || g.ClientChainID == g.EgressID || g.IPv4EgressID != "") {
+		return errors.New("glivela: invalid three-hop route selection")
+	}
 	if !ValidIdentifier(g.ID) || !ValidIdentifier(g.AccountID) || !ValidIdentifier(g.EntryID) || !ValidIdentifier(g.EgressID) || !g.Mode.Valid() || !validInboundTag(g.InboundTag) || g.DesiredRev == 0 || g.AppliedRev > g.DesiredRev {
 		return errors.New("glivela: invalid route grant")
 	}

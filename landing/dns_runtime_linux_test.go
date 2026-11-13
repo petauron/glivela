@@ -39,7 +39,8 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	if binary == "" {
 		t.Fatal("verified official core required")
 	}
-	ipv6 := os.Getenv("GLIVELA_LANDING_FAMILY") == "ipv6"
+	dual := os.Getenv("GLIVELA_LANDING_FAMILY") == "dual"
+	ipv6 := os.Getenv("GLIVELA_LANDING_FAMILY") == "ipv6" || dual
 	egress, targetNetwork, targetAddress, queryType := "93.184.216.35", "tcp4", "93.184.216.34:443", "A"
 	if ipv6 {
 		egress, targetNetwork, targetAddress, queryType = "2606:4700::100", "tcp6", "[::]:443", "AAAA"
@@ -53,7 +54,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		}
 	}
 	ip("link", "set", "lo", "up")
-	for _, address := range []string{"100.64.0.10/32", "100.64.0.11/32", "100.64.0.12/32", "192.168.50.2/32", "93.184.216.34/32", "93.184.216.35/32", "1.1.1.1/32", "1.0.0.1/32"} {
+	for _, address := range []string{"100.64.0.10/32", "100.64.0.11/32", "100.64.0.12/32", "100.64.0.13/32", "192.168.50.2/32", "93.184.216.34/32", "93.184.216.35/32", "1.1.1.1/32", "1.0.0.1/32"} {
 		ip("addr", "add", address, "dev", "lo")
 	}
 	resolverAddress, resolverNetwork := "1.1.1.1:53", "udp"
@@ -104,7 +105,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	}
 	args = append(args, "--host-record=example.com,93.184.216.34")
 	args = append(args, "--host-record=private.example.com,192.168.50.2", "--host-record=mixed.example.com,192.168.50.2", "--host-record=mixed.example.com,93.184.216.34")
-	args = append(args, "--host-record=ipv4only.example.com,93.184.216.34", "--host-record=unreachable.example.com,2606:4700::dead,93.184.216.34")
+	args = append(args, "--host-record=ipv6only.example.com,2606:4700::1", "--host-record=ipv4only.example.com,93.184.216.34", "--host-record=unreachable.example.com,2606:4700::dead,93.184.216.34")
 	if ipv6 {
 		args = append(args, "--host-record=private.example.com,::1", "--host-record=mixed.example.com,::1", "--host-record=mixed.example.com,2606:4700::1")
 	}
@@ -151,9 +152,22 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	defer target.Close()
 	pool := x509.NewCertPool()
 	pool.AddCert(target.Certificate())
+	if dual {
+		v4 := httptest.NewUnstartedServer(target.Config.Handler)
+		_ = v4.Listener.Close()
+		v4.Listener, err = net.Listen("tcp4", "93.184.216.34:443")
+		if err != nil {
+			t.Fatal(err)
+		}
+		v4.TLS = target.TLS.Clone()
+		v4.StartTLS()
+		defer v4.Close()
+	}
 	blockedTargets := []string{"93.184.216.34:22", "93.184.216.34:3306", "192.168.50.2:443", "192.168.50.2:22"}
 	if ipv6 {
-		blockedTargets = append(blockedTargets, "93.184.216.34:443")
+		if !dual {
+			blockedTargets = append(blockedTargets, "93.184.216.34:443")
+		}
 		// DNS deliberately returns twelve AAAA records. Every selected public
 		// address must serve the positive port controls, just as port 443 does.
 		for i := 1; i <= 12; i++ {
@@ -191,6 +205,9 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 		plan.Sources[0].PublicAddress = "1.1.1.1"
 		plan.ClientListeners = []ClientListener{{ID: "client", Shared: true, Transport: "ipv6-ss2022", Address: plan.IPv6OnlyAddress, Source: "2001:4860:4860::8888", Port: 24000, Key: key}}
 	}
+	if dual {
+		plan.ClientListeners = append(plan.ClientListeners, ClientListener{ID: "ipv4-final", Transport: "ipv6-ss2022", Address: plan.IPv6OnlyAddress, Source: "2001:4860:4860::8888", Port: 24001, Key: plan.ClientListeners[0].Key, EgressIP: "93.184.216.35"})
+	}
 	raw, err := plan.Render()
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +235,13 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 			return map[string]any{"tag": tag, "protocol": "shadowsocks", "sendThrough": source, "settings": map[string]any{"servers": []any{map[string]any{"address": plan.IPv6OnlyAddress, "port": 24000, "method": glivela.SS2022Method, "password": plan.ClientListeners[0].Key}}}}
 		}
 		client := map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": plan.Address, "port": 1080, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}}, "outbounds": []any{outbound("authorized", "2001:4860:4860::8888"), outbound("untrusted", "2001:4860:4860::8844")}, "routing": map[string]any{"rules": []any{map[string]any{"type": "field", "source": []string{"100.64.0.12/32"}, "outboundTag": "untrusted"}}}}
+		if dual {
+			override := outbound("ipv4-final", "2001:4860:4860::8888")
+			override["settings"].(map[string]any)["servers"].([]any)[0].(map[string]any)["port"] = 24001
+			client["outbounds"] = append(client["outbounds"].([]any), override)
+			routing := client["routing"].(map[string]any)
+			routing["rules"] = append(routing["rules"].([]any), map[string]any{"type": "field", "source": []string{"100.64.0.13/32"}, "outboundTag": "ipv4-final"})
+		}
 		bytes, err := json.Marshal(client)
 		if err != nil {
 			t.Fatal(err)
@@ -313,7 +337,7 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 	for _, denied := range denials {
 		t.Run(denied.name, func(t *testing.T) {
 			dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(denied.source)}, Timeout: time.Second}
-			transport := &http.Transport{Proxy: http.ProxyURL(proxy), DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}
+			transport := &http.Transport{Proxy: http.ProxyURL(proxy), DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool, ServerName: "example.com"}}
 			defer transport.CloseIdleConnections()
 			response, err := (&http.Client{Transport: transport, Timeout: 2 * time.Second}).Get(denied.target)
 			if err == nil {
@@ -321,6 +345,35 @@ func TestRenderedLandingDNSAndTLS(t *testing.T) {
 				t.Fatal("restricted proxy request reached HTTP target")
 			}
 		})
+	}
+	if dual {
+		dial := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP("100.64.0.13")}, Timeout: time.Second}
+		custom := &http.Transport{Proxy: http.ProxyURL(proxy), DialContext: dial.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool, ServerName: "example.com"}, DisableKeepAlives: true}
+		defer custom.CloseIdleConnections()
+		c := &http.Client{Transport: custom, Timeout: 2 * time.Second}
+		for _, phase := range []string{"cold", "warm"} {
+			response, err := c.Get("https://example.com/")
+			if err != nil {
+				t.Fatal("IPv4 override did not resolve a dual-stack name", err)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusNoContent || response.Header.Get("Observed-Exit") != "93.184.216.35" {
+				t.Fatal("per-client fixed IPv4 exit not observed")
+			}
+			t.Logf("%s IPv4 override: verified TLS/HTTP 204 and actual IPv4 source on the same worker", phase)
+		}
+		for _, address := range []string{"https://ipv6only.example.com/", "https://[2606:4700::1]/", "https://private.example.com/", "https://mixed.example.com/"} {
+			response, err := c.Get(address)
+			if response != nil {
+				response.Body.Close()
+			}
+			if err == nil {
+				t.Fatal("IPv4 override bypassed its family or private-address restriction", address)
+			}
+		}
+		if err := policy.Verify(ctx); err != nil {
+			t.Fatal("dual-exit kernel policy changed", err)
+		}
 	}
 	untrusted := transport.Clone()
 	untrusted.TLSClientConfig.RootCAs = x509.NewCertPool()

@@ -81,6 +81,7 @@ func transportCommand(parent context.Context, args []string, output io.Writer, a
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	driver := &control.NativeEntryDriver{SystemdDriver: installed, Directory: cfg.Directory}
+	driver.SetPublicPeerVerifier(client.VerifyPublicPeer)
 	runtime := &control.NativeRuntime{Directory: cfg.Directory, Driver: driver}
 	if action == "cancel" {
 		if err := runtime.CancelTransport(ctx, client); err != nil {

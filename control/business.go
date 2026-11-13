@@ -28,10 +28,11 @@ type businessState struct {
 }
 
 type BusinessAccount struct {
-	Account  glivela.Account                          `json:"account"`
-	Schedule glivela.ImportResetSchedule              `json:"schedule"`
-	Usage    []glivela.UsageMember                    `json:"usage"`
-	Traffic  map[string]glivela.ImportTrafficCounters `json:"traffic"`
+	RetiredUsageBytes int64                                    `json:"retiredUsageBytes,string"`
+	Account           glivela.Account                          `json:"account"`
+	Schedule          glivela.ImportResetSchedule              `json:"schedule"`
+	Usage             []glivela.UsageMember                    `json:"usage"`
+	Traffic           map[string]glivela.ImportTrafficCounters `json:"traffic"`
 }
 
 // Browser clients must not round original 64-bit ledger values through a
@@ -62,11 +63,12 @@ func (a BusinessAccount) MarshalJSON() ([]byte, error) {
 		RawDownloadBytes int64 `json:"rawDownloadBytes,string"`
 	}
 	view := struct {
-		Account  account                     `json:"account"`
-		Schedule glivela.ImportResetSchedule `json:"schedule"`
-		Usage    []usage                     `json:"usage"`
-		Traffic  map[string]traffic          `json:"traffic"`
-	}{Account: account{a.Account, plan{a.Account.Plan, a.Account.Plan.TotalBytes, a.Account.Plan.ExpiryTime}, a.Account.DesiredRevision, a.Account.AppliedRevision}, Schedule: a.Schedule, Usage: []usage{}, Traffic: map[string]traffic{}}
+		RetiredUsageBytes int64                       `json:"retiredUsageBytes,string"`
+		Account           account                     `json:"account"`
+		Schedule          glivela.ImportResetSchedule `json:"schedule"`
+		Usage             []usage                     `json:"usage"`
+		Traffic           map[string]traffic          `json:"traffic"`
+	}{RetiredUsageBytes: a.RetiredUsageBytes, Account: account{a.Account, plan{a.Account.Plan, a.Account.Plan.TotalBytes, a.Account.Plan.ExpiryTime}, a.Account.DesiredRevision, a.Account.AppliedRevision}, Schedule: a.Schedule, Usage: []usage{}, Traffic: map[string]traffic{}}
 	for _, member := range a.Usage {
 		view.Usage = append(view.Usage, usage{member, member.Baseline, member.Observed})
 	}
@@ -92,24 +94,29 @@ type BusinessInventory struct {
 }
 
 type BusinessRoute struct {
-	ID           string `json:"id"`
-	AccountID    string `json:"accountId"`
-	EntryID      string `json:"entryId"`
-	EgressID     string `json:"egressId"`
-	IPv4EgressID string `json:"ipv4EgressId,omitempty"`
-	Enabled      bool   `json:"enabled"`
-	HideNative   bool   `json:"hideNative"`
-	State        string `json:"state"`
+	ClientChainID string `json:"clientChainId,omitempty"`
+	RelayID       string `json:"relayId,omitempty"`
+	Port          int    `json:"port"`
+	IPv4Port      int    `json:"ipv4Port,omitempty"`
+	ID            string `json:"id"`
+	AccountID     string `json:"accountId"`
+	EntryID       string `json:"entryId"`
+	EgressID      string `json:"egressId"`
+	IPv4EgressID  string `json:"ipv4EgressId,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	HideNative    bool   `json:"hideNative"`
+	State         string `json:"state"`
 }
 
 type BusinessRuntime struct {
-	HostID       string    `json:"hostId,omitempty"`
-	ID           string    `json:"id"`
-	Role         string    `json:"role"`
-	Revision     uint64    `json:"revision,string"`
-	RuntimeReady bool      `json:"runtimeReady"`
-	ReportedAt   time.Time `json:"reportedAt"`
-	Peers        []string  `json:"peers"`
+	CertificateID string    `json:"certificateId"`
+	HostID        string    `json:"hostId,omitempty"`
+	ID            string    `json:"id"`
+	Role          string    `json:"role"`
+	Revision      uint64    `json:"revision,string"`
+	RuntimeReady  bool      `json:"runtimeReady"`
+	ReportedAt    time.Time `json:"reportedAt"`
+	Peers         []string  `json:"peers"`
 }
 
 type BusinessNode struct {
@@ -175,7 +182,7 @@ func (s *Store) LoadBusiness(keyPath string) error {
 	if err != nil {
 		return errors.New("control: business checkpoint unavailable or invalid")
 	}
-	names, err := loadSubscriptionNames(directory, material)
+	presentation, err := loadSubscriptionPresentation(directory, material)
 	if err != nil {
 		return err
 	}
@@ -190,7 +197,8 @@ func (s *Store) LoadBusiness(keyPath string) error {
 			}
 		}
 	}
-	s.subscriptionNames = names
+	s.subscriptionNames = presentation.Names
+	s.subscriptionLandings = presentation.Landings
 	s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key)}
 	return nil
 }
@@ -243,7 +251,12 @@ func (s *Store) Business() BusinessInventory {
 			if err != nil {
 				continue
 			}
-			view.ClientChains = append(view.ClientChains, ClientChainView{UnavailableReason: clientChainUnavailableReason(s.nodes, c), Shared: c.Shared, Port: c.Port, ID: c.ID, AccountID: c.AccountID, EntryID: c.EntryID, EgressID: c.EgressID, Name: c.Name, Enabled: c.Enabled, Transport: c.Transport, SourceIPv6: c.SourceIPv6, ServerIPv6: c.ServerIPv6})
+			item := ClientChainView{EgressIP: c.EgressIP, UnavailableReason: clientChainUnavailableReason(s.nodes, c), Shared: c.Shared, Port: c.Port, ID: c.ID, AccountID: c.AccountID, EntryID: c.EntryID, EgressID: c.EgressID, Name: c.Name, Enabled: c.Enabled, Transport: c.Transport, SourceIPv6: c.SourceIPv6, ServerIPv6: c.ServerIPv6}
+			if c.Relay != nil {
+				item.RelayID, item.RelaySourceIPv6, item.RelayServerIPv6 = c.Relay.NodeID, c.Relay.SourceIPv6, c.Relay.ServerIPv6
+				item.RelayTransport, item.RelaySourceIPv4, item.RelayServerIPv4 = c.Relay.Transport, c.Relay.SourceIPv4, c.Relay.ServerIPv4
+			}
+			view.ClientChains = append(view.ClientChains, item)
 		}
 	}
 	if s.business == nil {
@@ -263,7 +276,7 @@ func (s *Store) Business() BusinessInventory {
 			for id := range node.RouteEntries {
 				names[id] = true
 			}
-			view.Runtimes = append(view.Runtimes, BusinessRuntime{ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+			view.Runtimes = append(view.Runtimes, BusinessRuntime{CertificateID: node.CertificateID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
 			if node.EntryQuota != nil {
 				view.Endpoints = append(view.Endpoints, BusinessEndpoint{ID: node.ID, EntryID: node.ID, Name: node.ID, NextResetAt: node.EntryQuota.NextResetAt.Format(time.RFC3339)})
 			}
@@ -297,7 +310,7 @@ func (s *Store) Business() BusinessInventory {
 	now := time.Now().UTC()
 	credentials, grants, projectionErr := effectiveBusinessCredentials(m, now)
 	for _, item := range m.Plan.Accounts {
-		account := BusinessAccount{Account: item.Account, Schedule: m.ResetSchedules[item.Account.ID], Usage: append([]glivela.UsageMember{}, item.Usage...), Traffic: map[string]glivela.ImportTrafficCounters{}}
+		account := BusinessAccount{RetiredUsageBytes: item.RetiredUsageBytes, Account: item.Account, Schedule: m.ResetSchedules[item.Account.ID], Usage: append([]glivela.UsageMember{}, item.Usage...), Traffic: map[string]glivela.ImportTrafficCounters{}}
 		for _, credential := range item.Credentials {
 			account.Traffic[credential.ID] = m.TrafficCounters[credential.ID]
 		}
@@ -318,7 +331,7 @@ func (s *Store) Business() BusinessInventory {
 					if projectionErr != nil || entry.ID != grant.EntryID || entry.Desired.Entry == nil || !effective.Deployable() || !s.availableRuntime(entry, now) {
 						continue
 					}
-					if slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Base.ID]) && slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Route.ID]) && slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, effective) }) && s.subscriptionPeerReady(entry, grant.EgressID, now) && (grant.IPv4EgressID == "" || s.subscriptionPeerReady(entry, grant.IPv4EgressID, now)) {
+					if slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Base.ID]) && slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Route.ID]) && slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, effective) }) && s.subscriptionPeerReady(entry, grant.EgressID, now, grant.PeerKey()) && (grant.IPv4EgressID == "" || s.subscriptionPeerReady(entry, grant.IPv4EgressID, now)) {
 						state = "verified"
 					}
 				}
@@ -326,7 +339,29 @@ func (s *Store) Business() BusinessInventory {
 			if s.suspended(grant.EntryID, now) || s.suspended(grant.EgressID, now) || s.suspended(grant.IPv4EgressID, now) {
 				state = "temporarily-suspended"
 			}
-			view.Routes = append(view.Routes, BusinessRoute{ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
+			port, ipv4Port := 0, 0
+			relayID := ""
+			for _, entry := range s.nodes {
+				if entry.ID != grant.EntryID || entry.Desired.Entry == nil {
+					continue
+				}
+				for _, peer := range entry.Desired.Entry.Peers {
+					if peer.PeerKey() == grant.PeerKey() {
+						port = peer.Port
+						if peer.Relay != nil {
+							relayID = peer.Relay.NodeID
+							port = peer.Relay.Port
+						}
+					}
+					if peer.EgressID == grant.IPv4EgressID {
+						ipv4Port = peer.Port
+					}
+				}
+			}
+			if relayID != "" && s.suspended(relayID, now) {
+				state = "temporarily-suspended"
+			}
+			view.Routes = append(view.Routes, BusinessRoute{ClientChainID: grant.ClientChainID, RelayID: relayID, Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
 		}
 	}
 	for _, node := range s.nodes {
@@ -349,7 +384,7 @@ func (s *Store) Business() BusinessInventory {
 			}
 		}
 		slices.Sort(peers)
-		view.Runtimes = append(view.Runtimes, BusinessRuntime{HostID: hostID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+		view.Runtimes = append(view.Runtimes, BusinessRuntime{CertificateID: node.CertificateID, HostID: hostID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
 	}
 	slices.SortFunc(view.Nodes, func(a, b BusinessNode) int { return strings.Compare(a.ID, b.ID) })
 	slices.SortFunc(view.Runtimes, func(a, b BusinessRuntime) int { return strings.Compare(a.ID, b.ID) })

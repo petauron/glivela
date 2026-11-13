@@ -149,9 +149,7 @@ func (s *Store) saveSpeedLocked() error {
 		close(s.speedChanged)
 	}
 	s.speedChanged = make(chan struct{})
-	if s.speedHub != nil {
-		s.speedHub.wake()
-	}
+	s.wakeSpeedParticipantsLocked("")
 	return nil
 }
 

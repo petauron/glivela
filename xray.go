@@ -139,17 +139,32 @@ func (e RealityEndpoint) validateSubscription() error {
 }
 
 type RoutePeer struct {
-	Transport  PrivateTransport `json:"transport,omitzero"`
-	EgressID   string           `json:"egressId"`
-	Address    string           `json:"address"`
-	Port       int              `json:"port"`
-	ExitFamily EgressPolicy     `json:"exitFamily,omitempty"`
-	Ready      bool             `json:"ready,omitempty"`
+	ClientChainID string            `json:"clientChainId,omitempty"`
+	Relay         *ClientChainRelay `json:"relay,omitempty"`
+	Transport     PrivateTransport  `json:"transport,omitzero"`
+	EgressID      string            `json:"egressId"`
+	Address       string            `json:"address"`
+	Port          int               `json:"port"`
+	ExitFamily    EgressPolicy      `json:"exitFamily,omitempty"`
+	Ready         bool              `json:"ready,omitempty"`
+}
+
+func (p RoutePeer) PeerKey() string {
+	if p.ClientChainID != "" {
+		return p.ClientChainID
+	}
+	return p.EgressID
 }
 
 func (p RoutePeer) Validate() error {
+	if (p.Relay == nil) != (p.ClientChainID == "") {
+		return errors.New("glivela: incomplete three-hop peer")
+	}
+	if p.Relay != nil && (!ValidIdentifier(p.ClientChainID) || p.ClientChainID == p.EgressID || p.Transport.ClientListenerID != p.ClientChainID || p.Relay.ValidateServerRelay(p.Transport) != nil) {
+		return errors.New("glivela: invalid three-hop peer")
+	}
 	address, err := netip.ParseAddr(p.Address)
-	if !ValidIdentifier(p.EgressID) || err != nil || !privateServiceIPv4(address) || !validPort(p.Port) || p.Transport.Validate() != nil || p.Transport.PublicAddress != "" && p.Port != 1080 {
+	if !ValidIdentifier(p.EgressID) || err != nil || !privateServiceIPv4(address) || !validPort(p.Port) || p.Transport.Validate() != nil || p.Transport.PublicAddress != "" && p.Port != p.Transport.ListenerPort() {
 		return errors.New("glivela: invalid route peer")
 	}
 	return nil
@@ -296,7 +311,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 	}
 	composite := false
 	for _, grant := range projection.grants {
-		peer := projection.peers[grant.EgressID]
+		peer := projection.peers[grant.PeerKey()]
 		tag := routeOutboundTag(grant.ID)
 		outbound := peer.outbound(tag)
 		if grant.IPv4EgressID != "" {
@@ -309,7 +324,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 			rules = append(rules, compositeXrayRules(grant, plan.PublicSSH, version < 2)...)
 			continue
 		}
-		outbounds = append(outbounds, outbound)
+		outbounds = append(outbounds, peer.ServerOutbounds(tag)...)
 		scope := func(network, outbound string) map[string]any {
 			return map[string]any{"type": "field", "inboundTag": []string{grant.InboundTag}, "user": []string{grant.Route.User}, "network": network, "outboundTag": outbound}
 		}
@@ -446,10 +461,10 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 		tags[endpoint.InboundTag], ports[portKey] = true, true
 	}
 	for _, peer := range plan.Peers {
-		if peer.Validate() != nil || projection.peers[peer.EgressID].EgressID != "" {
+		if peer.Validate() != nil || projection.peers[peer.PeerKey()].EgressID != "" {
 			return xrayProjection{}, errors.New("glivela: conflicting route peer")
 		}
-		projection.peers[peer.EgressID] = peer
+		projection.peers[peer.PeerKey()] = peer
 	}
 	materialByID := map[string]CredentialMaterial{}
 	users, identities, hysteriaIdentities := map[string]bool{}, map[string]bool{}, map[string]bool{}
@@ -478,7 +493,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	for _, grant := range grants {
 		base, hasBase := materialByID[grant.Base.ID]
 		route, hasRoute := materialByID[grant.Route.ID]
-		peer, hasPeer := projection.peers[grant.EgressID]
+		peer, hasPeer := projection.peers[grant.PeerKey()]
 		if grant.Validate() != nil || seenGrants[grant.ID] || !hasBase || !hasRoute || base.Credential != grant.Base || route.Credential != grant.Route || usedRoutes[grant.Route.ID] || !hasPeer || peer.EgressID != grant.EgressID || routeTags[grant.EntryID] != grant.InboundTag || !grant.Deployable() && route.Credential.Enabled {
 			return xrayProjection{}, errors.New("glivela: conflicting Xray route grant")
 		}

@@ -134,3 +134,46 @@ Upgrade receipt consumers and the scoped node together: the new receipt carries
 `securityCheckedAt`, failure/success streaks and the last actual business success.
 Do not mark old or missing receipts healthy during a rolling update. Preserve
 configuration, enrollment, subscription tokens and traffic watermarks.
+
+
+## Explicit expired-host history removal
+
+An operational retirement does not itself erase encrypted migration history or
+old subscription snapshots. For an explicitly authorized no-history retirement,
+the separately distributed offline tool provides `purge-retired-history`.
+
+Stop both writers normally, verify the current shared recovery point, and use the
+exact retired node IDs. The controller directory lock must be available and the
+Center database must be standalone; the tool authenticates the owned checkpoint
+and requires permanent landing revocation first. No remote host is contacted.
+
+```sh
+glivela-legacy-export purge-retired-history \
+  --state-directory /private/controller-state \
+  --center-directory /private/center-state \
+  --node-ids '<exact-retired-id>,<exact-retired-id>' \
+  --audit-file /private/task/token-fingerprints.json \
+  --confirm-stopped-writers
+```
+
+The command removes target archive rows and unshared secret values, redacts their
+references in mixed historical JSON and authenticated execution payloads, and
+updates historical subscription checksums. Other owners' current credentials,
+node policy, account ledger and subscription identities remain protected. Raw
+integer values are decoded without floating-point conversion. A redacted archive
+is marked and cannot be reused to transfer execution authority.
+
+Center changes use one transaction with foreign keys retained. Any snapshot
+update exception is restricted to the exact secret owner and its original freeze
+guard is restored before commit. Center is committed first so an interrupted
+operation can derive the same scope from the still-original controller archive.
+The controller checkpoint is then authenticated, atomically replaced and synced.
+The audit file contains one-way fingerprints only; it must not contain matched
+secret values.
+
+After successful normal startup and actual subscription acceptance, replace the
+necessary shared recovery points with verified clean points. Enumerate and retire
+superseded contaminated restore copies only after checking their task and process
+references. Preserve other owners' data; never treat an encrypted backup as proof
+that a target secret has been erased. Storage snapshots and recycle bins must be
+included in the actual cleanup inventory when present.

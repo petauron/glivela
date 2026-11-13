@@ -47,3 +47,17 @@ func TestHostGateScopeAndIdentity(t *testing.T) {
 		t.Fatal("accepted bypassed return-path fence")
 	}
 }
+
+func TestEntryFirewallPublicIPv6Peer(t *testing.T) {
+	p := EntryFirewall{UID: 1001, Revision: 7, Peers: []string{"2606:4700:4700::1111"}, PeerPorts: map[string]int{"2606:4700:4700::1111": 24008}}
+	if err := p.validate(); err != nil {
+		t.Fatal("enrolled public IPv6 peer rejected", err)
+	}
+	for _, invalid := range []string{"::1", "fe80::1", "fd00::1", "::ffff:8.8.8.8", "2606:4700:4700:0:0:0:0:1111"} {
+		p.Peers = []string{invalid}
+		p.PeerPorts = map[string]int{invalid: 24008}
+		if p.validate() == nil {
+			t.Fatal("accepted invalid or noncanonical public peer", invalid)
+		}
+	}
+}

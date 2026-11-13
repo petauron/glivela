@@ -47,12 +47,13 @@ type MonitorStatus struct {
 // Run performs one startup acceptance. It does not renew leases or monitor
 // third-party availability while the worker is running.
 type Monitor struct {
-	Gate          *TrafficGate
-	Links         *LinkChecker
-	CheckBusiness func(context.Context, PeerIdentity, uint64) (BusinessResult, error)
-	Report        func(MonitorStatus)
-	TCPOnly       bool
-	ExpectedExit  string
+	Gate                *TrafficGate
+	Links               *LinkChecker
+	CheckBusiness       func(context.Context, PeerIdentity, uint64) (BusinessResult, error)
+	CheckPublicIdentity func(context.Context, PeerIdentity) LinkResult
+	Report              func(MonitorStatus)
+	TCPOnly             bool
+	ExpectedExit        string
 }
 
 // Run owns Links for this monitor's lifetime, including validation and setup
@@ -75,7 +76,10 @@ func (m *Monitor) Run(ctx context.Context) (result error) {
 	started := time.Now()
 	checkLink := m.Links.Check
 	if m.Gate.publicAddress != "" {
-		checkLink = m.Links.CheckIdentity
+		if m.CheckPublicIdentity == nil {
+			return errors.New("landing: authenticated public peer verifier required")
+		}
+		checkLink = m.CheckPublicIdentity
 	}
 	before := checkLink(ctx, m.Gate.peer)
 	if !m.Gate.validLink(before, time.Now()) {

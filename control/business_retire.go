@@ -9,12 +9,14 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
-	"github.com/petauron/glivela/landing"
 )
 
 // entryRetired only interprets the existing owned endpoint policy. It does not
 // delete the enrollment, account credentials, route records or ledger.
 func entryRetired(m glivela.ImportMaterial, id string) bool {
+	if _, retired := m.RetiredLandings[id]; retired {
+		return true
+	}
 	return slices.ContainsFunc(m.Endpoints, func(e glivela.ImportEndpoint) bool {
 		return e.Reality.EntryID == id && e.Retired
 	})
@@ -84,18 +86,8 @@ func (s *Store) RetireEntry(ctx context.Context, change RetireEntryChange) error
 		if chain.Enabled {
 			return errors.New("control: retire active client chain first")
 		}
-		landingFound := false
-		for _, node := range s.nodes {
-			if node.ID != chain.EgressID || node.Desired.Landing == nil {
-				continue
-			}
-			landingFound = true
-			if !runtimeFresh(node, now) || slices.ContainsFunc(node.Desired.Landing.ClientListeners, func(listener landing.ClientListener) bool { return listener.ID == chain.ID }) {
-				return errors.New("control: client chain listener retirement not verified")
-			}
-		}
-		if !landingFound {
-			return errors.New("control: client chain landing unavailable")
+		if !clientChainDeletionReady(s.nodes, chain, now) {
+			return errors.New("control: client chain listener retirement not verified")
 		}
 	}
 	next.Endpoints = slices.Clone(next.Endpoints)

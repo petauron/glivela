@@ -18,6 +18,9 @@ func publicSpeedAddresses(address, source string) bool {
 // The pair comes from owned business policy and exact enrolled identities. It
 // adds no Xray grant, peer, listener, credential or subscription entry.
 func chainSpeedPeer(nodes map[string]Node, m glivela.ImportMaterial, c glivela.ClientChain, credentials map[string]glivela.CredentialMaterial) (EntrySpeedPeer, Node, Node, bool) {
+	if c.Relay != nil {
+		return EntrySpeedPeer{}, Node{}, Node{}, false
+	}
 	var err error
 	c, err = m.EffectiveClientChain(c)
 	if err != nil {

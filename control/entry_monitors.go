@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -16,8 +17,9 @@ type entryMonitorGroup struct {
 	statuses map[string]landing.MonitorStatus
 }
 type entryMonitors struct {
-	mu    sync.Mutex
-	group *entryMonitorGroup
+	verifyPublicPeer PublicPeerVerifier
+	mu               sync.Mutex
+	group            *entryMonitorGroup
 }
 
 func (m *entryMonitors) close(ctx context.Context) error {
@@ -61,7 +63,7 @@ func (m *entryMonitors) health(d Desired) *EntryHealthReport {
 		h.Source = &source
 	}
 	for _, p := range d.EntryNetwork.Peers {
-		h.Peers[p.EgressID] = EntryPeerObservation{Identity: p.Identity, Status: g.statuses[p.EgressID]}
+		h.Peers[p.PeerKey()] = EntryPeerObservation{Identity: p.Identity, Status: g.statuses[p.PeerKey()]}
 	}
 	return h
 }
@@ -108,6 +110,12 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 			checker = links()
 		}
 		monitor := landing.Monitor{Gate: gates[index], Links: checker, TCPOnly: true, ExpectedExit: peer.ExpectedExit,
+			CheckPublicIdentity: func(check context.Context, identity landing.PeerIdentity) landing.LinkResult {
+				if m.verifyPublicPeer == nil || identity != peer.Identity {
+					return landing.LinkResult{State: "unknown", Reason: "peer_identity_unavailable"}
+				}
+				return m.verifyPublicPeer(check, desired, peer)
+			},
 			CheckBusiness: func(check context.Context, identity landing.PeerIdentity, revision uint64) (landing.BusinessResult, error) {
 				result := landing.BusinessResult{Peer: identity, Revision: revision, StartedAt: time.Now()}
 				before, err := checker.SelfIdentity(check, desired.EntryNetwork.Source.Address)
@@ -121,9 +129,10 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 				}
 				probe := RouteProbe{AttemptID: "entry-startup", SnapshotID: desired.ConfigSHA256, EntryID: entryID, LandingID: peer.EgressID, Revision: revision, ConfigSHA256: desired.ConfigSHA256, SOCKSAddress: net.JoinHostPort(identity.Address, "1080"), Target: peer.Target, ExpectedExit: peer.ExpectedExit}
 				for _, route := range desired.Entry.Peers {
-					if route.EgressID == peer.EgressID {
+					if route.PeerKey() == peer.PeerKey() {
 						probe.Transport = route.Transport
-						probe.SOCKSAddress = net.JoinHostPort(route.Transport.Endpoint(route.Address), "1080")
+						probe.Relay = route.Relay
+						probe.SOCKSAddress = net.JoinHostPort(route.Transport.Endpoint(route.Address), strconv.Itoa(route.Port))
 					}
 				}
 				checkRoute := CheckRoute
@@ -145,7 +154,7 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 				}
 				result.TCP, result.ExitIP, result.CheckedAt = observed.Passed, observed.ObservedExit, time.Now()
 				return result, nil
-			}, Report: func(status landing.MonitorStatus) { g.statuses[peer.EgressID] = status }}
+			}, Report: func(status landing.MonitorStatus) { g.statuses[peer.PeerKey()] = status }}
 		if err := monitor.Run(peerContext); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -177,12 +186,13 @@ func sameEntryTransport(a, b *EntryNetwork) bool {
 	if a == nil || b == nil || !reflect.DeepEqual(a.Source, b.Source) || len(a.Peers) != len(b.Peers) {
 		return false
 	}
-	peers := make(map[string]landing.PeerIdentity, len(a.Peers))
+	peers := make(map[string]EntryPeer, len(a.Peers))
 	for _, peer := range a.Peers {
-		peers[peer.EgressID] = peer.Identity
+		peers[peer.PeerKey()] = peer
 	}
 	for _, peer := range b.Peers {
-		if peers[peer.EgressID] != peer.Identity {
+		previous, ok := peers[peer.PeerKey()]
+		if !ok || previous.Identity != peer.Identity || !reflect.DeepEqual(previous.RelayIdentity, peer.RelayIdentity) {
 			return false
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 type TrafficGate struct {
 	mu            sync.Mutex
 	peer          PeerIdentity
+	port          int
 	publicAddress string
 	bridge        string
 	gid           uint32
@@ -26,6 +28,13 @@ type TrafficGate struct {
 	table         string
 	marker        string
 	run           func(context.Context, []byte, ...string) ([]byte, error)
+}
+
+func (g *TrafficGate) listenerPort() int {
+	if g.port != 0 {
+		return g.port
+	}
+	return SOCKSPort
 }
 
 func (g *TrafficGate) endpoint() string {
@@ -217,9 +226,10 @@ func (g *TrafficGate) RemoveClosedConflicts(ctx context.Context) error {
 		if !g.validOwnership(name, marker) {
 			return errors.New("landing: conflicting gate ownership is unavailable")
 		}
-		candidate := &TrafficGate{peer: g.peer, publicAddress: g.publicAddress, bridge: g.bridge, gid: g.gid, revision: g.revision, table: name, marker: marker, run: g.run}
-		if found, err := candidate.validate(document); err != nil || !found || len(candidate.elements(document)) != 0 {
-			return errors.Join(err, errors.New("landing: conflicting gate is not a closed managed policy"))
+		candidate := &TrafficGate{peer: g.peer, publicAddress: g.publicAddress, port: g.listenerPort(), bridge: g.bridge, gid: g.gid, revision: g.revision, table: name, marker: marker, run: g.run}
+		found, validationErr := candidate.validate(document)
+		if validationErr != nil || !found || len(candidate.elements(document)) != 0 {
+			return errors.Join(validationErr, errors.New("landing: conflicting gate is not a closed managed policy"))
 		}
 		conflicts = append(conflicts, candidate)
 	}
@@ -247,12 +257,16 @@ func (g *TrafficGate) RemoveClosedConflicts(ctx context.Context) error {
 }
 
 func (g *TrafficGate) matchesTarget(document nftDocument, table string) bool {
+	protocol := "ip"
+	if ip, err := netip.ParseAddr(g.endpoint()); err == nil && ip.Is6() {
+		protocol = "ip6"
+	}
 	for _, object := range document.Objects {
 		rule := object["rule"]
 		if rule == nil || rule["family"] != "inet" || rule["table"] != table || rule["chain"] != g.scopeChain() {
 			continue
 		}
-		bridge, address := false, false
+		bridge, address, port := false, false, false
 		expressions, ok := rule["expr"].([]any)
 		if !ok {
 			continue
@@ -273,11 +287,14 @@ func (g *TrafficGate) matchesTarget(document nftDocument, table string) bool {
 			if meta, ok := left["meta"].(map[string]any); ok && (g.gid == 0 && meta["key"] == "iifname" && match["right"] == g.bridge || g.gid != 0 && meta["key"] == "skgid" && match["right"] == float64(g.gid)) {
 				bridge = true
 			}
-			if payload, ok := left["payload"].(map[string]any); ok && payload["protocol"] == "ip" && payload["field"] == "daddr" && match["right"] == g.endpoint() {
+			if payload, ok := left["payload"].(map[string]any); ok && payload["protocol"] == protocol && payload["field"] == "daddr" && match["right"] == g.endpoint() {
 				address = true
 			}
+			if payload, ok := left["payload"].(map[string]any); ok && (payload["protocol"] == "tcp" || payload["protocol"] == "udp") && payload["field"] == "dport" && match["right"] == float64(g.listenerPort()) {
+				port = true
+			}
 		}
-		if bridge && address {
+		if bridge && address && port {
 			return true
 		}
 	}

@@ -8,14 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	glivela "github.com/petauron/glivela"
 	"io"
 	"net"
 	"net/netip"
 	"net/url"
 	"os/exec"
 	"time"
-
-	glivela "github.com/petauron/glivela"
 )
 
 // ProbeWithCore uses the installed, digest-verified Xray to implement SS2022,
@@ -35,7 +34,7 @@ func probeWithCore(ctx context.Context, p RouteProbe, binary, digest string, roo
 		return failed, errors.New("control: encrypted probe prerequisites unavailable")
 	}
 	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)
-	if err != nil || !(p.Transport.PublicAddress != "" && endpoint.Addr().String() == p.Transport.PublicAddress && endpoint.Port() == 1080 || netip.MustParsePrefix("100.64.0.0/10").Contains(endpoint.Addr()) && endpoint.Port() == 1080 || endpoint.Addr().IsLoopback()) {
+	if err != nil || !(p.Transport.PublicAddress != "" && endpoint.Addr().String() == p.Transport.PublicAddress && int(endpoint.Port()) == p.Transport.ListenerPort() || netip.MustParsePrefix("100.64.0.0/10").Contains(endpoint.Addr()) && int(endpoint.Port()) == p.Transport.ListenerPort() || endpoint.Addr().IsLoopback()) {
 		return failed, errors.New("control: encrypted probe requires assigned private endpoint")
 	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -53,7 +52,7 @@ func probeWithCore(ctx context.Context, p RouteProbe, binary, digest string, roo
 	config := map[string]any{
 		"log":       map[string]any{"loglevel": "none"},
 		"inbounds":  []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "socks", "settings": map[string]any{"auth": "password", "accounts": []any{map[string]any{"user": "probe", "pass": password}}, "udp": false}}},
-		"outbounds": []any{map[string]any{"protocol": "shadowsocks", "settings": map[string]any{"servers": []any{map[string]any{"address": endpoint.Addr().String(), "port": endpoint.Port(), "method": glivela.SS2022Method, "password": p.Transport.Key}}}}},
+		"outbounds": (glivela.RoutePeer{Address: endpoint.Addr().String(), Transport: p.Transport, Port: int(endpoint.Port()), Relay: p.Relay, ClientChainID: p.Transport.ClientListenerID}).ServerOutbounds("probe-exit"),
 	}
 	raw, err := json.Marshal(config)
 	if err != nil {

@@ -180,6 +180,9 @@ func (r *record) secret(a archive, column, aad string, optional bool) string {
 }
 
 func importMaterial(a archive) (glivela.ImportMaterial, error) {
+	if a.HistoryRedacted {
+		return glivela.ImportMaterial{}, errors.New("redacted history cannot transfer authority")
+	}
 	m := glivela.ImportMaterial{
 		SubscriptionTokens: map[string]string{}, ProtocolSecrets: map[string]string{}, HysteriaSecrets: map[string]string{},
 		ResetSchedules: map[string]glivela.ImportResetSchedule{}, TrafficCounters: map[string]glivela.ImportTrafficCounters{},

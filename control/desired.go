@@ -24,10 +24,16 @@ type Desired struct {
 }
 
 func NewDesired(plan landing.Plan) (Desired, error) {
-	version := landing.RenderVersion
+	version := uint8(3)
 	// Ordinary listener projections must remain consumable by unchanged nodes.
 	if plan.IPv6OnlyAddress == "" {
 		version = 2
+	}
+	if slices.ContainsFunc(plan.ClientListeners, func(c landing.ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
+		version = 4
+	}
+	if plan.HasClientEgress() {
+		version = 6
 	}
 	return newLandingDesiredVersion(plan, version)
 }
@@ -125,6 +131,12 @@ func (d Desired) clone() Desired {
 		plan.Credentials = slices.Clone(plan.Credentials)
 		plan.Grants = slices.Clone(plan.Grants)
 		plan.Peers = slices.Clone(plan.Peers)
+		for i := range plan.Peers {
+			if plan.Peers[i].Relay != nil {
+				r := *plan.Peers[i].Relay
+				plan.Peers[i].Relay = &r
+			}
+		}
 		d.Entry = &plan
 	}
 	if d.EntryNetwork != nil {

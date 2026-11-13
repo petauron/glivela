@@ -256,6 +256,13 @@ func (s *nodeOperationsServer) LandingAcceptance(ctx context.Context, in *pb.Nod
 	if err = nodeDocument(in, &request, 4096); err != nil {
 		return nil, err
 	}
+	if request.PeerID != "" {
+		proof, err := s.store.publicPeerAcceptance(cert, request)
+		if err != nil {
+			return nil, nodeRefused(err)
+		}
+		return nodeReply(proof)
+	}
 	v, err := s.store.ownLandingAcceptance(cert, request)
 	if err != nil {
 		return nil, nodeRefused(err)

@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"strconv"
 	"time"
-
-	"github.com/petauron/glivela/landing"
 )
 
 // Reuse the existing bounded route protocol. Only complete already-enrolled
@@ -22,7 +20,7 @@ func reconcileOwnedRouteChecks(nodes map[string]Node, business *businessState, n
 		return nil
 	}
 	for certificate, node := range nodes {
-		if node.Desired.Landing == nil || !runtimeFresh(node, now) || len(node.RouteEntries) == 0 {
+		if node.Desired.Landing == nil || !node.Desired.Landing.HasServerListener() || !runtimeFresh(node, now) || len(node.RouteEntries) == 0 {
 			continue
 		}
 		snapshot := ""
@@ -64,7 +62,7 @@ func reconcileOwnedRouteChecks(nodes map[string]Node, business *businessState, n
 				complete = false
 				break
 			}
-			request := RouteProbe{SnapshotID: snapshot, EntryID: id, LandingID: node.ID, Revision: node.Desired.Revision, ConfigSHA256: node.Desired.ConfigSHA256, SOCKSAddress: net.JoinHostPort(node.Desired.Landing.Transport.Endpoint(node.Desired.Landing.Address), strconv.Itoa(landing.SOCKSPort)), Target: peer.Target, ExpectedExit: peer.ExpectedExit}
+			request := RouteProbe{SnapshotID: snapshot, EntryID: id, LandingID: node.ID, Revision: node.Desired.Revision, ConfigSHA256: node.Desired.ConfigSHA256, SOCKSAddress: net.JoinHostPort(node.Desired.Landing.Transport.Endpoint(node.Desired.Landing.Address), strconv.Itoa(node.Desired.Landing.Transport.ListenerPort())), Target: peer.Target, ExpectedExit: peer.ExpectedExit}
 			request.Transport = node.Desired.Landing.Transport
 			old, exists := node.Checks[id]
 			request.AttemptID = old.Request.AttemptID

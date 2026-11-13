@@ -20,10 +20,12 @@ import (
 type EntryFirewall struct {
 	LocalTLSOrigin bool `json:"localTLSOrigin,omitempty"`
 
-	PublicSSH *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
-	UID       uint32
-	Revision  uint64
-	Peers     []string
+	PublicSSH      *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
+	UID            uint32
+	Revision       uint64
+	ExtraPeerPorts map[string][]int `json:"extraPeerPorts,omitempty"`
+	PeerPorts      map[string]int   `json:"peerPorts,omitempty"`
+	Peers          []string
 	// Local, root-owned resolver configuration only; never supplied by peers.
 	// Exclude from the stable table identity so resolver changes are reconciled
 	// in the same owned table without conflicting output chains.
@@ -50,10 +52,27 @@ func (p EntryFirewall) validate() error {
 	}
 	seen = map[string]bool{}
 	for _, address := range p.Peers {
-		if !(tailnetIPv4(address) || glivela.PublicTransportIPv4(address)) || seen[address] {
+		if !(tailnetIPv4(address) || glivela.PublicTransportIPv4(address) || glivela.PublicTransportIPv6(address)) || seen[address] {
 			return errors.New("landing: invalid native entry peer")
 		}
 		seen[address] = true
+	}
+	for address, port := range p.PeerPorts {
+		if !seen[address] || (!glivela.PublicTransportIPv4(address) && !glivela.PublicTransportIPv6(address)) || port < 24000 || port > 24999 {
+			return errors.New("landing: invalid public entry peer port")
+		}
+	}
+	for address, ports := range p.ExtraPeerPorts {
+		if !seen[address] || p.PeerPorts[address] == 0 || len(ports) > 1000 {
+			return errors.New("landing: invalid additional peer ports")
+		}
+		used := map[int]bool{p.PeerPorts[address]: true}
+		for _, port := range ports {
+			if port < 24000 || port > 24999 || used[port] {
+				return errors.New("landing: invalid additional peer port")
+			}
+			used[port] = true
+		}
 	}
 	return nil
 }
@@ -124,10 +143,23 @@ func (p EntryFirewall) renderObjects(table, marker string, legacy bool) []map[st
 	peers := slices.Clone(p.Peers)
 	slices.Sort(peers)
 	for _, address := range peers {
-		rule("destinations", match(payload("ip", "daddr"), address), match(payload("tcp", "dport"), SOCKSPort), nftObject{"return": nil})
+		port := SOCKSPort
+		if selected := p.PeerPorts[address]; selected != 0 {
+			port = selected
+		}
+		family := "ip"
+		if ip, _ := netip.ParseAddr(address); ip.Is6() {
+			family = "ip6"
+		}
+		extra := slices.Clone(p.ExtraPeerPorts[address])
+		slices.Sort(extra)
+		for _, extraPort := range extra {
+			rule("destinations", match(payload(family, "daddr"), address), match(payload("tcp", "dport"), extraPort), nftObject{"return": nil})
+		}
+		rule("destinations", match(payload(family, "daddr"), address), match(payload("tcp", "dport"), port), nftObject{"return": nil})
 		// The landing independently retains its source-specific UDP policy.
-		if glivela.PublicTransportIPv4(address) {
-			rule("destinations", match(payload("ip", "daddr"), address), match(payload("udp", "dport"), SOCKSPort), nftObject{"return": nil})
+		if glivela.PublicTransportIPv4(address) || glivela.PublicTransportIPv6(address) {
+			rule("destinations", match(payload(family, "daddr"), address), match(payload("udp", "dport"), port), nftObject{"return": nil})
 		} else {
 			rule("destinations", match(payload("ip", "daddr"), address), match(nftObject{"meta": nftObject{"key": "l4proto"}}, "udp"), nftObject{"return": nil})
 		}
@@ -195,16 +227,16 @@ func localTLSReadbackExpression(expression any) any {
 // reconcileDNS replaces only the owned destination-chain rules when the
 // root-owned resolver inventory changes. Every preexisting object must match
 // the complete old policy before the atomic transaction is allowed.
-func (p EntryFirewall) reconcileDNS(ctx context.Context) error {
+func (p EntryFirewall) reconcileDNS(ctx context.Context) (bool, error) {
 	table, _ := p.identity()
 	data, err := runNFT(ctx, nil, "--json", "list", "ruleset")
 	var document nftDocument
 	if err != nil || len(data) > nftOutputLimit || json.Unmarshal(data, &document) != nil || document.Objects == nil {
-		return errors.New("landing: cannot inspect entry firewall for DNS reconciliation")
+		return false, errors.New("landing: cannot inspect entry firewall for DNS reconciliation")
 	}
 	found, currentErr := validateNFTPolicy(document, table, p.objects(), false)
 	if currentErr == nil {
-		return nil
+		return found, nil
 	} // absent or already exact
 	old := p
 	old.DNS = nil
@@ -217,7 +249,7 @@ func (p EntryFirewall) reconcileDNS(ctx context.Context) error {
 		}
 		handle, ok := rule["handle"].(float64)
 		if !ok || handle <= 0 || handle != float64(uint64(handle)) {
-			return errors.New("landing: entry firewall rule handle unavailable")
+			return false, errors.New("landing: entry firewall rule handle unavailable")
 		}
 		handles = append(handles, uint64(handle))
 		expressions, ok := rule["expr"].([]any)
@@ -255,11 +287,11 @@ func (p EntryFirewall) reconcileDNS(ctx context.Context) error {
 		}
 	}
 	if err := old.validate(); err != nil {
-		return currentErr
+		return false, currentErr
 	}
 	found, err = validateNFTPolicy(document, table, old.objects(), false)
 	if err != nil || !found || len(handles) == 0 {
-		return currentErr
+		return false, currentErr
 	}
 	commands := make([]any, 0, len(handles)+len(p.objects()))
 	for _, handle := range handles {
@@ -272,12 +304,13 @@ func (p EntryFirewall) reconcileDNS(ctx context.Context) error {
 	}
 	batch, err := json.Marshal(nftObject{"nftables": commands})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if _, err := runNFT(ctx, batch, "--json", "--file", "-"); err != nil {
-		return err
+		return false, err
 	}
-	return verifyOwnedFirewall(ctx, table, p.objects())
+	err = verifyOwnedFirewall(ctx, table, p.objects())
+	return err == nil, err
 }
 
 func (p EntryFirewall) Install(ctx context.Context) error {
@@ -285,7 +318,7 @@ func (p EntryFirewall) Install(ctx context.Context) error {
 		return err
 	}
 	table, _ := p.identity()
-	if err := p.reconcileDNS(ctx); err != nil {
+	if _, err := p.reconcileDNS(ctx); err != nil {
 		return err
 	}
 	if err := installOwnedFirewall(ctx, runNFT, table, p.objects()); err != nil {
@@ -298,18 +331,24 @@ func (p EntryFirewall) Verify(ctx context.Context) error {
 	if err := p.validate(); err != nil {
 		return err
 	}
-	table, _ := p.identity()
-	if err := p.reconcileDNS(ctx); err != nil {
+	// reconcileDNS already validates the full live ruleset. A DNS update also
+	// reads back the transaction before returning. Never reuse it across rounds.
+	found, err := p.reconcileDNS(ctx)
+	if err != nil {
 		return err
 	}
-	return verifyOwnedFirewall(ctx, table, p.objects())
+	if !found {
+		return errors.New("landing: native firewall is missing or changed")
+	}
+	return nil
 }
+
 func (p EntryFirewall) Remove(ctx context.Context) error {
 	if err := p.validate(); err != nil {
 		return err
 	}
 	table, _ := p.identity()
-	if err := p.reconcileDNS(ctx); err != nil {
+	if _, err := p.reconcileDNS(ctx); err != nil {
 		return err
 	}
 	if err := removeOwnedFirewall(ctx, runNFT, table, p.objects()); err != nil {

@@ -40,6 +40,25 @@ reject a file changed behind the running controller. Restore only to an offline
 new private destination. Configuration recovery never restores an old ledger.
 Ordinary absence uses the retained service's own display name.
 
+## Landing subscription regions
+
+`POST /v1/admin/subscription-landing` reads one enrolled landing's effective
+presentation with `{ "id": "landing-example" }`. To save, send `id`, an exact
+`expected` object from that read, and `value`, for example
+`{ "regionCode": "US", "nameSuffix": "" }`. The region is a two-letter uppercase
+code; the optional suffix follows existing route-name rules. An empty suffix
+keeps the normal double-hop label. This private administration operation uses
+the existing mTLS boundary; it does not enroll a node or authorize a route.
+
+The same `subscription-names.json` file stores explicit `landings` values keyed
+by landing ID. Existing imported regions remain effective until explicitly
+changed. Saving validates generated subscriptions and preserves selectable
+identities and ordering before the atomic write. Both ordinary name edits and
+consistent backups retain the region values. No account/node revision, proxy
+policy, key, subscription URL or traffic ledger is rewritten. IPv6 chains with
+explicit issued labels retain those labels. Refresh client subscriptions to
+receive changed names and their matching group/dependency references.
+
 ## Independently managed host firewall
 
 A native node with a separately managed input DROP guard may explicitly identify
@@ -85,6 +104,29 @@ and current revision restores the retained original per-chain configuration
 through a forward revision. Never restore an older ledger, loosen source checks,
 change the exit or fabricate health to continue.
 
+## Three-hop Mihomo client chains
+
+The client-chain form can select an optional intermediate landing for an IPv6
+SS2022 final hop. Enroll distinct entry, relay and final landing identities first.
+The first hop can use an exact public IPv6 or IPv4 source and listener; the relay
+uses a fixed, explicitly verified IPv6 source for the final hop. An IPv4 relay
+listener needs landing render version 4 and an upgraded relay runtime. It is an
+independent exact-source client listener: it does not add a server-forwarding
+source grant. The entry source and the relay's IPv6 source are authorized
+separately on their respective listeners. Each new chain
+has an independent relay credential; existing two-hop and server-forwarding
+routes are unchanged. TCP only is supported.
+
+The Mihomo subscription makes the final SS2022 proxy dial via the relay SS2022
+proxy, which dials through the original VLESS/REALITY entry. Only the final
+chain is placed in the selector. A suspended or mismatched relay suppresses the
+chain rather than substituting a direct path. Refresh the subscription and
+verify a real client request and exit; node receipts alone are not acceptance.
+Disabling a chain withdraws both listeners, and deletion waits for both nodes'
+fresh applied receipts. Do not roll an older controller back onto an encrypted
+ledger containing relay records; use a verified recovery point or a forward fix
+without discarding later accounting.
+
 ## IPv6-only entry DNS
 
 New entry render policy 15 uses the existing public resolvers over IPv6 when the native exit is explicitly `ipv6_only`. The DNS servers, resolver outbound family and exact port-53 destination rules select the same addresses; composite local DoH uses those IPv6 endpoints too. Private/control-address isolation and proxy readiness checks remain mandatory. IPv4-only and automatic policies retain their existing resolver configuration.
@@ -124,3 +166,17 @@ reused revisions, corrupt state or failed ownership checks remain closed.
 This does not authorize editing journals, replaying an old ledger or changing
 unrelated nodes. Installation success is distinct from fresh runtime receipts
 and a real subscription client request through the expected exit.
+
+## Independent client-only landing
+
+A separately enrolled landing may set `clientOnly:true` with render format 5.
+It retains a fixed final egress, exact sources, its own certificate, worker UID,
+state directory and native installation. IPv4 and IPv6 client transports do not
+select the final egress family. The server-forwarding listener on port 1080 is
+not started or authorized, allowing this worker to coexist with another landing.
+Retained ordinary landing formats and IPv6 relays are unchanged. The controller
+allocates nonconflicting ports across landings sharing listener addresses and
+rejects conflicting client-only projections before changing business state.
+Use a separate signed native recipe namespace; never overwrite the original
+installation or share worker users. This does not create server-forwarding
+routes, add UDP, or change existing subscription selectors.

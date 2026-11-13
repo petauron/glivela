@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -93,7 +94,20 @@ func NewClient(endpoint string, identity tls.Certificate, roots *x509.CertPool) 
 		TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 15 * time.Second,
 		MaxIdleConnsPerHost: 1, IdleConnTimeout: time.Minute,
 	}
-	conn, err := grpc.NewClient("dns:///"+u.Host, grpc.WithTransportCredentials(credentials.NewTLS(transport.TLSClientConfig.Clone())), grpc.WithNoProxy(), grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: time.Minute, Timeout: 20 * time.Second}), grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 5 * time.Second}), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessage+4096), grpc.MaxCallSendMsgSize(maxMessage+4096)))
+	dialer, err := privateNetworkDialer(u.Hostname())
+	if err != nil {
+		return nil, err
+	}
+	options := []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(transport.TLSClientConfig.Clone())), grpc.WithNoProxy(), grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: time.Minute, Timeout: 20 * time.Second}), grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 5 * time.Second}), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessage+4096), grpc.MaxCallSendMsgSize(maxMessage+4096))}
+	target := "dns:///" + u.Host
+	if dialer != nil {
+		target = "passthrough:///" + u.Host
+		transport.DialContext = dialer.DialContext
+		options = append(options, grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "tcp", address)
+		}))
+	}
+	conn, err := grpc.NewClient(target, options...)
 	if err != nil {
 		return nil, err
 	}

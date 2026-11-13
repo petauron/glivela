@@ -181,7 +181,7 @@ func (s *Store) speedPairLocked(entryID, landingID string, requireFresh bool) (l
 			}
 		}
 	}
-	t, ok := s.latencyTargetsLocked()[latencyKey(entryID, landingID, 1080)]
+	t, ok := s.serverLatencyTargetLocked(entryID, landingID)
 	now := time.Now()
 	if !enabled || !ok || !glivela.PublicTransportIPv4(t.Address) || s.suspended(entryID, now) || s.suspended(landingID, now) || requireFresh && !s.latencyOnlineLocked(t, now) {
 		return latencyTarget{}, "", "", fail

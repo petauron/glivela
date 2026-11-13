@@ -14,7 +14,6 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
-	"github.com/petauron/glivela/landing"
 )
 
 var errSubscriptionMissing = errors.New("control: subscription unavailable")
@@ -135,7 +134,7 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 	if account == nil || !account.Account.Plan.Enabled || account.Account.Plan.ExpiryTime > 0 && account.Account.Plan.ExpiryTime <= now.UnixMilli() {
 		return subscriptionContent{}, errSubscriptionMissing
 	}
-	quota, err := glivela.ProjectQuota(account.Account.Plan, account.Usage)
+	quota, err := account.Quota()
 	if err != nil || !quota.Enabled {
 		return subscriptionContent{}, errSubscriptionMissing
 	}
@@ -223,15 +222,27 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 		if !baseOK || !routeOK || !entryOK || !grant.Deployable() || base.Credential != grant.Base || route.Credential != grant.Route {
 			continue
 		}
-		if !slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grant) }) || !s.subscriptionPeerAuthorized(entry, grant.EgressID, now) || grant.IPv4EgressID != "" && !s.subscriptionPeerAuthorized(entry, grant.IPv4EgressID, now) {
+		if !slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grant) }) || !s.subscriptionPeerAuthorized(entry, grant.EgressID, now, grant.PeerKey()) || grant.IPv4EgressID != "" && !s.subscriptionPeerAuthorized(entry, grant.IPv4EgressID, now) {
 			continue
 		}
 		published := glivela.PublishedRoute{Grant: grant, Protocol: glivela.VLESSReality, EntryName: names[grant.Base.ID], BaseLink: links[grant.Base.ID], RouteLink: links[grant.Route.ID], BaseProtocolIdentity: base.Credential.Identity, RouteProtocolIdentity: route.Credential.Identity}
-		if selection := m.References.LandingSelection; selection != nil {
-			published.EgressRegionPrefix = importedLandingRegionPrefix(selection.LandingRegionCodes[grant.EgressID])
-			published.IPv4EgressRegionPrefix = importedLandingRegionPrefix(selection.LandingRegionCodes[grant.IPv4EgressID])
-			published.EgressNameSuffix = selection.LandingNameSuffixes[grant.EgressID]
+		if grant.ClientChainID != "" {
+			for _, chain := range m.ClientChains {
+				if chain.ID == grant.ClientChainID {
+					published.Name = chain.Name
+					if issued := s.subscriptionNames[chain.ID]; issued != "" {
+						published.Name = issued
+					}
+				}
+			}
+			if published.Name == "" {
+				return subscriptionContent{}, errSubscriptionUnverified
+			}
 		}
+		label := s.subscriptionLandingLocked(grant.EgressID)
+		published.EgressRegionPrefix = importedLandingRegionPrefix(label.RegionCode)
+		published.IPv4EgressRegionPrefix = importedLandingRegionPrefix(s.subscriptionLandingLocked(grant.IPv4EgressID).RegionCode)
+		published.EgressNameSuffix = label.NameSuffix
 		routes = append(routes, published)
 		publishedBases[grant.Base.ID] = true
 	}
@@ -269,6 +280,12 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 			if !slices.Contains(landingNode.Desired.Landing.ClientListeners, listener) {
 				continue
 			}
+			if chain.Relay != nil {
+				relay, err := chainRelay(s.nodes, chain)
+				if err != nil || !s.subscriptionNodeEnabled(relay, now) || !slices.Contains(relay.Desired.Landing.ClientListeners, clientRelayListener(chain)) {
+					continue
+				}
+			}
 			for id, material := range byID {
 				if material.Credential.Kind == glivela.NativeCredential && material.Credential.EntryID == chain.EntryID {
 					server := landingNode.Desired.Landing.Transport.PublicAddress
@@ -276,10 +293,9 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 						server = chain.ServerIPv6
 					}
 					published := glivela.PublishedClientChain{Chain: chain, Base: glivela.NativeEntry{Material: material, Protocol: glivela.VLESSReality, Link: links[id]}, Server: server}
-					if selection := m.References.LandingSelection; selection != nil {
-						published.EgressRegionPrefix = importedLandingRegionPrefix(selection.LandingRegionCodes[chain.EgressID])
-						published.EgressNameSuffix = selection.LandingNameSuffixes[chain.EgressID]
-					}
+					label := s.subscriptionLandingLocked(chain.EgressID)
+					published.EgressRegionPrefix = importedLandingRegionPrefix(label.RegionCode)
+					published.EgressNameSuffix = label.NameSuffix
 					chains = append(chains, published)
 					break
 				}
@@ -308,10 +324,27 @@ func (s *Store) subscriptionNodeEnabled(node Node, now time.Time) bool {
 	return !s.suspended(node.ID, now) && node.TransportTail == nil && node.Desired.Validate() == nil && validateNodeRole(node) == nil
 }
 
-func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now time.Time) bool {
+func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now time.Time, path ...string) bool {
+	key := landingID
+	if len(path) == 1 {
+		key = path[0]
+	}
 	for _, node := range s.nodes {
-		if node.ID != landingID || node.Desired.Landing == nil || node.Desired.Landing.IPv6OnlyAddress != "" || !s.subscriptionNodeEnabled(node, now) {
+		if node.ID != landingID || node.Desired.Landing == nil || !s.subscriptionNodeEnabled(node, now) {
 			continue
+		}
+		for _, peer := range entry.Desired.Entry.Peers {
+			if peer.PeerKey() == key && peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
+				chain, authorized := s.boundClientListener(entry, node, peer)
+				if authorized && chain.Relay != nil {
+					relay, err := chainRelay(s.nodes, chain)
+					return err == nil && s.subscriptionNodeEnabled(relay, now)
+				}
+				return authorized
+			}
+		}
+		if key != landingID || !node.Desired.Landing.HasServerListener() {
+			return false
 		}
 		authorized, ok := node.RouteEntries[entry.ID]
 		if !ok || authorized.CertificateID != entry.CertificateID || s.nodes[authorized.CertificateID].ID != entry.ID || entry.Desired.EntryNetwork.Source == nil || authorized.Address != entry.Desired.EntryNetwork.Source.Address {
@@ -322,7 +355,7 @@ func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now tim
 		return slices.ContainsFunc(entry.Desired.EntryNetwork.Peers, func(peer EntryPeer) bool {
 			return peer.EgressID == landingID && peer.Identity.Address == node.Desired.Landing.Address
 		}) && slices.ContainsFunc(entry.Desired.Entry.Peers, func(peer glivela.RoutePeer) bool {
-			return peer.EgressID == landingID && peer.Address == node.Desired.Landing.Address && peer.Port == landing.SOCKSPort && peer.Transport == node.Desired.Landing.Transport
+			return peer.EgressID == landingID && peer.Address == node.Desired.Landing.Address && peer.Port == node.Desired.Landing.Transport.ListenerPort() && peer.Transport == node.Desired.Landing.Transport
 		})
 	}
 	return false
@@ -331,10 +364,23 @@ func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now tim
 // Health checks only this entry's route, not unrelated entries which
 // happen to share the same landing. A verifier-only legacy identity cannot
 // authorize the new owned subscription.
-func (s *Store) subscriptionPeerReady(entry Node, landingID string, now time.Time) bool {
+func (s *Store) subscriptionPeerReady(entry Node, landingID string, now time.Time, path ...string) bool {
+	key := landingID
+	if len(path) == 1 {
+		key = path[0]
+	}
 	for _, node := range s.nodes {
-		if node.ID != landingID || !s.availableRuntime(entry, now) || !s.availableRuntime(node, now) || !entryPeerFresh(entry, node, now) {
+		if node.ID != landingID || !s.availableRuntime(entry, now) || !s.availableRuntime(node, now) {
 			continue
+		}
+		for _, peer := range entry.Desired.Entry.Peers {
+			if peer.PeerKey() == key && peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
+				_, err := s.publicPeerAcceptanceLocked(entry.CertificateID, landingAcceptanceRequest{SnapshotID: entry.ID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256, PeerID: key})
+				return err == nil && entryPeerFreshSource(entry, node, now, entry.Desired.EntryNetwork.Source.Address, key)
+			}
+		}
+		if key != landingID || !entryPeerFresh(entry, node, now) {
+			return false
 		}
 		authorized, ok := node.RouteEntries[entry.ID]
 		check, hasCheck := node.Checks[entry.ID]
@@ -361,7 +407,7 @@ func importedLandingRegionPrefix(region string) string {
 	case "US":
 		return "🇺🇸 美国"
 	case "TW":
-		return "🇨🇳 台湾"
+		return "🇹🇼 台湾"
 	case "SG":
 		return "🇸🇬 新加坡"
 	default:

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
-	"github.com/petauron/glivela/landing"
 )
 
 type RouteCheck struct {
@@ -60,12 +59,21 @@ func enrolledEntryPeersFresh(node Node, nodes map[string]Node, now time.Time, de
 }
 
 func routeTargetsLanding(p RouteProbe, node Node) bool {
+	if p.Relay != nil {
+		return false
+	} // Three-hop startup proofs belong to the entry path, not legacy landing inventories.
+	return node.Desired.Landing != nil && node.Desired.Landing.HasServerListener() && routeMatchesLanding(p, node)
+}
+
+// A retained pending check can still match its exact plan after that plan's
+// server listener becomes inactive. Matching never makes it publishable.
+func routeMatchesLanding(p RouteProbe, node Node) bool {
 	if node.Desired.Landing == nil {
 		return false
 	}
 	endpoint, err := netip.ParseAddrPort(p.SOCKSAddress)
 	address, addressErr := netip.ParseAddr(node.Desired.Landing.Transport.Endpoint(node.Desired.Landing.Address))
-	return err == nil && addressErr == nil && endpoint.Addr() == address && endpoint.Port() == landing.SOCKSPort &&
+	return err == nil && addressErr == nil && endpoint.Addr() == address && int(endpoint.Port()) == node.Desired.Landing.Transport.ListenerPort() &&
 		p.LandingID == node.ID && p.Revision == node.Desired.Revision && p.ConfigSHA256 == node.Desired.ConfigSHA256 && p.Transport == node.Desired.Landing.Transport
 }
 

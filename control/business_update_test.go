@@ -388,6 +388,21 @@ func TestImportedPilotProcessBaselineDoesNotReplayLifetimeTotals(t *testing.T) {
 	if err := s.observeBusinessTrafficLocked(s.nodes[cert], observation, sampled.Add(3*time.Second)); err != nil || !bytes.Equal(written, businessBytes(t, s)) {
 		t.Fatal("repeated sample charged twice", err)
 	}
+	// A later idle heartbeat carries no new accounting state. Readiness uses
+	// the independent fresh runtime receipt, not this durable traffic watermark.
+	observation.Traffic.SampledAt = sampled.Add(4 * time.Second)
+	if err := s.observeBusinessTrafficLocked(s.nodes[cert], observation, sampled.Add(5*time.Second)); err != nil || !bytes.Equal(written, businessBytes(t, s)) {
+		t.Fatal("idle heartbeat rewrote unchanged accounting state", err)
+	}
+	observation.Traffic.SampledAt = sampled.Add(6 * time.Second)
+	observation.Traffic.Counters[credentialID] = TrafficCounter{Upload: 21, Download: 37}
+	if err := s.observeBusinessTrafficLocked(s.nodes[cert], observation, sampled.Add(7*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	got = s.business.material.TrafficCounters[credentialID]
+	if got.UploadBytes != counter.UploadBytes+9 || got.DownloadBytes != counter.DownloadBytes+14 {
+		t.Fatal("idle deduplication lost the next real traffic delta")
+	}
 }
 
 func TestImportedRealityPreservesNativeDNSTargetAndLegacyPin(t *testing.T) {
@@ -398,5 +413,48 @@ func TestImportedRealityPreservesNativeDNSTargetAndLegacyPin(t *testing.T) {
 	endpoint.TargetIP = "203.0.113.20"
 	if pinnedImportedReality(endpoint).Target != "203.0.113.20:443" {
 		t.Fatal("legacy fixed target changed")
+	}
+}
+
+func TestOwnedRouteToClientManagedLanding(t *testing.T) {
+	source, direct, _, _ := subscriptionFixture(t, false)
+	routed := withRoutedEntry(t, direct)
+	plan := *direct.Entry
+	plan.Peers = routed.Entry.Peers
+	desired, err := NewEntryDesired(plan, *routed.EntryNetwork)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := source.business.material
+	m.Ownership = nil
+	m.ClientLandings = map[string]glivela.ClientLanding{"landing-example": {AccountID: "account-example", Key: "MDEyMzQ1Njc4OWFiY2RlZg=="}}
+	m.ClientChains = []glivela.ClientChain{{ID: "existing-client-chain", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Name: "Example chain", Port: 24001, Key: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", Transport: glivela.IPv4ClientSS2022, Enabled: true}}
+	s, _, _, _ := ownedSubscriptionFixture(t, m, desired, true)
+	change := RouteChange{ID: "new-server-route", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Enabled: true}
+	for _, account := range m.Plan.Accounts {
+		if account.Account.ID == change.AccountID {
+			change.ExpectedRevision = account.Account.DesiredRevision
+		}
+	}
+	if _, err := s.ChangeRoute(context.Background(), change); err != nil {
+		t.Fatal("enrolled client-managed landing refused server grant:", err)
+	}
+	before := businessBytes(t, s)
+	other := change
+	other.ID, other.AccountID = "foreign-server-route", "account-other"
+	for _, account := range s.business.material.Plan.Accounts {
+		if account.Account.ID == other.AccountID {
+			other.ExpectedRevision = account.Account.DesiredRevision
+		}
+	}
+	if _, err := s.ChangeRoute(context.Background(), other); err == nil || !bytes.Equal(before, businessBytes(t, s)) {
+		t.Fatal("shared landing granted to another account or changed its ledger")
+	}
+	reloaded, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.LoadBusiness(filepath.Join(filepath.Dir(s.path), "business.key")); err != nil {
+		t.Fatal("new grant did not survive controller reload:", err)
 	}
 }

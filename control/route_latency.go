@@ -15,6 +15,17 @@ import (
 	"github.com/petauron/glivela/landing"
 )
 
+func (s *Store) serverLatencyTargetLocked(entryID, landingID string) (latencyTarget, bool) {
+	targets := s.latencyTargetsLocked()
+	for _, node := range s.nodes {
+		if node.ID == landingID && node.Desired.Landing != nil && node.Desired.Landing.HasServerListener() {
+			t, ok := targets[latencyKey(entryID, landingID, node.Desired.Landing.Transport.ListenerPort())]
+			return t, ok
+		}
+	}
+	return latencyTarget{}, false
+}
+
 // Diagnostics never change desired state, accounting or route acceptance.
 // Only completed samples are retained as display history across restarts.
 type LatencyProbe struct {
@@ -116,15 +127,31 @@ func (s *Store) latencyTargetsLocked() map[string]latencyTarget {
 			continue
 		}
 		for _, peer := range entry.Desired.Entry.Peers {
+			// A single TCP sample cannot describe both legs of a three-hop path.
+			if peer.Relay != nil {
+				continue
+			}
 			node, ok := landings[peer.EgressID]
-			if !ok {
+			if !ok || node.Desired.Landing == nil {
+				continue
+			}
+			if peer.Transport.ClientListenerID != "" {
+				chain, authorized := s.boundClientListener(entry, node, peer)
+				if !authorized {
+					continue
+				}
+				target := latencyTarget{Certificate: cert, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Transport.Endpoint(peer.Address), EntryID: entry.ID, LandingID: node.ID, Port: peer.Port}
+				if chain.Transport == "ipv6-ss2022" {
+					target.Source = chain.SourceIPv6
+				}
+				out[latencyTargetKey(target)] = target
 				continue
 			}
 			enrolled, ok := node.RouteEntries[entry.ID]
-			if !ok || enrolled.CertificateID != cert || peer.Transport != node.Desired.Landing.Transport || peer.Address != node.Desired.Landing.Address {
+			if !ok || !node.Desired.Landing.HasServerListener() || enrolled.CertificateID != cert || peer.Transport != node.Desired.Landing.Transport || peer.Address != node.Desired.Landing.Address {
 				continue
 			}
-			target := latencyTarget{Certificate: cert, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Transport.Endpoint(peer.Address), EntryID: entry.ID, LandingID: node.ID, Port: landing.SOCKSPort}
+			target := latencyTarget{Certificate: cert, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Transport.Endpoint(peer.Address), EntryID: entry.ID, LandingID: node.ID, Port: peer.Port}
 			out[latencyKey(entry.ID, node.ID, target.Port)] = target
 		}
 	}

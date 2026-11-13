@@ -96,8 +96,27 @@ func (d *NativeEntryDriver) policy(desired Desired) (landing.EntryFirewall, erro
 	}
 	for _, peer := range desired.EntryNetwork.Peers {
 		for _, route := range desired.Entry.Peers {
-			if route.EgressID == peer.EgressID {
-				policy.Peers = append(policy.Peers, route.Transport.Endpoint(route.Address))
+			if route.PeerKey() == peer.PeerKey() {
+				dial := route.DialTransport()
+				address := dial.Endpoint(route.Address)
+				if !slices.Contains(policy.Peers, address) {
+					policy.Peers = append(policy.Peers, address)
+				}
+				if dial.Port != 0 {
+					if policy.PeerPorts == nil {
+						policy.PeerPorts = map[string]int{}
+					}
+					if old := policy.PeerPorts[address]; old == 0 {
+						policy.PeerPorts[address] = dial.Port
+					} else if old != dial.Port {
+						if policy.ExtraPeerPorts == nil {
+							policy.ExtraPeerPorts = map[string][]int{}
+						}
+						if !slices.Contains(policy.ExtraPeerPorts[address], dial.Port) {
+							policy.ExtraPeerPorts[address] = append(policy.ExtraPeerPorts[address], dial.Port)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -112,13 +131,13 @@ func (d *NativeEntryDriver) gates(desired Desired) ([]*landing.TrafficGate, erro
 	}
 	var gates []*landing.TrafficGate
 	for _, peer := range desired.EntryNetwork.Peers {
-		publicAddress := ""
+		transport := glivela.PrivateTransport{}
 		for _, route := range desired.Entry.Peers {
-			if route.EgressID == peer.EgressID {
-				publicAddress = route.Transport.PublicAddress
+			if route.PeerKey() == peer.PeerKey() {
+				transport = route.DialTransport()
 			}
 		}
-		gate, err := landing.NewHostGate(peer.Identity, d.WorkerGID, desired.Revision, publicAddress)
+		gate, err := landing.NewHostGate(peer.Identity, d.WorkerGID, desired.Revision, transport)
 		if err != nil {
 			return nil, err
 		}
@@ -134,25 +153,44 @@ func (d *NativeEntryDriver) stopOwned(ctx context.Context, desired Desired) erro
 	return d.SystemdDriver.stopOwned(ctx)
 }
 
-func (d *NativeEntryDriver) readyProcess(ctx context.Context, desired Desired) error {
+// verifiedProcess starts a single observation. Its caller must re-read the
+// generation after the guarded work; this snapshot never survives that call.
+func (d *NativeEntryDriver) verifiedProcess(ctx context.Context, desired Desired) (nativeEntryProcess, error) {
 	if err := d.plan(desired); err != nil {
-		return err
+		return nativeEntryProcess{}, err
 	}
 	if err := d.verifyLoadedService(ctx); err != nil {
-		return err
+		return nativeEntryProcess{}, err
 	}
-	before, err := inspectNativeEntry(ctx, d.SystemdDriver)
-	if err != nil || !before.Active || before.PID <= 0 || before.ControlPID != 0 {
-		return errors.New("control: native entry process not ready")
+	process, err := inspectNativeEntry(ctx, d.SystemdDriver)
+	if err != nil || !process.Active || process.PID <= 0 || process.ControlPID != 0 {
+		return nativeEntryProcess{}, errors.New("control: native entry process not ready")
 	}
-	if err := verifyNativeEntryProcess(d.SystemdDriver, before, desired); err != nil {
-		return err
+	if err := verifyNativeEntryProcess(d.SystemdDriver, process, desired); err != nil {
+		return nativeEntryProcess{}, err
 	}
+	return process, nil
+}
+
+var errNativeEntryChanged = errors.New("control: native entry changed during observation")
+
+func (d *NativeEntryDriver) verifySameProcess(ctx context.Context, before nativeEntryProcess) error {
 	after, err := inspectNativeEntry(ctx, d.SystemdDriver)
-	if err != nil || before != after {
-		return errors.New("control: native entry changed during acceptance")
+	if err != nil {
+		return err
+	}
+	if before != after {
+		return errNativeEntryChanged
 	}
 	return nil
+}
+
+func (d *NativeEntryDriver) readyProcess(ctx context.Context, desired Desired) error {
+	before, err := d.verifiedProcess(ctx, desired)
+	if err != nil {
+		return err
+	}
+	return d.verifySameProcess(ctx, before)
 }
 
 func (d *NativeEntryDriver) Activate(ctx context.Context, desired Desired, previous *Desired) (result error) {
@@ -271,23 +309,51 @@ func (d *NativeEntryDriver) Stop(ctx context.Context, desired Desired) error {
 }
 
 func (d *NativeEntryDriver) Healthy(ctx context.Context, desired Desired) error {
-	if err := d.readyProcess(ctx, desired); err != nil {
-		return err
+	_, err := d.healthyProcess(ctx, desired)
+	return err
+}
+
+func (d *NativeEntryDriver) healthyProcess(ctx context.Context, desired Desired) (nativeEntryProcess, error) {
+	before, err := d.verifiedProcess(ctx, desired)
+	if err != nil {
+		return nativeEntryProcess{}, err
 	}
 	if err := verifyEntryConfigFile(filepath.Join(d.Directory, "config.json"), desired.Config); err != nil {
-		return err
+		return nativeEntryProcess{}, err
 	}
 	policy, err := d.policy(desired)
 	if err != nil {
-		return err
+		return nativeEntryProcess{}, err
 	}
 	if err := policy.Verify(ctx); err != nil {
-		return err
+		return nativeEntryProcess{}, err
 	}
 	if err := d.monitors.verify(desired); err != nil {
-		return err
+		return nativeEntryProcess{}, err
 	}
-	return d.warmup(ctx, desired)
+	if err := d.warmupFromProcess(ctx, desired, before); err != nil {
+		return nativeEntryProcess{}, err
+	}
+	return before, nil
+}
+
+// observe verifies health and accounting together, with fresh generation reads
+// bracketing both health acceptance and the subsequent counter query.
+func (d *NativeEntryDriver) observe(ctx context.Context, desired Desired) (bool, *EntryTraffic) {
+	before, err := d.healthyProcess(ctx, desired)
+	if err != nil {
+		return false, nil
+	}
+	traffic, err := d.trafficFromProcess(ctx, desired, before)
+	if errors.Is(err, errNativeEntryChanged) {
+		return false, nil
+	}
+	if err != nil {
+		return true, nil
+	}
+	// Accounting failure does not authorize restarting a healthy worker. Missing
+	// counters stay missing; the next observation performs all checks anew.
+	return true, traffic
 }
 
 func (d *NativeEntryDriver) EntryHealth(desired Desired) *EntryHealthReport {
@@ -302,12 +368,17 @@ type nativeEntryProcess struct {
 }
 
 func (d *NativeEntryDriver) warmup(ctx context.Context, desired Desired) error {
+	before, err := d.verifiedProcess(ctx, desired)
+	if err != nil {
+		return err
+	}
+	return d.warmupFromProcess(ctx, desired, before)
+}
+
+func (d *NativeEntryDriver) warmupFromProcess(ctx context.Context, desired Desired, before nativeEntryProcess) error {
 	return d.readiness.check(ctx, func() (string, error) {
-		if err := d.readyProcess(ctx, desired); err != nil {
-			return "", err
-		}
 		p, err := inspectNativeEntry(ctx, d.SystemdDriver)
-		if err != nil || !p.Active {
+		if err != nil || !p.Active || p != before {
 			return "", errors.New("control: entry process unavailable")
 		}
 		return strconv.Itoa(p.PID) + ":" + p.Invocation + ":" + p.StartedAt + ":" + desired.ConfigSHA256 + ":" + strconv.FormatUint(desired.Revision, 10), nil

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -192,5 +193,37 @@ func TestEntryUpdatesAndReadinessCannotReuseOldRouteProof(t *testing.T) {
 	}
 	if len(s.nodes[landingCert].Checks) != 0 {
 		t.Fatal("entry update retained route proof for the previous configuration")
+	}
+}
+
+func TestEntryReenrollmentPreservesAdminNetworkSettings(t *testing.T) {
+	s := store(t)
+	desired := routedEntryArtifact(t)
+	plan := *desired.Entry
+	plan.Peers[0].Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: "AAECAwQFBgcICQoLDA0ODw==", PublicAddress: "8.8.8.8"}
+	desired, err := NewEntryDesired(plan, *desired.EntryNetwork)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := strings.Repeat("b", 64)
+	settings := &NetworkSettings{Revision: 7, BandwidthMbps: 1000, Path: "nearby", Paths: map[string]PathMTUObservation{"8.8.8.8": {Address: "8.8.8.8", Configured: 1400, Actual: 1400}}, Command: &NetworkCommand{ID: "retained-command", Action: "path-mtu", ExpiresAt: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), PathMTU: &PathMTUCommand{Address: "8.8.8.8", MTU: 1400, Revision: desired.Revision, Hash: desired.ConfigSHA256}}, Result: &NetworkResult{ID: "retained-command", State: "applied", Message: "retained result"}}
+	if err := s.Put(Node{ID: "entry-example", CertificateID: certificate, Desired: desired, Network: settings}); err != nil {
+		t.Fatal(err)
+	}
+	plan.Revision++
+	plan.Peers[0].Port, plan.Peers[0].Transport.Port = 24000, 24000
+	updated, err := NewEntryDesired(plan, *desired.EntryNetwork)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(Node{ID: "entry-example", CertificateID: certificate, Desired: updated}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(s.nodes[certificate].Network, settings) || s.nodes[certificate].Desired.ConfigSHA256 != updated.ConfigSHA256 {
+		t.Fatal("peer enrollment discarded administrator-owned network settings")
+	}
+	loaded, err := OpenStore(s.path)
+	if err != nil || !reflect.DeepEqual(loaded.nodes[certificate].Network, settings) {
+		t.Fatal("retained network settings lost after reopen", err)
 	}
 }

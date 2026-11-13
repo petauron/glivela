@@ -7,6 +7,7 @@ import (
 )
 
 type landingAcceptanceRequest struct {
+	PeerID       string `json:"peerId,omitempty"`
 	SnapshotID   string `json:"snapshotId"`
 	Revision     uint64 `json:"revision"`
 	ConfigSHA256 string `json:"configSha256"`
@@ -26,7 +27,7 @@ func (s *Store) ownLandingAcceptance(cert string, request landingAcceptanceReque
 
 func (c *Client) verifyLandingAcceptance(ctx context.Context, snapshot string, revision uint64, digest string) (RouteAcceptance, error) {
 	var result RouteAcceptance
-	err := c.nodeCall(ctx, pb.NewNodeOperationsClient(c.grpc).LandingAcceptance, landingAcceptanceRequest{snapshot, revision, digest}, &result, 4096, 4096)
+	err := c.nodeCall(ctx, pb.NewNodeOperationsClient(c.grpc).LandingAcceptance, landingAcceptanceRequest{SnapshotID: snapshot, Revision: revision, ConfigSHA256: digest}, &result, 4096, 4096)
 	if err != nil || !result.RuntimeReady || !result.RoutesPassed || (result.Reason != "verified" && result.Reason != "verified-active-entries") || (len(result.DeferredEntries) > 0) != (result.Reason == "verified-active-entries") {
 		return RouteAcceptance{}, errors.New("control: complete fresh landing route acceptance required")
 	}

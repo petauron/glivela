@@ -76,6 +76,7 @@ type secretValue struct {
 	Value   []byte `json:"value"`
 }
 type archive struct {
+	HistoryRedacted bool                     `json:"historyRedacted,omitempty"`
 	Version         int                      `json:"version"`
 	Schema          int                      `json:"sourceSchema"`
 	SnapshotID      string                   `json:"snapshotId"`
@@ -87,6 +88,13 @@ type archive struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "purge-retired-history" {
+		if err := purgeHistoryCommand(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "offline retired history purge failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "quality" {
 		if exportQuality(os.Args[2:]) != nil {
 			fmt.Fprintln(os.Stderr, "quality export failed; source was not modified")
@@ -153,7 +161,10 @@ func privateFile(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	i, err := os.Lstat(path)
-	if err != nil || !i.Mode().IsRegular() || i.Mode().Perm()&0077 != 0 || i.Size() > limit {
+	if err != nil {
+		return nil, err
+	}
+	if !i.Mode().IsRegular() || i.Mode().Perm()&0077 != 0 || i.Size() > limit {
 		return nil, errors.New("unsafe file")
 	}
 	f, err := os.Open(path)

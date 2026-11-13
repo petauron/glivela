@@ -14,6 +14,7 @@ import (
 const maxSubscriptionBytes = 4 << 20
 
 type PublishedRoute struct {
+	Name                   string       `json:"name,omitempty"`
 	Grant                  RouteGrant   `json:"grant"`
 	Protocol               ProtocolKind `json:"protocol"`
 	EntryName              string       `json:"entryName"`
@@ -132,8 +133,8 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 	}
 	type proxyEntry struct {
 		SubscriptionItem
-		value  map[string]any
-		helper string
+		value   map[string]any
+		helpers []string
 	}
 	values := make([]proxyEntry, 0, len(resolved)+len(chains))
 	helperValues := map[string]map[string]any{}
@@ -193,7 +194,18 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 		if c.Transport == "ipv6-ss2022" || c.Shared {
 			cipher = SS2022Method
 		}
-		values = append(values, proxyEntry{SubscriptionItem: SubscriptionItem{ID: "chain/" + c.ID, Name: name, Kind: "chain", Protocol: ProtocolKind("shadowsocks")}, helper: helper, value: map[string]any{"name": name, "type": "ss", "server": published.Server, "port": c.Port, "cipher": cipher, "password": c.Key, "udp": false, "dialer-proxy": helper}})
+		dependencies := []string{helper}
+		if c.Relay != nil {
+			relayName := uniqueSubscriptionName("中转｜"+c.Name, used)
+			relayServer, relayCipher := c.Relay.ServerIPv6, SS2022Method
+			if c.Relay.Transport == IPv4RelaySS2022 {
+				relayServer, relayCipher = c.Relay.ServerIPv4, IPv4ClientSS2022Method
+			}
+			helperValues[relayName] = map[string]any{"name": relayName, "type": "ss", "server": relayServer, "port": c.Relay.Port, "cipher": relayCipher, "password": c.Relay.Key, "udp": false, "dialer-proxy": helper}
+			dependencies = append(dependencies, relayName)
+			helper = relayName
+		}
+		values = append(values, proxyEntry{SubscriptionItem: SubscriptionItem{ID: "chain/" + c.ID, Name: name, Kind: "chain", Protocol: ProtocolKind("shadowsocks")}, helpers: dependencies, value: map[string]any{"name": name, "type": "ss", "server": published.Server, "port": c.Port, "cipher": cipher, "password": c.Key, "udp": false, "dialer-proxy": helper}})
 	}
 	ranks := subscriptionRanks(order, resolved)
 	slices.SortStableFunc(values, func(a, b proxyEntry) int { return cmp.Compare(ranks.position(a.ID), ranks.position(b.ID)) })
@@ -202,9 +214,11 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 	names = make([]any, 0, len(values)+1)
 	addedHelpers := map[string]bool{}
 	for _, entry := range values {
-		if entry.helper != "" && !addedHelpers[entry.helper] {
-			proxies = append(proxies, helperValues[entry.helper])
-			addedHelpers[entry.helper] = true
+		for _, helper := range entry.helpers {
+			if !addedHelpers[helper] {
+				proxies = append(proxies, helperValues[helper])
+				addedHelpers[helper] = true
+			}
 		}
 		proxies = append(proxies, entry.value)
 		names = append(names, entry.Name)
@@ -385,6 +399,9 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 }
 
 func validatePublishedRouteScope(item PublishedRoute, accountID string) error {
+	if item.Name != "" && (item.Grant.ClientChainID == "" || !validDisplayName(item.Name)) {
+		return errors.New("glivela: invalid server chain name")
+	}
 	if item.EgressNameSuffix != "" && (!validDisplayName(item.EgressNameSuffix) || strings.ContainsAny(item.EgressNameSuffix, "|｜")) {
 		return errors.New("glivela: invalid landing name suffix")
 	}
@@ -423,6 +440,9 @@ func compactSubscriptionName(name string) string {
 }
 
 func routeName(item PublishedRoute) string {
+	if item.Name != "" {
+		return item.Name
+	}
 	entry := strings.TrimSpace(item.EntryName)
 	if _, name, ok := strings.Cut(entry, "｜"); ok && strings.TrimSpace(name) != "" {
 		entry = name

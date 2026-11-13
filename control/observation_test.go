@@ -71,7 +71,7 @@ func healthyEntryObservation(desired Desired, now time.Time) Observation {
 		health.Source = &source
 	}
 	for _, peer := range desired.EntryNetwork.Peers {
-		health.Peers[peer.EgressID] = EntryPeerObservation{Identity: peer.Identity, Status: landing.MonitorStatus{Revision: desired.Revision, State: "healthy", LinkState: "direct", Stage: "startup", Reason: "startup_ready", TCP: true, ExitIP: peer.ExpectedExit, StartedAt: now.Add(-time.Second), SecurityCheckedAt: now.Add(-500 * time.Millisecond), CheckedAt: now.Add(-100 * time.Millisecond), LastHealthyAt: now.Add(-100 * time.Millisecond), AllowedUntil: time.Time{}, DurationMS: 900}}
+		health.Peers[peer.PeerKey()] = EntryPeerObservation{Identity: peer.Identity, Status: landing.MonitorStatus{Revision: desired.Revision, State: "healthy", LinkState: "direct", Stage: "startup", Reason: "startup_ready", TCP: true, ExitIP: peer.ExpectedExit, StartedAt: now.Add(-time.Second), SecurityCheckedAt: now.Add(-500 * time.Millisecond), CheckedAt: now.Add(-100 * time.Millisecond), LastHealthyAt: now.Add(-100 * time.Millisecond), AllowedUntil: time.Time{}, DurationMS: 900}}
 	}
 	return Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: desired.Revision, ConfigSHA256: desired.ConfigSHA256, RuntimeReady: true}, EntryHealth: health}
 }

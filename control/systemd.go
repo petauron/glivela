@@ -271,8 +271,13 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 		}
 	}
 	all, err := net.InterfaceAddrs()
-	if err != nil || !assigned(all, desired.Landing.EgressIP) {
-		return landing.ServerFirewall{}, errors.New("control: egress source is not locally assigned")
+	if err != nil {
+		return landing.ServerFirewall{}, err
+	}
+	for _, ip := range desired.Landing.EgressAddresses() {
+		if !assigned(all, ip) {
+			return landing.ServerFirewall{}, errors.New("control: egress source is not locally assigned")
+		}
 	}
 	return desired.Landing.Firewall(d.WorkerUID, ifaceName)
 }
@@ -429,8 +434,8 @@ func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 	if err := policy.Verify(ctx); err != nil {
 		return err
 	}
-	if desired.Landing.IPv6OnlyAddress == "" {
-		if err := verifyOwnedListener(desired.Landing.ListenerAddress(), landing.SOCKSPort, d.WorkerUID); err != nil {
+	if desired.Landing.HasServerListener() {
+		if err := verifyOwnedListener(desired.Landing.ListenerAddress(), uint16(desired.Landing.Transport.ListenerPort()), d.WorkerUID); err != nil {
 			return err
 		}
 	}
