@@ -28,6 +28,20 @@ type legacyCutover struct {
 	Candidate            Desired   `json:"candidate"`
 }
 
+func checkPairingLegacyState(ctx context.Context, r *NativeRuntime) error {
+	state, err := readLegacyCutover(r)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if state.Phase != "accepted" {
+		return errors.New("control: finish legacy cutover before pairing")
+	}
+	return requireLegacyLandingFenced(ctx, state.NodeID)
+}
+
 // SwitchLegacyLanding is an offline first-cutover operation, not a health
 // acceptance. The old Agent must already be stopped and persistently masked.
 // The caller supplies the local immutable installation inventory, never remote
