@@ -335,7 +335,7 @@ func (d SystemdDriver) removeLandingFirewall(ctx context.Context, plan landing.P
 		return err
 	}
 	interfaces := []string{d.Interface}
-	if plan.Transport.PublicAddress != "" {
+	if plan.Transport.PublicAddress != "" || plan.IPv6OnlyAddress != "" {
 		local, err := net.Interfaces()
 		if err != nil {
 			return err
