@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.146](https://github.com/petauron/glivela/compare/v0.1.0-alpha.145...v0.1.0-alpha.146) (2026-11-13)
+
+
+### Features
+
+* add native Shadowrocket routing profile ([#152](https://github.com/petauron/glivela/issues/152)) ([0879f5f](https://github.com/petauron/glivela/commit/0879f5fd48b7324feb23383e7e0533a48bbd6eb7))
+
 ## [0.1.0-alpha.145](https://github.com/petauron/glivela/compare/v0.1.0-alpha.144...v0.1.0-alpha.145) (2026-11-13)
 
 
