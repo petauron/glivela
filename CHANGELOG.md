@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.139](https://github.com/petauron/glivela/compare/v0.1.0-alpha.138...v0.1.0-alpha.139) (2026-11-13)
+
+
+### Bug Fixes
+
+* **network:** isolate gate cleanup by destination port ([226b2e6](https://github.com/petauron/glivela/commit/226b2e61fa55f20704bcffe1a1dafd0c2b54cbd3))
+
 ## [0.1.0-alpha.138](https://github.com/petauron/glivela/compare/v0.1.0-alpha.137...v0.1.0-alpha.138) (2026-11-13)
 
 
