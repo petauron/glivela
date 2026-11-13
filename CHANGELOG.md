@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.144](https://github.com/petauron/glivela/compare/v0.1.0-alpha.143...v0.1.0-alpha.144) (2026-11-13)
+
+
+### Bug Fixes
+
+* **control:** retry transient encrypted startup probes within deadline ([#146](https://github.com/petauron/glivela/issues/146)) ([c5e2406](https://github.com/petauron/glivela/commit/c5e2406094465f5edae5a92da69394c5ef606483))
+
 ## [0.1.0-alpha.143](https://github.com/petauron/glivela/compare/v0.1.0-alpha.142...v0.1.0-alpha.143) (2026-11-13)
 
 
