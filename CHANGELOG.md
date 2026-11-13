@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.141](https://github.com/petauron/glivela/compare/v0.1.0-alpha.140...v0.1.0-alpha.141) (2026-11-13)
+
+
+### Features
+
+* **chains:** support exact private IPv4 client links ([#138](https://github.com/petauron/glivela/issues/138)) ([0630560](https://github.com/petauron/glivela/commit/0630560ce3c81cc6cc093e136aa639e3d318411d))
+
 ## [0.1.0-alpha.140](https://github.com/petauron/glivela/compare/v0.1.0-alpha.139...v0.1.0-alpha.140) (2026-11-13)
 
 
