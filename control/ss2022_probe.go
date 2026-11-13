@@ -84,5 +84,16 @@ func probeWithCore(ctx context.Context, p RouteProbe, binary, digest string, roo
 		case <-ticker.C:
 		}
 	}
-	return checkRouteProxy(child, p, roots, &url.URL{Scheme: "socks5", Host: address, User: url.UserPassword("probe", password)})
+	proxy := &url.URL{Scheme: "socks5", Host: address, User: url.UserPassword("probe", password)}
+	started := time.Now()
+	result, err := checkRouteProxy(child, p, roots, proxy)
+	// A cold encrypted path can close its first connection before inner TLS
+	// completes. Retry that transport failure once inside the original deadline,
+	// using the same authenticated listener and exact encrypted outbounds.
+	// Certificate, HTTP and exit mismatches never retry or fall back to direct.
+	if err != nil && result.Failure == "connect-or-tls" && child.Err() == nil {
+		result, err = checkRouteProxy(child, p, roots, proxy)
+	}
+	result.DurationMillis = time.Since(started).Milliseconds()
+	return result, err
 }
