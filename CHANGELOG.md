@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.147](https://github.com/petauron/glivela/compare/v0.1.0-alpha.146...v0.1.0-alpha.147) (2026-11-13)
+
+
+### Bug Fixes
+
+* render native Shadowrocket REALITY fingerprints ([#154](https://github.com/petauron/glivela/issues/154)) ([792c9c9](https://github.com/petauron/glivela/commit/792c9c9c685be14d5e5466a86bf6ed453f6364df))
+
 ## [0.1.0-alpha.146](https://github.com/petauron/glivela/compare/v0.1.0-alpha.145...v0.1.0-alpha.146) (2026-11-13)
 
 
