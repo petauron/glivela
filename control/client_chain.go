@@ -16,48 +16,51 @@ import (
 )
 
 type ClientChainChange struct {
-	EgressIP         *string `json:"egressIp,omitempty"`
-	ShareLanding     bool    `json:"shareLanding,omitempty"`
-	RestoreLanding   bool    `json:"restoreLanding,omitempty"`
-	Transport        string  `json:"transport,omitempty"`
-	SourceIPv6       string  `json:"sourceIpv6,omitempty"`
-	ServerIPv6       string  `json:"serverIpv6,omitempty"`
-	RelayID          string  `json:"relayId,omitempty"`
-	RelayTransport   string  `json:"relayTransport,omitempty"`
-	RelaySourceIPv4  string  `json:"relaySourceIpv4,omitempty"`
-	RelayServerIPv4  string  `json:"relayServerIpv4,omitempty"`
-	RelaySourceIPv6  string  `json:"relaySourceIpv6,omitempty"`
-	RelayServerIPv6  string  `json:"relayServerIpv6,omitempty"`
-	ID               string  `json:"id"`
-	AccountID        string  `json:"accountId"`
-	EntryID          string  `json:"entryId"`
-	EgressID         string  `json:"egressId"`
-	Name             string  `json:"name"`
-	Enabled          bool    `json:"enabled"`
-	Delete           bool    `json:"delete,omitempty"`
-	ExpectedRevision uint64  `json:"expectedRevision,string"`
+	PrivateLink      *glivela.PrivateClientLink `json:"privateLink,omitempty"`
+	ClearPrivateLink bool                       `json:"clearPrivateLink,omitempty"`
+	EgressIP         *string                    `json:"egressIp,omitempty"`
+	ShareLanding     bool                       `json:"shareLanding,omitempty"`
+	RestoreLanding   bool                       `json:"restoreLanding,omitempty"`
+	Transport        string                     `json:"transport,omitempty"`
+	SourceIPv6       string                     `json:"sourceIpv6,omitempty"`
+	ServerIPv6       string                     `json:"serverIpv6,omitempty"`
+	RelayID          string                     `json:"relayId,omitempty"`
+	RelayTransport   string                     `json:"relayTransport,omitempty"`
+	RelaySourceIPv4  string                     `json:"relaySourceIpv4,omitempty"`
+	RelayServerIPv4  string                     `json:"relayServerIpv4,omitempty"`
+	RelaySourceIPv6  string                     `json:"relaySourceIpv6,omitempty"`
+	RelayServerIPv6  string                     `json:"relayServerIpv6,omitempty"`
+	ID               string                     `json:"id"`
+	AccountID        string                     `json:"accountId"`
+	EntryID          string                     `json:"entryId"`
+	EgressID         string                     `json:"egressId"`
+	Name             string                     `json:"name"`
+	Enabled          bool                       `json:"enabled"`
+	Delete           bool                       `json:"delete,omitempty"`
+	ExpectedRevision uint64                     `json:"expectedRevision,string"`
 }
 
 type ClientChainView struct {
-	EgressIP          string `json:"egressIp,omitempty"`
-	UnavailableReason string `json:"unavailableReason,omitempty"`
-	Shared            bool   `json:"shared,omitempty"`
-	Transport         string `json:"transport,omitempty"`
-	SourceIPv6        string `json:"sourceIpv6,omitempty"`
-	ServerIPv6        string `json:"serverIpv6,omitempty"`
-	RelayID           string `json:"relayId,omitempty"`
-	RelayTransport    string `json:"relayTransport,omitempty"`
-	RelaySourceIPv4   string `json:"relaySourceIpv4,omitempty"`
-	RelayServerIPv4   string `json:"relayServerIpv4,omitempty"`
-	RelaySourceIPv6   string `json:"relaySourceIpv6,omitempty"`
-	RelayServerIPv6   string `json:"relayServerIpv6,omitempty"`
-	Port              int    `json:"port"`
-	ID                string `json:"id"`
-	AccountID         string `json:"accountId"`
-	EntryID           string `json:"entryId"`
-	EgressID          string `json:"egressId"`
-	Name              string `json:"name"`
-	Enabled           bool   `json:"enabled"`
+	PrivateLink       *glivela.PrivateClientLink `json:"privateLink,omitempty"`
+	EgressIP          string                     `json:"egressIp,omitempty"`
+	UnavailableReason string                     `json:"unavailableReason,omitempty"`
+	Shared            bool                       `json:"shared,omitempty"`
+	Transport         string                     `json:"transport,omitempty"`
+	SourceIPv6        string                     `json:"sourceIpv6,omitempty"`
+	ServerIPv6        string                     `json:"serverIpv6,omitempty"`
+	RelayID           string                     `json:"relayId,omitempty"`
+	RelayTransport    string                     `json:"relayTransport,omitempty"`
+	RelaySourceIPv4   string                     `json:"relaySourceIpv4,omitempty"`
+	RelayServerIPv4   string                     `json:"relayServerIpv4,omitempty"`
+	RelaySourceIPv6   string                     `json:"relaySourceIpv6,omitempty"`
+	RelayServerIPv6   string                     `json:"relayServerIpv6,omitempty"`
+	Port              int                        `json:"port"`
+	ID                string                     `json:"id"`
+	AccountID         string                     `json:"accountId"`
+	EntryID           string                     `json:"entryId"`
+	EgressID          string                     `json:"egressId"`
+	Name              string                     `json:"name"`
+	Enabled           bool                       `json:"enabled"`
 }
 
 // The existing public transport's enrolled source is an authorization boundary,
@@ -95,6 +98,12 @@ func chainLanding(nodes map[string]Node, c glivela.ClientChain) (Node, string, e
 		entry, known := nodes[member.CertificateID]
 		if !ok || !known || entry.ID != c.EntryID || entry.Desired.Entry == nil || entry.Desired.Entry.NativeEgress == glivela.EgressIPv6Only || p.Transport.PublicAddress == "" {
 			break
+		}
+		if c.PrivateLink != nil {
+			if c.PrivateLink.Validate() != nil {
+				break
+			}
+			return n, c.PrivateLink.Source, nil
 		}
 		for _, source := range p.Sources {
 			if source.Address == member.Address && glivela.PublicTransportIPv4(source.PublicAddress) {
@@ -145,6 +154,9 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 	if s.business == nil || s.business.faulted || s.business.material.Ownership == nil || c.ExpectedRevision == 0 || c.ExpectedRevision == math.MaxUint64 {
 		return AccountChangeResult{}, invalid
 	}
+	if c.PrivateLink != nil && (c.PrivateLink.Validate() != nil || c.ClearPrivateLink) {
+		return AccountChangeResult{}, invalid
+	}
 	if c.ShareLanding || c.RestoreLanding {
 		return s.changeSharedLandingLocked(c)
 	}
@@ -183,7 +195,14 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 		if c.Delete && !deleted && (old.Enabled || !clientChainDeletionReady(s.nodes, old, time.Now())) {
 			return AccountChangeResult{}, errors.New("control: client chain must be disabled and applied before deletion")
 		}
-		same = old.Name == c.Name && old.Enabled == c.Enabled && deleted == c.Delete && (c.Transport == "" || c.Transport == old.Transport) && (c.EgressIP == nil || *c.EgressIP == old.EgressIP)
+		if old.PrivateLink != nil && c.PrivateLink == nil && !c.ClearPrivateLink {
+			v := *old.PrivateLink
+			c.PrivateLink = &v
+		}
+		if c.PrivateLink != nil && clientListenerUsedByServer(s.nodes, next, old, time.Now()) {
+			return AccountChangeResult{}, errors.New("control: client link is used by server forwarding")
+		}
+		same = reflect.DeepEqual(old.PrivateLink, c.PrivateLink) && old.Name == c.Name && old.Enabled == c.Enabled && deleted == c.Delete && (c.Transport == "" || c.Transport == old.Transport) && (c.EgressIP == nil || *c.EgressIP == old.EgressIP)
 	}
 	if deleted && !same {
 		return AccountChangeResult{}, invalid
@@ -267,6 +286,10 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 		}
 		if c.EgressIP != nil {
 			chain.EgressIP = *c.EgressIP
+		}
+		chain.PrivateLink = c.PrivateLink
+		if c.ClearPrivateLink {
+			chain.PrivateLink = nil
 		}
 		chain.Name, chain.Enabled = c.Name, c.Enabled
 		if chain.Validate() != nil {
@@ -428,7 +451,11 @@ func projectClientLandings(nodes map[string]Node, m glivela.ImportMaterial, now 
 }
 
 func clientListener(c glivela.ClientChain, source string) landing.ClientListener {
-	return landing.ClientListener{EgressIP: c.EgressIP, Shared: c.Shared, ID: c.ID, Port: c.Port, Key: c.Key, Source: source, Transport: c.Transport, Address: c.ServerIPv6}
+	result := landing.ClientListener{EgressIP: c.EgressIP, Shared: c.Shared, ID: c.ID, Port: c.Port, Key: c.Key, Source: source, Transport: c.Transport, Address: c.ServerIPv6}
+	if c.PrivateLink != nil {
+		result.Address, result.Interface = c.PrivateLink.Address, c.PrivateLink.Interface
+	}
+	return result
 }
 
 func clientRelayListener(c glivela.ClientChain) landing.ClientListener {

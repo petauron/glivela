@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	glivela "github.com/petauron/glivela"
@@ -260,6 +261,26 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 			// adopting an already-matching plan instead of issuing a new revision.
 			expected.AppliedRev, expected.RuntimeGood = current.AppliedRev, current.RuntimeGood
 			plan.Grants[i] = expected
+		}
+		plan.ClientLinks = nil
+		for _, original := range m.ClientChains {
+			chain, e := m.EffectiveClientChain(original)
+			if e != nil {
+				return nil, false, e
+			}
+			if m.DeletedClientChains[chain.ID] || chain.EntryID != node.ID || !chain.Enabled || chain.PrivateLink == nil || !slices.ContainsFunc(plan.Credentials, func(v glivela.CredentialMaterial) bool {
+				return v.Credential.Enabled && v.Credential.Kind == glivela.NativeCredential && v.Credential.AccountID == chain.AccountID
+			}) {
+				continue
+			}
+			if _, _, e = chainLanding(nodes, chain); e != nil {
+				continue
+			}
+			plan.ClientLinks = append(plan.ClientLinks, glivela.PrivateClientPolicy{PrivateClientLink: *chain.PrivateLink, ID: chain.ID, AccountID: chain.AccountID, Port: chain.Port})
+		}
+		slices.SortFunc(plan.ClientLinks, func(a, b glivela.PrivateClientPolicy) int { return strings.Compare(a.ID, b.ID) })
+		if len(plan.ClientLinks) != 0 {
+			desired.EntryRenderVersion = glivela.XrayRenderVersion
 		}
 		if reflect.DeepEqual(plan, node.Desired.Entry) {
 			continue

@@ -19,6 +19,7 @@ import (
 // members. The output chain runs after output DNAT, so post-resolution private
 // addresses (including DNS rebinding) cannot bypass the destination restriction.
 type ClientListenerPolicy struct {
+	Interface string `json:"interface,omitempty"`
 	EgressIP  string `json:"egressIp,omitempty"`
 	Shared    bool   `json:"shared,omitempty"`
 	Transport string `json:"transport,omitempty"`
@@ -108,6 +109,9 @@ func (policy ServerFirewall) validateIdentity() error {
 		validTransport := (c.Transport == "" || c.Transport == glivela.IPv4ClientSS2022) && c.Address == "" && seen[c.Source] ||
 			c.Transport == glivela.IPv4RelaySS2022 && c.Address == "" && !c.Shared && glivela.PublicTransportIPv4(c.Source) && c.Source != policy.Address ||
 			c.Transport == "ipv6-ss2022" && glivela.PublicTransportIPv6(c.Address) && glivela.PublicTransportIPv6(c.Source) && c.Address != c.Source
+		if c.Interface != "" {
+			validTransport = glivela.PrivateClientIPv4(c.Address) && glivela.PrivateClientIPv4(c.Source) && c.Source != c.Address && bridgeNamePattern.MatchString(c.Interface) && c.Interface != "lo" && (c.Transport == "" || c.Transport == glivela.IPv4ClientSS2022)
+		}
 		if policy.IPv6Only && (c.Transport != "ipv6-ss2022" || c.Address != policy.Address) {
 			return errors.New("landing: IPv4 listener in IPv6-only firewall")
 		}
@@ -182,7 +186,11 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 		if c.Transport == "ipv6-ss2022" {
 			family, address = "ip6", c.Address
 		}
-		rule("input", match(payload(family, "daddr"), address), match(payload("tcp", "dport"), c.Port), match(meta("iifname"), policy.Interface), match(payload(family, "saddr"), c.Source), nftObject{"return": nil})
+		iface := policy.Interface
+		if c.Interface != "" {
+			address, iface = c.Address, c.Interface
+		}
+		rule("input", match(payload(family, "daddr"), address), match(payload("tcp", "dport"), c.Port), match(meta("iifname"), iface), match(payload(family, "saddr"), c.Source), nftObject{"return": nil})
 		if !c.Shared {
 			for _, protocol := range []string{"tcp", "udp"} {
 				rule("input", match(payload(family, "daddr"), address), match(payload(protocol, "dport"), c.Port), nftObject{"drop": nil})
@@ -207,7 +215,7 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 				}
 			}
 		}
-		rule("destinations", match(meta("oifname"), policy.Interface), match(payload(family, "saddr"), address), match(payload(family, "daddr"), c.Source), match(payload("tcp", "sport"), c.Port), match(nftObject{"ct": nftObject{"key": "direction"}}, "reply"), nftObject{"return": nil})
+		rule("destinations", match(meta("oifname"), iface), match(payload(family, "saddr"), address), match(payload(family, "daddr"), c.Source), match(payload("tcp", "sport"), c.Port), match(nftObject{"ct": nftObject{"key": "direction"}}, "reply"), nftObject{"return": nil})
 	}
 	sources := slices.Clone(policy.Sources)
 	slices.Sort(sources)

@@ -55,6 +55,11 @@ func (d *NativeEntryDriver) Validate(ctx context.Context, desired Desired, confi
 	if err := d.plan(desired); err != nil {
 		return err
 	}
+	for _, link := range desired.Entry.ClientLinks {
+		if err := verifyPrivateClientInterface(link.SourceInterface, link.Source); err != nil {
+			return err
+		}
+	}
 	if err := d.verifyLoadedService(ctx); err != nil {
 		return err
 	}
@@ -89,6 +94,12 @@ func verifyStartupSelfIdentity(ctx context.Context, expected landing.PeerIdentit
 
 func (d *NativeEntryDriver) policy(desired Desired) (landing.EntryFirewall, error) {
 	policy := landing.EntryFirewall{PublicSSH: desired.Entry.PublicSSH.Clone(), UID: d.WorkerUID, Revision: desired.Revision}
+	for _, link := range desired.Entry.ClientLinks {
+		if err := verifyPrivateClientInterface(link.SourceInterface, link.Source); err != nil {
+			return landing.EntryFirewall{}, err
+		}
+		policy.PrivateClients = append(policy.PrivateClients, link)
+	}
 	for _, endpoint := range desired.Entry.RealityEndpoints {
 		if endpoint.Target == glivela.ManagedLocalTLSTarget {
 			policy.LocalTLSOrigin = true

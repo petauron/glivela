@@ -266,6 +266,11 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 		return landing.ServerFirewall{}, errors.New("control: landing listener is not on private interface")
 	}
 	for _, listener := range desired.Landing.ActiveClientListeners() {
+		if listener.Interface != "" {
+			if err := verifyPrivateClientInterface(listener.Interface, listener.Address); err != nil {
+				return landing.ServerFirewall{}, err
+			}
+		}
 		if listener.Transport == "ipv6-ss2022" && !assigned(addresses, listener.Address) {
 			return landing.ServerFirewall{}, errors.New("control: client listener address is not assigned to the landing interface")
 		}
@@ -441,7 +446,7 @@ func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 	}
 	for _, listener := range desired.Landing.ActiveClientListeners() {
 		address := desired.Landing.Transport.PublicAddress
-		if listener.Transport == "ipv6-ss2022" {
+		if listener.Transport == "ipv6-ss2022" || listener.Interface != "" {
 			address = listener.Address
 		}
 		if err := verifyOwnedListener(address, uint16(listener.Port), d.WorkerUID); err != nil {

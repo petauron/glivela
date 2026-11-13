@@ -289,6 +289,9 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 			for id, material := range byID {
 				if material.Credential.Kind == glivela.NativeCredential && material.Credential.EntryID == chain.EntryID {
 					server := landingNode.Desired.Landing.Transport.PublicAddress
+					if chain.PrivateLink != nil {
+						server = chain.PrivateLink.Address
+					}
 					if chain.Transport == "ipv6-ss2022" {
 						server = chain.ServerIPv6
 					}
