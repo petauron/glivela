@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.143](https://github.com/petauron/glivela/compare/v0.1.0-alpha.142...v0.1.0-alpha.143) (2026-11-13)
+
+
+### Features
+
+* **control:** accept independent managed ingress domains ([#144](https://github.com/petauron/glivela/issues/144)) ([632badf](https://github.com/petauron/glivela/commit/632badf0445f756797203213434d5fc1982094aa))
+
 ## [0.1.0-alpha.142](https://github.com/petauron/glivela/compare/v0.1.0-alpha.141...v0.1.0-alpha.142) (2026-11-13)
 
 
