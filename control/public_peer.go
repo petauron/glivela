@@ -17,6 +17,7 @@ import (
 type PublicPeerVerifier func(context.Context, Desired, EntryPeer) landing.LinkResult
 
 type publicPeerProof struct {
+	ClientChainID       string               `json:"clientChainId,omitempty"`
 	EntryID             string               `json:"entryId"`
 	LandingID           string               `json:"landingId"`
 	Revision            uint64               `json:"revision"`
@@ -42,8 +43,8 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 		request.SnapshotID != entry.ID || request.Revision != entry.Desired.Revision || request.ConfigSHA256 != entry.Desired.ConfigSHA256 || !glivela.ValidIdentifier(request.PeerID) || s.entryRetiredLocked(entry.ID) {
 		return publicPeerProof{}, refused
 	}
-	pi := slices.IndexFunc(entry.Desired.EntryNetwork.Peers, func(p EntryPeer) bool { return p.EgressID == request.PeerID })
-	ri := slices.IndexFunc(entry.Desired.Entry.Peers, func(p glivela.RoutePeer) bool { return p.EgressID == request.PeerID })
+	pi := slices.IndexFunc(entry.Desired.EntryNetwork.Peers, func(p EntryPeer) bool { return p.PeerKey() == request.PeerID })
+	ri := slices.IndexFunc(entry.Desired.Entry.Peers, func(p glivela.RoutePeer) bool { return p.PeerKey() == request.PeerID })
 	if pi < 0 || ri < 0 {
 		return publicPeerProof{}, refused
 	}
@@ -53,7 +54,7 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 	}
 	now := time.Now().UTC()
 	for _, target := range s.nodes {
-		if target.ID != request.PeerID {
+		if target.ID != route.EgressID {
 			continue
 		}
 		if target.Desired.Landing == nil || !s.availableRuntime(target, now) || target.Receipt.ManagementIdentity == nil ||
@@ -61,10 +62,10 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 			return publicPeerProof{}, refused
 		}
 		if route.Transport.ClientListenerID != "" {
-			if _, ok := s.boundClientListener(entry, target, route); !ok {
+			if c, ok := s.boundClientListener(entry, target, route); !ok || !s.serverRelayLive(c, peer, now) {
 				return publicPeerProof{}, refused
 			}
-			return publicPeerProof{entry.ID, target.ID, entry.Desired.Revision, entry.Desired.ConfigSHA256, peer.Identity, target.Desired.Revision, target.Desired.ConfigSHA256, now}, nil
+			return publicPeerProof{peer.ClientChainID, entry.ID, target.ID, entry.Desired.Revision, entry.Desired.ConfigSHA256, peer.Identity, target.Desired.Revision, target.Desired.ConfigSHA256, now}, nil
 		}
 		if !reflect.DeepEqual(route.Transport, target.Desired.Landing.Transport) || route.Port != target.Desired.Landing.Transport.ListenerPort() {
 			return publicPeerProof{}, refused
@@ -76,7 +77,7 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 		}) {
 			return publicPeerProof{}, refused
 		}
-		return publicPeerProof{entry.ID, target.ID, entry.Desired.Revision, entry.Desired.ConfigSHA256, peer.Identity, target.Desired.Revision, target.Desired.ConfigSHA256, now}, nil
+		return publicPeerProof{peer.ClientChainID, entry.ID, target.ID, entry.Desired.Revision, entry.Desired.ConfigSHA256, peer.Identity, target.Desired.Revision, target.Desired.ConfigSHA256, now}, nil
 	}
 	return publicPeerProof{}, refused
 }
@@ -99,11 +100,11 @@ func (c *Client) VerifyPublicPeer(ctx context.Context, desired Desired, peer Ent
 		result.StartedAt = time.Now().UTC()
 		check, stop := context.WithTimeout(ctx, landing.CheckTimeout)
 		var proof publicPeerProof
-		err = c.nodeCall(check, pb.NewNodeOperationsClient(c.grpc).LandingAcceptance, landingAcceptanceRequest{SnapshotID: id, Revision: desired.Revision, ConfigSHA256: desired.ConfigSHA256, PeerID: peer.EgressID}, &proof, 4096, 4096)
+		err = c.nodeCall(check, pb.NewNodeOperationsClient(c.grpc).LandingAcceptance, landingAcceptanceRequest{SnapshotID: id, Revision: desired.Revision, ConfigSHA256: desired.ConfigSHA256, PeerID: peer.PeerKey()}, &proof, 4096, 4096)
 		now := time.Now().UTC()
 		timedOut := err != nil && errors.Is(check.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 		if err == nil && check.Err() == nil && proof.EntryID == id && proof.LandingID == peer.EgressID && proof.Revision == desired.Revision && proof.ConfigSHA256 == desired.ConfigSHA256 &&
-			proof.Identity == peer.Identity && proof.LandingRevision > 0 && glivela.ValidIdentity(proof.LandingConfigSHA256) && !proof.CheckedAt.Before(result.StartedAt.Add(-5*time.Second)) && !proof.CheckedAt.After(now.Add(5*time.Second)) {
+			proof.ClientChainID == peer.ClientChainID && proof.Identity == peer.Identity && proof.LandingRevision > 0 && glivela.ValidIdentity(proof.LandingConfigSHA256) && !proof.CheckedAt.Before(result.StartedAt.Add(-5*time.Second)) && !proof.CheckedAt.After(now.Add(5*time.Second)) {
 			result.State, result.Reason = "authenticated", "management_identity_verified"
 		}
 		stop()
@@ -120,4 +121,12 @@ func (d *NativeEntryDriver) SetPublicPeerVerifier(verify PublicPeerVerifier) {
 }
 func (d *EntryDriver) SetPublicPeerVerifier(verify PublicPeerVerifier) {
 	d.monitors.verifyPublicPeer = verify
+}
+
+func (s *Store) serverRelayLive(c glivela.ClientChain, peer EntryPeer, now time.Time) bool {
+	if c.Relay == nil {
+		return true
+	}
+	relay, err := chainRelay(s.nodes, c)
+	return err == nil && !s.suspended(relay.ID, now) && s.availableRuntime(relay, now) && relay.Receipt.ManagementIdentity != nil && peer.RelayIdentity != nil && *relay.Receipt.ManagementIdentity == *peer.RelayIdentity && peer.RelayIdentity.Address == relay.Desired.Landing.Address
 }

@@ -22,16 +22,17 @@ import (
 // The controlled HTTPS target must return its observed source IP as plain text.
 // It is not a command execution request or an arbitrary HTTP forwarding API.
 type RouteProbe struct {
-	Transport    glivela.PrivateTransport `json:"transport,omitzero"`
-	AttemptID    string                   `json:"attemptId"`
-	SnapshotID   string                   `json:"snapshotId"`
-	EntryID      string                   `json:"entryId"`
-	LandingID    string                   `json:"landingId"`
-	Revision     uint64                   `json:"revision"`
-	ConfigSHA256 string                   `json:"configSha256"`
-	SOCKSAddress string                   `json:"socksAddress"`
-	Target       string                   `json:"target"`
-	ExpectedExit string                   `json:"expectedExit"`
+	Relay        *glivela.ClientChainRelay `json:"relay,omitempty"`
+	Transport    glivela.PrivateTransport  `json:"transport,omitzero"`
+	AttemptID    string                    `json:"attemptId"`
+	SnapshotID   string                    `json:"snapshotId"`
+	EntryID      string                    `json:"entryId"`
+	LandingID    string                    `json:"landingId"`
+	Revision     uint64                    `json:"revision"`
+	ConfigSHA256 string                    `json:"configSha256"`
+	SOCKSAddress string                    `json:"socksAddress"`
+	Target       string                    `json:"target"`
+	ExpectedExit string                    `json:"expectedExit"`
 }
 
 type RouteProbeResult struct {
@@ -58,6 +59,9 @@ func (p RouteProbe) Validate() error {
 	public := p.Transport.PublicAddress != "" && proxy.Addr().String() == p.Transport.PublicAddress && int(proxy.Port()) == p.Transport.ListenerPort()
 	if err != nil || proxy.Port() == 0 || !(public || p.Transport.PublicAddress == "" && (proxy.Addr().IsPrivate() || proxy.Addr().IsLoopback() || netip.MustParsePrefix("100.64.0.0/10").Contains(proxy.Addr()))) {
 		return errors.New("control: route check requires private SOCKS endpoint")
+	}
+	if p.Relay != nil && p.Relay.ValidateServerRelay(p.Transport) != nil {
+		return errors.New("control: invalid three-hop probe")
 	}
 	if !validRouteTarget(p.Target) {
 		return errors.New("control: controlled HTTPS target required")

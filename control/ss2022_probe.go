@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	glivela "github.com/petauron/glivela"
 	"io"
 	"net"
 	"net/netip"
@@ -51,7 +52,7 @@ func probeWithCore(ctx context.Context, p RouteProbe, binary, digest string, roo
 	config := map[string]any{
 		"log":       map[string]any{"loglevel": "none"},
 		"inbounds":  []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "socks", "settings": map[string]any{"auth": "password", "accounts": []any{map[string]any{"user": "probe", "pass": password}}, "udp": false}}},
-		"outbounds": []any{map[string]any{"protocol": "shadowsocks", "settings": map[string]any{"servers": []any{map[string]any{"address": endpoint.Addr().String(), "port": endpoint.Port(), "method": p.Transport.Method(), "password": p.Transport.Key}}}}},
+		"outbounds": (glivela.RoutePeer{Address: endpoint.Addr().String(), Transport: p.Transport, Port: int(endpoint.Port()), Relay: p.Relay, ClientChainID: p.Transport.ClientListenerID}).ServerOutbounds("probe-exit"),
 	}
 	raw, err := json.Marshal(config)
 	if err != nil {

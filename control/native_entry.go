@@ -96,13 +96,26 @@ func (d *NativeEntryDriver) policy(desired Desired) (landing.EntryFirewall, erro
 	}
 	for _, peer := range desired.EntryNetwork.Peers {
 		for _, route := range desired.Entry.Peers {
-			if route.EgressID == peer.EgressID {
-				policy.Peers = append(policy.Peers, route.Transport.Endpoint(route.Address))
-				if route.Transport.Port != 0 {
+			if route.PeerKey() == peer.PeerKey() {
+				dial := route.DialTransport()
+				address := dial.Endpoint(route.Address)
+				if !slices.Contains(policy.Peers, address) {
+					policy.Peers = append(policy.Peers, address)
+				}
+				if dial.Port != 0 {
 					if policy.PeerPorts == nil {
 						policy.PeerPorts = map[string]int{}
 					}
-					policy.PeerPorts[route.Transport.Endpoint(route.Address)] = route.Port
+					if old := policy.PeerPorts[address]; old == 0 {
+						policy.PeerPorts[address] = dial.Port
+					} else if old != dial.Port {
+						if policy.ExtraPeerPorts == nil {
+							policy.ExtraPeerPorts = map[string][]int{}
+						}
+						if !slices.Contains(policy.ExtraPeerPorts[address], dial.Port) {
+							policy.ExtraPeerPorts[address] = append(policy.ExtraPeerPorts[address], dial.Port)
+						}
+					}
 				}
 			}
 		}
@@ -120,8 +133,8 @@ func (d *NativeEntryDriver) gates(desired Desired) ([]*landing.TrafficGate, erro
 	for _, peer := range desired.EntryNetwork.Peers {
 		transport := glivela.PrivateTransport{}
 		for _, route := range desired.Entry.Peers {
-			if route.EgressID == peer.EgressID {
-				transport = route.Transport
+			if route.PeerKey() == peer.PeerKey() {
+				transport = route.DialTransport()
 			}
 		}
 		gate, err := landing.NewHostGate(peer.Identity, d.WorkerGID, desired.Revision, transport)

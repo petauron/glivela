@@ -59,6 +59,9 @@ func enrolledEntryPeersFresh(node Node, nodes map[string]Node, now time.Time, de
 }
 
 func routeTargetsLanding(p RouteProbe, node Node) bool {
+	if p.Relay != nil {
+		return false
+	} // Three-hop startup proofs belong to the entry path, not legacy landing inventories.
 	return node.Desired.Landing != nil && node.Desired.Landing.HasServerListener() && routeMatchesLanding(p, node)
 }
 

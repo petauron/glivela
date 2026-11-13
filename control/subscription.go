@@ -222,10 +222,23 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 		if !baseOK || !routeOK || !entryOK || !grant.Deployable() || base.Credential != grant.Base || route.Credential != grant.Route {
 			continue
 		}
-		if !slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grant) }) || !s.subscriptionPeerAuthorized(entry, grant.EgressID, now) || grant.IPv4EgressID != "" && !s.subscriptionPeerAuthorized(entry, grant.IPv4EgressID, now) {
+		if !slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grant) }) || !s.subscriptionPeerAuthorized(entry, grant.EgressID, now, grant.PeerKey()) || grant.IPv4EgressID != "" && !s.subscriptionPeerAuthorized(entry, grant.IPv4EgressID, now) {
 			continue
 		}
 		published := glivela.PublishedRoute{Grant: grant, Protocol: glivela.VLESSReality, EntryName: names[grant.Base.ID], BaseLink: links[grant.Base.ID], RouteLink: links[grant.Route.ID], BaseProtocolIdentity: base.Credential.Identity, RouteProtocolIdentity: route.Credential.Identity}
+		if grant.ClientChainID != "" {
+			for _, chain := range m.ClientChains {
+				if chain.ID == grant.ClientChainID {
+					published.Name = chain.Name
+					if issued := s.subscriptionNames[chain.ID]; issued != "" {
+						published.Name = issued
+					}
+				}
+			}
+			if published.Name == "" {
+				return subscriptionContent{}, errSubscriptionUnverified
+			}
+		}
 		label := s.subscriptionLandingLocked(grant.EgressID)
 		published.EgressRegionPrefix = importedLandingRegionPrefix(label.RegionCode)
 		published.IPv4EgressRegionPrefix = importedLandingRegionPrefix(s.subscriptionLandingLocked(grant.IPv4EgressID).RegionCode)
@@ -311,18 +324,26 @@ func (s *Store) subscriptionNodeEnabled(node Node, now time.Time) bool {
 	return !s.suspended(node.ID, now) && node.TransportTail == nil && node.Desired.Validate() == nil && validateNodeRole(node) == nil
 }
 
-func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now time.Time) bool {
+func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now time.Time, path ...string) bool {
+	key := landingID
+	if len(path) == 1 {
+		key = path[0]
+	}
 	for _, node := range s.nodes {
 		if node.ID != landingID || node.Desired.Landing == nil || !s.subscriptionNodeEnabled(node, now) {
 			continue
 		}
 		for _, peer := range entry.Desired.Entry.Peers {
-			if peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
-				_, authorized := s.boundClientListener(entry, node, peer)
+			if peer.PeerKey() == key && peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
+				chain, authorized := s.boundClientListener(entry, node, peer)
+				if authorized && chain.Relay != nil {
+					relay, err := chainRelay(s.nodes, chain)
+					return err == nil && s.subscriptionNodeEnabled(relay, now)
+				}
 				return authorized
 			}
 		}
-		if !node.Desired.Landing.HasServerListener() {
+		if key != landingID || !node.Desired.Landing.HasServerListener() {
 			return false
 		}
 		authorized, ok := node.RouteEntries[entry.ID]
@@ -343,18 +364,22 @@ func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now tim
 // Health checks only this entry's route, not unrelated entries which
 // happen to share the same landing. A verifier-only legacy identity cannot
 // authorize the new owned subscription.
-func (s *Store) subscriptionPeerReady(entry Node, landingID string, now time.Time) bool {
+func (s *Store) subscriptionPeerReady(entry Node, landingID string, now time.Time, path ...string) bool {
+	key := landingID
+	if len(path) == 1 {
+		key = path[0]
+	}
 	for _, node := range s.nodes {
 		if node.ID != landingID || !s.availableRuntime(entry, now) || !s.availableRuntime(node, now) {
 			continue
 		}
 		for _, peer := range entry.Desired.Entry.Peers {
-			if peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
-				_, err := s.publicPeerAcceptanceLocked(entry.CertificateID, landingAcceptanceRequest{SnapshotID: entry.ID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256, PeerID: landingID})
-				return err == nil && entryPeerFreshSource(entry, node, now, entry.Desired.EntryNetwork.Source.Address)
+			if peer.PeerKey() == key && peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
+				_, err := s.publicPeerAcceptanceLocked(entry.CertificateID, landingAcceptanceRequest{SnapshotID: entry.ID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256, PeerID: key})
+				return err == nil && entryPeerFreshSource(entry, node, now, entry.Desired.EntryNetwork.Source.Address, key)
 			}
 		}
-		if !entryPeerFresh(entry, node, now) {
+		if key != landingID || !entryPeerFresh(entry, node, now) {
 			return false
 		}
 		authorized, ok := node.RouteEntries[entry.ID]

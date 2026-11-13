@@ -92,3 +92,40 @@ func (p RoutePeer) outbound(tag string) map[string]any {
 	}
 	return map[string]any{"protocol": protocol, "tag": tag, "settings": map[string]any{"servers": []any{server}}}
 }
+
+// DialTransport is the only socket opened by the entry. The final SS2022
+// connection is carried inside the separately authorized intermediate hop.
+func (p RoutePeer) DialTransport() PrivateTransport {
+	if p.Relay == nil {
+		return p.Transport
+	}
+	r := p.Relay
+	address := r.ServerIPv6
+	if r.Transport == IPv4RelaySS2022 {
+		address = r.ServerIPv4
+	}
+	return PrivateTransport{Protocol: "ss2022", Key: r.Key, PublicAddress: address, Port: r.Port, ClientListenerID: p.ClientChainID}
+}
+
+func (r ClientChainRelay) ValidateServerRelay(final PrivateTransport) error {
+	key, err := base64.StdEncoding.Strict().DecodeString(r.Key)
+	ipv6 := r.Transport == "" && r.SourceIPv4 == "" && r.ServerIPv4 == "" && PublicTransportIPv6(r.SourceIPv6) && PublicTransportIPv6(r.ServerIPv6) && r.SourceIPv6 != r.ServerIPv6 && r.ServerIPv6 != final.PublicAddress && len(key) == 16
+	ipv4 := r.Transport == IPv4RelaySS2022 && r.SourceIPv6 == "" && r.ServerIPv6 == "" && PublicTransportIPv4(r.SourceIPv4) && PublicTransportIPv4(r.ServerIPv4) && r.SourceIPv4 != r.ServerIPv4 && len(key) == 32
+	if err != nil || !ValidIdentifier(r.NodeID) || !ValidIdentity(r.CertificateID) || r.Port < 24000 || r.Port > 24999 || (!ipv6 && !ipv4) || !PublicTransportIPv6(final.PublicAddress) || final.Protocol != "ss2022" || final.ClientListenerID == "" {
+		return errors.New("glivela: invalid server relay")
+	}
+	return nil
+}
+
+// ServerOutbounds retains both independent issued credentials and chains the
+// final proxy through the relay. Neither outbound has a direct fallback.
+func (p RoutePeer) ServerOutbounds(tag string) []any {
+	final := p.outbound(tag)
+	if p.Relay == nil {
+		return []any{final}
+	}
+	relayTag := tag + "-relay"
+	final["streamSettings"] = map[string]any{"sockopt": map[string]any{"dialerProxy": relayTag}}
+	relay := RoutePeer{Transport: p.DialTransport(), Port: p.Relay.Port}
+	return []any{final, relay.outbound(relayTag)}
+}

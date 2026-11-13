@@ -113,6 +113,9 @@ func testSS2022ProbeWithOfficialCore(t *testing.T, public bool) {
 		t.Log(coreLog.String())
 		t.Fatalf("real SS2022 probe did not pass: %+v %v", result, err)
 	}
+	if public {
+		testThreeHopCorePath(t, binary, digest, target, roots)
+	}
 	if os.Getenv("GLIVELA_TEST_TRANSPORT_FENCE") == "1" {
 		fence := landing.TransportFence{Binding: "isolated-ss2022-integration", Listeners: []landing.TransportListener{{Address: listenAddress, Port: port, Network: "tcp"}}}
 		if err := fence.Install(ctx); err != nil {
@@ -184,5 +187,55 @@ func testSS2022ProbeWithOfficialCore(t *testing.T, public bool) {
 	defer done()
 	if result, err := probeWithCore(wrong, p, binary, digest, roots); err == nil || result.Passed {
 		t.Fatal("wrong key accepted or silently fell back")
+	}
+}
+
+// Reuses the existing isolated public-address fixture and installed core.
+func testThreeHopCorePath(t *testing.T, binary, digest string, target *httptest.Server, roots *x509.CertPool) {
+	t.Helper()
+	const final = "2606:4700:4700::1111"
+	if err := exec.Command("ip", "-6", "address", "add", final+"/128", "dev", "lo", "nodad").Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = exec.Command("ip", "-6", "address", "del", final+"/128", "dev", "lo").Run() }()
+	finalKey := "AAECAwQFBgcICQoLDA0ODw=="
+	relayKey := "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+	inbound := func(tag, address string, port int, method, key string) any {
+		return map[string]any{"tag": tag, "listen": address, "port": port, "protocol": "shadowsocks", "settings": map[string]any{"method": method, "password": key, "network": "tcp"}}
+	}
+	freedom := func(tag, address string, port int) any {
+		return map[string]any{"tag": tag, "protocol": "freedom", "settings": map[string]any{"finalRules": []any{map[string]any{"action": "allow", "network": "tcp", "ip": []string{address}, "port": port}}}}
+	}
+	config := map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{inbound("relay", "8.8.4.4", 24001, glivela.IPv4ClientSS2022Method, relayKey), inbound("final", final, 24000, glivela.SS2022Method, finalKey)}, "outbounds": []any{map[string]any{"tag": "deny", "protocol": "blackhole"}, freedom("to-final", final+"/128", 24000), freedom("to-site", "127.0.0.1/32", target.Listener.Addr().(*net.TCPAddr).Port)}, "routing": map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": []string{"relay"}, "outboundTag": "to-final"}, map[string]any{"type": "field", "inboundTag": []string{"final"}, "outboundTag": "to-site"}}}}
+	raw, _ := json.Marshal(config)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "run", "-config", "stdin:")
+	cmd.Stdin = bytes.NewReader(raw)
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = cmd.Wait() }()
+	for i := 0; i < 100; i++ {
+		c, err := net.DialTimeout("tcp", "8.8.4.4:24001", 20*time.Millisecond)
+		if err == nil {
+			_ = c.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	relay := &glivela.ClientChainRelay{NodeID: "relay", CertificateID: strings.Repeat("b", 64), Transport: glivela.IPv4RelaySS2022, SourceIPv4: "8.8.8.8", ServerIPv4: "8.8.4.4", Port: 24001, Key: relayKey}
+	p := RouteProbe{AttemptID: "three-hop", SnapshotID: "snapshot", EntryID: "entry", LandingID: "landing", Revision: 1, ConfigSHA256: strings.Repeat("a", 64), SOCKSAddress: "[" + final + "]:24000", Target: target.URL, ExpectedExit: "8.8.8.8", Relay: relay, Transport: glivela.PrivateTransport{Protocol: "ss2022", Key: finalKey, PublicAddress: final, Port: 24000, ClientListenerID: "retained-chain"}}
+	if r, err := probeWithCore(ctx, p, binary, digest, roots); err != nil || !r.Passed || !r.TLSVerified {
+		t.Fatalf("actual three-hop TLS failed: %+v %v", r, err)
+	}
+	bad := *relay
+	bad.Key = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+	p.Relay = &bad
+	failed, stop := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer stop()
+	if r, err := probeWithCore(failed, p, binary, digest, roots); err == nil || r.Passed {
+		t.Fatal("bad relay silently bypassed intermediate hop")
 	}
 }

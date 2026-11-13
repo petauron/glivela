@@ -62,7 +62,7 @@ func pathMTUAllowed(d Desired, address string) bool {
 		return false
 	}
 	for _, peer := range d.Entry.Peers {
-		if peer.Transport.Endpoint(peer.Address) == address {
+		if peer.DialTransport().Endpoint(peer.Address) == address {
 			return true
 		}
 	}
@@ -101,7 +101,7 @@ func (s *Store) pathMTUTargetLocked(mode, id, landingID string) (Node, string, e
 				continue
 			}
 			for _, g := range a.Grants {
-				if g.ID != id || !g.Enabled || g.EgressID != landingID && g.IPv4EgressID != landingID {
+				if g.ClientChainID != "" || g.ID != id || !g.Enabled || g.EgressID != landingID && g.IPv4EgressID != landingID {
 					continue
 				}
 				t, ok := s.serverLatencyTargetLocked(g.EntryID, landingID)

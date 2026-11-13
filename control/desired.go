@@ -131,6 +131,12 @@ func (d Desired) clone() Desired {
 		plan.Credentials = slices.Clone(plan.Credentials)
 		plan.Grants = slices.Clone(plan.Grants)
 		plan.Peers = slices.Clone(plan.Peers)
+		for i := range plan.Peers {
+			if plan.Peers[i].Relay != nil {
+				r := *plan.Peers[i].Relay
+				plan.Peers[i].Relay = &r
+			}
+		}
 		d.Entry = &plan
 	}
 	if d.EntryNetwork != nil {

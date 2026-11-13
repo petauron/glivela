@@ -60,7 +60,7 @@ func validateEntryHealth(desired Desired, health *EntryHealthReport) error {
 		return invalid
 	}
 	for _, peer := range desired.EntryNetwork.Peers {
-		observation, found := health.Peers[peer.EgressID]
+		observation, found := health.Peers[peer.PeerKey()]
 		status := observation.Status
 		if !found || observation.Identity != peer.Identity || status.Revision != desired.Revision || status.CheckedAt.After(health.SampledAt) || status.DurationMS < 0 || status.DurationMS > 30000 || len(status.Reason) > 128 || strings.ContainsAny(status.Reason, "\x00\r\n") {
 			return invalid
@@ -73,7 +73,7 @@ func validateEntryHealth(desired Desired, health *EntryHealthReport) error {
 		case "healthy":
 			link := "direct"
 			for _, route := range desired.Entry.Peers {
-				if route.EgressID == peer.EgressID && route.Transport.PublicAddress != "" {
+				if route.PeerKey() == peer.PeerKey() && route.Transport.PublicAddress != "" {
 					link = "authenticated"
 				}
 			}
@@ -99,7 +99,7 @@ func validateStoredEntryHealth(desired Desired, health *EntryHealthReport) error
 		return errors.New("control: invalid stored entry health")
 	}
 	for _, p := range desired.EntryNetwork.Peers {
-		h, ok := health.Peers[p.EgressID]
+		h, ok := health.Peers[p.PeerKey()]
 		if !ok || h.Identity != p.Identity || h.Status.Revision != desired.Revision ||
 			h.Status.CheckedAt.After(health.SampledAt) || h.Status.DurationMS < 0 || h.Status.DurationMS > 30000 ||
 			(h.Status.State != "healthy" && h.Status.State != "blocked" && h.Status.State != "degraded") ||
@@ -119,7 +119,11 @@ func entryPeerFresh(entry Node, target Node, now time.Time) bool {
 
 // Bound public listeners authorize their source through the original client
 // enrollment; legacy server transports retain their RouteEntries requirement.
-func entryPeerFreshSource(entry Node, target Node, now time.Time, source string) bool {
+func entryPeerFreshSource(entry Node, target Node, now time.Time, source string, path ...string) bool {
+	key := target.ID
+	if len(path) == 1 {
+		key = path[0]
+	}
 	if entry.Desired.Entry == nil || entry.Desired.EntryNetwork == nil || entry.Receipt == nil || entry.Receipt.EntryHealth == nil || validateEntryHealth(entry.Desired, entry.Receipt.EntryHealth) != nil {
 		return false
 	}
@@ -130,7 +134,7 @@ func entryPeerFreshSource(entry Node, target Node, now time.Time, source string)
 	if target.Desired.Landing == nil || health.Source == nil || health.Source.Address != source {
 		return false
 	}
-	peer, found := health.Peers[target.ID]
+	peer, found := health.Peers[key]
 	if !found || peer.Identity.Address != target.Desired.Landing.Address {
 		return false
 	}
@@ -171,7 +175,7 @@ func entryRouteMatches(entry Node, probe RouteProbe) bool {
 		return false
 	}
 	for _, peer := range entry.Desired.EntryNetwork.Peers {
-		if peer.EgressID == probe.LandingID {
+		if peer.ClientChainID == "" && peer.EgressID == probe.LandingID {
 			return peer.Target == probe.Target && peer.ExpectedExit == probe.ExpectedExit
 		}
 	}

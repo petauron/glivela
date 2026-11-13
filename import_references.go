@@ -160,6 +160,11 @@ func (m ImportMaterial) validateReferences() error {
 	managed := map[string]bool{}
 	for _, a := range m.Plan.Accounts {
 		for _, g := range a.Grants {
+			if g.ClientChainID != "" && !slices.ContainsFunc(m.ClientChains, func(c ClientChain) bool {
+				return c.ID == g.ClientChainID && c.Relay != nil && c.AccountID == a.Account.ID && c.EntryID == g.EntryID && c.EgressID == g.EgressID && !m.DeletedClientChains[c.ID]
+			}) {
+				return invalid
+			}
 			if cert, ok := m.ManagedRouteLandings[g.ID]; ok {
 				if len(cert) != 64 || strings.Trim(cert, "0123456789abcdef") != "" || g.IPv4EgressID != "" {
 					return invalid

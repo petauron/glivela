@@ -127,6 +127,10 @@ func (s *Store) latencyTargetsLocked() map[string]latencyTarget {
 			continue
 		}
 		for _, peer := range entry.Desired.Entry.Peers {
+			// A single TCP sample cannot describe both legs of a three-hop path.
+			if peer.Relay != nil {
+				continue
+			}
 			node, ok := landings[peer.EgressID]
 			if !ok || node.Desired.Landing == nil {
 				continue

@@ -14,6 +14,7 @@ import (
 )
 
 type RouteChange struct {
+	ClientChainID    string `json:"clientChainId,omitempty"`
 	ID               string `json:"id"`
 	AccountID        string `json:"accountId"`
 	EntryID          string `json:"entryId"`
@@ -47,13 +48,35 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	if ai < 0 {
 		return AccountChangeResult{}, invalid
 	}
+	if change.ClientChainID != "" && change.Enabled {
+		found := false
+		for _, entry := range s.nodes {
+			if entry.ID != change.EntryID || entry.Desired.Entry == nil {
+				continue
+			}
+			for _, peer := range entry.Desired.Entry.Peers {
+				if peer.ClientChainID != change.ClientChainID || peer.EgressID != change.EgressID {
+					continue
+				}
+				for _, target := range s.nodes {
+					if target.ID == change.EgressID {
+						c, ok := s.boundClientListener(entry, target, peer)
+						found = ok && c.AccountID == change.AccountID && c.Relay != nil
+					}
+				}
+			}
+		}
+		if !found {
+			return AccountChangeResult{}, invalid
+		}
+	}
 	if change.Enabled {
 		for _, entry := range s.nodes {
 			if entry.ID != change.EntryID || entry.Desired.Entry == nil {
 				continue
 			}
 			for _, peer := range entry.Desired.Entry.Peers {
-				if peer.EgressID != change.EgressID || peer.Transport.ClientListenerID == "" {
+				if peer.EgressID != change.EgressID || peer.ClientChainID != change.ClientChainID || peer.Transport.ClientListenerID == "" {
 					continue
 				}
 				authorized := false
@@ -72,7 +95,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	account := &accounts[ai]
 	gi := slices.IndexFunc(account.Grants, func(g glivela.RouteGrant) bool { return g.ID == change.ID })
 	deleted := next.DeletedRoutes[change.ID]
-	same := gi >= 0 && account.Grants[gi].EntryID == change.EntryID && account.Grants[gi].EgressID == change.EgressID && account.Grants[gi].IPv4EgressID == change.IPv4EgressID && account.Grants[gi].HideNative == change.HideNative && account.Grants[gi].Enabled == change.Enabled && deleted == change.Delete
+	same := gi >= 0 && account.Grants[gi].EntryID == change.EntryID && account.Grants[gi].EgressID == change.EgressID && account.Grants[gi].IPv4EgressID == change.IPv4EgressID && account.Grants[gi].ClientChainID == change.ClientChainID && account.Grants[gi].HideNative == change.HideNative && account.Grants[gi].Enabled == change.Enabled && deleted == change.Delete
 	if change.Delete && (change.Enabled || gi < 0 || account.Grants[gi].HideNative != change.HideNative) || deleted && !same {
 		return AccountChangeResult{}, invalid
 	}
@@ -93,7 +116,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 		if gi >= 0 {
 			grant := &account.Grants[gi]
 			// Changing a route's exits/identity is a new grant, not credential reuse.
-			if grant.EntryID != change.EntryID || grant.EgressID != change.EgressID || grant.IPv4EgressID != change.IPv4EgressID || grant.DesiredRev == math.MaxUint64 {
+			if grant.EntryID != change.EntryID || grant.EgressID != change.EgressID || grant.IPv4EgressID != change.IPv4EgressID || grant.ClientChainID != change.ClientChainID || grant.DesiredRev == math.MaxUint64 {
 				return AccountChangeResult{}, invalid
 			}
 			if !change.Delete {
@@ -127,7 +150,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				return AccountChangeResult{}, err
 			}
 			credential := glivela.Credential{ID: cid.String(), AccountID: change.AccountID, Kind: glivela.RouteCredential, User: glivela.RouteUser(change.ID), Identity: glivela.Identity(identity.String()), EntryID: change.EntryID, EgressID: change.EgressID, Enabled: true}
-			grant := glivela.RouteGrant{ID: change.ID, AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, IPv4EgressID: change.IPv4EgressID, InboundTag: next.Endpoints[ei].Reality.InboundTag, Base: account.Credentials[base], Route: credential, Mode: glivela.FixedMode, Enabled: true, HideNative: change.HideNative, DesiredRev: 1}
+			grant := glivela.RouteGrant{ClientChainID: change.ClientChainID, ID: change.ID, AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, IPv4EgressID: change.IPv4EgressID, InboundTag: next.Endpoints[ei].Reality.InboundTag, Base: account.Credentials[base], Route: credential, Mode: glivela.FixedMode, Enabled: true, HideNative: change.HideNative, DesiredRev: 1}
 			if grant.Validate() != nil {
 				return AccountChangeResult{}, invalid
 			}
@@ -245,14 +268,14 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 		}
 		used := map[string]bool{}
 		for _, grant := range plan.Grants {
-			used[grant.EgressID] = true
+			used[grant.PeerKey()] = true
 			if grant.IPv4EgressID != "" {
 				used[grant.IPv4EgressID] = true
 			}
 		}
 		// Disabled grants retain their transport until explicit resource retirement.
 		for id := range used {
-			if !slices.ContainsFunc(plan.Peers, func(p glivela.RoutePeer) bool { return p.EgressID == id }) {
+			if !slices.ContainsFunc(plan.Peers, func(p glivela.RoutePeer) bool { return p.PeerKey() == id }) {
 				return nil, errors.New("control: enroll authorized entry transport before granting route")
 			}
 		}
@@ -288,14 +311,18 @@ func (s *Store) managedRouteLandingCertificate(change RouteChange) (string, erro
 		if entry.ID != change.EntryID {
 			continue
 		}
-		proof, err := s.publicPeerAcceptanceLocked(cert, landingAcceptanceRequest{SnapshotID: entry.ID, PeerID: change.EgressID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256})
+		peerKey := change.EgressID
+		if change.ClientChainID != "" {
+			peerKey = change.ClientChainID
+		}
+		proof, err := s.publicPeerAcceptanceLocked(cert, landingAcceptanceRequest{SnapshotID: entry.ID, PeerID: peerKey, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256})
 		if err != nil {
 			return "", refused
 		}
 		for targetCert, target := range s.nodes {
 			if target.ID == proof.LandingID {
 				for _, peer := range entry.Desired.Entry.Peers {
-					if peer.EgressID == target.ID && peer.Transport.ClientListenerID != "" {
+					if peer.EgressID == target.ID && peer.ClientChainID == change.ClientChainID && peer.Transport.ClientListenerID != "" {
 						c, ok := s.boundClientListener(entry, target, peer)
 						if !ok || c.AccountID != change.AccountID {
 							return "", refused
