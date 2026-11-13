@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.148](https://github.com/petauron/glivela/compare/v0.1.0-alpha.147...v0.1.0-alpha.148) (2026-11-13)
+
+
+### Bug Fixes
+
+* safely retry failed peer startup acceptance ([#157](https://github.com/petauron/glivela/issues/157)) ([b6a5ec0](https://github.com/petauron/glivela/commit/b6a5ec07becfd09d5b440cb427d31f301a30c9ba))
+
 ## [0.1.0-alpha.147](https://github.com/petauron/glivela/compare/v0.1.0-alpha.146...v0.1.0-alpha.147) (2026-11-13)
 
 
