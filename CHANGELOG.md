@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.142](https://github.com/petauron/glivela/compare/v0.1.0-alpha.141...v0.1.0-alpha.142) (2026-11-13)
+
+
+### Bug Fixes
+
+* **node:** remove exact IPv6 landing policy on public interfaces ([#142](https://github.com/petauron/glivela/issues/142)) ([c25fbbf](https://github.com/petauron/glivela/commit/c25fbbf1a281ee30090b83c11be992f7279832b3))
+* **subscription:** advertise TCP-only routes to URI clients ([#141](https://github.com/petauron/glivela/issues/141)) ([3e7272d](https://github.com/petauron/glivela/commit/3e7272dac7c777fcd1af343f32aa9c6c8bf309eb))
+
 ## [0.1.0-alpha.141](https://github.com/petauron/glivela/compare/v0.1.0-alpha.140...v0.1.0-alpha.141) (2026-11-13)
 
 
