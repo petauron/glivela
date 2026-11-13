@@ -381,7 +381,13 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 		if err != nil || !sameProtocolTransport(routed, base, VLESSReality) || routed.User.Username() == base.User.Username() || identities[string(VLESSReality)+"\x00"+routed.User.Username()] {
 			return nil, errors.New("glivela: invalid routed credential")
 		}
-		routeLink, _, _ := strings.Cut(strings.TrimSpace(item.RouteLink), "#")
+		// URI clients such as Shadowrocket otherwise default to allowing UDP,
+		// while server-forwarded grants intentionally accept TCP only.
+		query := routed.Query()
+		query.Set("udp", "0")
+		routed.RawQuery = query.Encode()
+		routed.Fragment, routed.RawFragment = "", ""
+		routeLink := routed.String()
 		name := routeName(item)
 		if label := routeLabels[item.Grant.ID]; label != "" {
 			name = label
