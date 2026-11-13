@@ -75,11 +75,11 @@ func SubscriptionHandler(store *Store) http.Handler {
 			return
 		}
 		profile := query.Get("profile")
-		if profile != "" && profile != "nodes" && profile != "aethersailor" || profile == "aethersailor" && format == "links" || format == "shadowrocket" && (profile != "aethersailor" || target != "") {
+		if profile != "" && profile != "nodes" && profile != "aethersailor" || profile == "aethersailor" && format == "links" || format == "shadowrocket" && target != "" {
 			http.Error(w, "invalid profile", http.StatusBadRequest)
 			return
 		}
-		mihomo := profile == "aethersailor" || format == "mihomo" || target != "" || format == "" && (strings.Contains(strings.ToLower(r.UserAgent()), "clash") || strings.Contains(strings.ToLower(r.UserAgent()), "mihomo"))
+		mihomo := format == "shadowrocket" || profile == "aethersailor" || format == "mihomo" || target != "" || format == "" && (strings.Contains(strings.ToLower(r.UserAgent()), "clash") || strings.Contains(strings.ToLower(r.UserAgent()), "mihomo"))
 		content, err := store.subscription(r.Context(), token, mihomo)
 		if errors.Is(err, errSubscriptionMissing) {
 			http.NotFound(w, r)
@@ -100,6 +100,14 @@ func SubscriptionHandler(store *Store) http.Handler {
 				http.Error(w, "subscription profile unavailable", http.StatusServiceUnavailable)
 				return
 			}
+		}
+		if format == "shadowrocket" && profile != "aethersailor" {
+			content.body, err = glivela.RenderShadowrocketNodes(content.body)
+			if err != nil {
+				http.Error(w, "subscription nodes unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			content.contentType = "text/plain; charset=utf-8"
 		}
 		w.Header().Set("Content-Type", content.contentType)
 		w.Header().Set("Subscription-Userinfo", content.userInfo)
