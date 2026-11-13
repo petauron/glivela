@@ -36,7 +36,7 @@ func RenderShadowrocketProfile(body []byte) ([]byte, error) {
 		return nil, err
 	}
 	var out strings.Builder
-	out.WriteString("# Glivela: Aethersailor Full for Shadowrocket; CC BY-SA 4.0.\n# Import the matching Mihomo node subscription first; preserve its names/order.\n# Keep local DNS and company/private overrides in your local configuration.\n# https://github.com/Aethersailor/Custom_OpenClash_Rules/tree/882e404049f0cfce5d2438efb8943527f9284caf\n# https://creativecommons.org/licenses/by-sa/4.0/\n\n[Proxy Group]\n")
+	out.WriteString("# Glivela: Aethersailor Full for Shadowrocket; CC BY-SA 4.0.\n# Import the matching Mihomo node subscription first; preserve its names/order.\n# Keep local DNS and company/private overrides in your local configuration.\n# Compatibility: DOMAIN-REGEX in upstream rule sets and SRC-PORT are unsupported.\n# Unmatched traffic follows later rules or FINAL; this is not an exact Mihomo equivalent.\n# https://github.com/Aethersailor/Custom_OpenClash_Rules/tree/882e404049f0cfce5d2438efb8943527f9284caf\n# https://creativecommons.org/licenses/by-sa/4.0/\n\n[Proxy Group]\n")
 	for _, g := range profile.Groups {
 		if !shadowrocketPolicyName(g.Name) || len(g.Proxies) == 0 || (g.Type != "select" && g.Type != "url-test") {
 			return nil, errors.New("subscription profile: unsupported Shadowrocket group")

@@ -94,3 +94,5 @@ The account panel offers **仅节点** (the existing format negotiation and node
 The Full profile includes policy groups and rules, without DNS, TUN, listeners or local network settings. It does not edit installed client profiles. Keep local company/private-network overrides ahead of imported rules; clients need compatible geosite/geoip data and access to rule-provider downloads. See [template provenance and adaptation](subscription_profiles/README.md).
 
 Shadowrocket 重度分流：在订阅类型选择 Aethersailor 后选择“小火箭”，先在首页导入配套节点订阅，再在配置页下载原生 `.conf`。保留原配置并合并已有 DNS、公司与内网优先规则后使用；下载配置不会自动完成本地合并。
+
+小火箭原生兼容范围：保留分类、策略组及规则顺序；不支持上游 `DOMAIN-REGEX` 和 `SRC-PORT`。未匹配流量继续匹配后续规则或兜底策略，不保证与 OpenClash 完全等价。

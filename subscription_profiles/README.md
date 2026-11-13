@@ -27,3 +27,5 @@ MetaCubeX/meta-rules-dat commit `2963a49408bbc37f2c2ffa6e8329fe11076a816b`,
 the native-text form of the same category data; no MRS binary is passed to the
 client. These public rules contain no subscription credentials. Unsupported
 policy-name delimiters fail the export rather than changing node identities.
+
+小火箭原生兼容范围：保留分类、策略组及规则顺序；不支持上游 `DOMAIN-REGEX` 和 `SRC-PORT`。未匹配流量继续匹配后续规则或兜底策略，不保证与 OpenClash 完全等价。
