@@ -177,3 +177,33 @@ superseded contaminated restore copies only after checking their task and proces
 references. Preserve other owners' data; never treat an encrypted backup as proof
 that a target secret has been erased. Storage snapshots and recycle bins must be
 included in the actual cleanup inventory when present.
+
+
+## Pruning a retired entry
+
+The administrator mTLS endpoint `POST /v1/admin/prune-retired-entry` accepts
+`id`, `certificateId`, decimal-string `expectedRevision`, and `confirmation`
+which must equal `id`. It only removes an already-retired, offline entry with
+an exact enrolled identity and revision, no pending transport/network/speed
+operation, and no dependent client chain or owned server resource. Online entries
+and mismatched identities are refused. Any change to a surviving runtime is also
+refused; this operation never reconciles or reinstalls another node.
+
+The encrypted business source is committed first. `prunedEntries` retains the
+certificate revocation fence, endpoint/service/inbound identifiers and original
+quota observations. Original account credentials, usage members, watermarks,
+subscription identities, display-name evidence and source archive are unchanged.
+Executable endpoint configuration (including SNI, listener and TLS configuration)
+is removed, followed by its recoverable node projection. A restart or identical
+retry completes an interrupted projection without restoring historical counters.
+The retired identity and certificate cannot be enrolled again.
+
+This is a forward-only business-state change. An older program must not open it;
+program rollback requires a verified matching pre-change recovery point. Existing
+automatic backups can supply that point after their contents and recovery scope
+are verified; repeated diagnostic actions must not generate extra full snapshots.
+
+DNS deletion is separate: check active listeners, publications, subscriptions and
+other services first, and remove only an unused operator-owned record. Historical
+source evidence is not another live configuration writer and is not rewritten to
+remove old names. Third-party DNS records are never deleted by this operation.
