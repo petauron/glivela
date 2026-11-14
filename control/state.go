@@ -137,31 +137,10 @@ func OpenStore(path string) (*Store, error) {
 		if node.Receipt != nil && validateEntryTraffic(node.Desired, node.Receipt.Traffic) != nil {
 			return nil, errors.New("control: invalid stored traffic observation")
 		}
-		staleChecks := false
-		for entry, check := range node.Checks {
-			// An older, well-formed attempt cannot prove the current landing.
-			// Discard the complete inventory rather than reuse partial results;
-			// malformed, future and mismatched current attempts still fail closed.
-			outdated := node.Desired.Landing != nil && check.Request.LandingID == node.ID && check.Request.Revision < node.Desired.Revision && check.Request.ConfigSHA256 != node.Desired.ConfigSHA256
-			// IPv6-only plans retain their former source grants, but cannot
-			// execute server probes. Discard only exact, unfinished attempts;
-			// malformed/current mismatches and completed results still fail closed.
-			inactivePending := node.Desired.Landing != nil && !node.Desired.Landing.HasServerListener() && check.Result == nil && routeMatchesLanding(check.Request, node)
-			if entry != check.Request.EntryID || !outdated && !inactivePending && !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
-				return nil, errors.New("control: invalid stored route check")
-			}
-			if len(node.Checks) > 64 || !outdated && (check.Request.Revision != node.Desired.Revision || check.Request.ConfigSHA256 != node.Desired.ConfigSHA256) || (check.Result == nil) != check.ReceivedAt.IsZero() {
-				return nil, errors.New("control: inconsistent stored route check")
-			}
-			staleChecks = staleChecks || outdated || inactivePending
-		}
-		// Enrollment can durably retain only some authorized source bindings.
-		// Preserve that configuration, but never reuse partial health proof.
-		if node.Desired.Landing != nil && len(node.RouteEntries) != len(node.Desired.Landing.Sources) {
-			staleChecks = true
-		}
-		if staleChecks {
-			node.Checks = nil
+		var checksErr error
+		node, checksErr = normalizeStoredRouteChecks(node)
+		if checksErr != nil {
+			return nil, checksErr
 		}
 		seen[node.ID] = true
 		s.nodes[node.CertificateID] = node
@@ -182,6 +161,39 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// normalizeStoredRouteChecks applies the same strict startup validation to
+// retained probe evidence. It may discard stale checks, never identities,
+// desired configuration, authorization or traffic observations.
+func normalizeStoredRouteChecks(node Node) (Node, error) {
+	staleChecks := false
+	for entry, check := range node.Checks {
+		// An older, well-formed attempt cannot prove the current landing.
+		// Discard the complete inventory rather than reuse partial results;
+		// malformed, future and mismatched current attempts still fail closed.
+		outdated := node.Desired.Landing != nil && check.Request.LandingID == node.ID && check.Request.Revision < node.Desired.Revision && check.Request.ConfigSHA256 != node.Desired.ConfigSHA256
+		// IPv6-only plans retain their former source grants, but cannot
+		// execute server probes. Discard only exact, unfinished attempts;
+		// malformed/current mismatches and completed results still fail closed.
+		inactivePending := node.Desired.Landing != nil && !node.Desired.Landing.HasServerListener() && check.Result == nil && routeMatchesLanding(check.Request, node)
+		if entry != check.Request.EntryID || !outdated && !inactivePending && !routeTargetsLanding(check.Request, node) || check.Request.Validate() != nil || !glivela.ValidIdentity(check.CertificateID) || check.IssuedAt.IsZero() || check.Result != nil && validateRouteResult(check.Request, *check.Result) != nil {
+			return Node{}, errors.New("control: invalid stored route check")
+		}
+		if len(node.Checks) > 64 || !outdated && (check.Request.Revision != node.Desired.Revision || check.Request.ConfigSHA256 != node.Desired.ConfigSHA256) || (check.Result == nil) != check.ReceivedAt.IsZero() {
+			return Node{}, errors.New("control: inconsistent stored route check")
+		}
+		staleChecks = staleChecks || outdated || inactivePending
+	}
+	// Enrollment can durably retain only some authorized source bindings.
+	// Preserve that configuration, but never reuse partial health proof.
+	if node.Desired.Landing != nil && len(node.RouteEntries) != len(node.Desired.Landing.Sources) {
+		staleChecks = true
+	}
+	if staleChecks {
+		node.Checks = nil
+	}
+	return node, nil
 }
 
 // Put is a local controller operation, never exposed on the node HTTP API.
