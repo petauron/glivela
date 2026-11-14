@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.155](https://github.com/petauron/glivela/compare/v0.1.0-alpha.154...v0.1.0-alpha.155) (2026-11-14)
+
+
+### Features
+
+* support managed public 443 dual-stack REALITY ingress ([#176](https://github.com/petauron/glivela/issues/176)) ([f9f5838](https://github.com/petauron/glivela/commit/f9f5838fd157d573a2863ea7930172ce53b21320))
+
 ## [0.1.0-alpha.154](https://github.com/petauron/glivela/compare/v0.1.0-alpha.153...v0.1.0-alpha.154) (2026-11-14)
 
 
