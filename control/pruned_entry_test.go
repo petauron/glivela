@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func prunableEntryFixture(t *testing.T) (*Store, PruneRetiredEntryChange) {
+func prunableEntryFixture(t *testing.T) (*Store, RetireLandingChange) {
 	t.Helper()
 	s, d, cert, _ := subscriptionFixture(t, false)
 	next := s.business.material
@@ -31,7 +31,7 @@ func prunableEntryFixture(t *testing.T) (*Store, PruneRetiredEntryChange) {
 	if err := s.Put(other); err != nil {
 		t.Fatal(err)
 	}
-	return s, PruneRetiredEntryChange{ID: "entry-example", CertificateID: cert, ExpectedRevision: d.Revision, Confirmation: "entry-example"}
+	return s, RetireLandingChange{ID: "entry-example", CertificateID: cert, ExpectedRevision: d.Revision, Confirmation: "entry-example", ConfirmHostReturned: true, ExpectedAvailabilityRevision: s.availability.Revision}
 }
 
 func TestPruneRetiredEntryPreservesLedgerAndSurvivingNodes(t *testing.T) {
@@ -44,7 +44,7 @@ func TestPruneRetiredEntryPreservesLedgerAndSurvivingNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.subscriptionNames = names.Names
-	if err := s.PruneRetiredEntry(context.Background(), change); err != nil {
+	if err := s.RetireReturnedEntry(context.Background(), change); err != nil {
 		t.Fatal(err)
 	}
 	after := s.business.material
@@ -60,7 +60,7 @@ func TestPruneRetiredEntryPreservesLedgerAndSurvivingNodes(t *testing.T) {
 		}
 	}
 	committed := businessBytes(t, s)
-	if err := s.PruneRetiredEntry(context.Background(), change); err != nil || !bytes.Equal(committed, businessBytes(t, s)) {
+	if err := s.RetireReturnedEntry(context.Background(), change); err != nil || !bytes.Equal(committed, businessBytes(t, s)) {
 		t.Fatal("retry is not idempotent", err)
 	}
 	loaded, err := OpenStore(s.path)
@@ -111,7 +111,7 @@ func TestPruneRetiredEntryRejectsUnsafeRequests(t *testing.T) {
 			}
 			nodes := maps.Clone(s.nodes)
 			raw := businessBytes(t, s)
-			if s.PruneRetiredEntry(context.Background(), c) == nil {
+			if s.RetireReturnedEntry(context.Background(), c) == nil {
 				t.Fatal("unsafe cleanup accepted")
 			}
 			if !reflect.DeepEqual(nodes, s.nodes) || !bytes.Equal(raw, businessBytes(t, s)) {
@@ -131,7 +131,7 @@ func TestPruneRetiredEntryRecoversPartialProjectionWrite(t *testing.T) {
 	if err := os.Mkdir(s.path, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if s.PruneRetiredEntry(context.Background(), c) == nil {
+	if s.RetireReturnedEntry(context.Background(), c) == nil {
 		t.Fatal("failed projection reported success")
 	}
 	committed := businessBytes(t, s)
@@ -157,7 +157,7 @@ func TestPruneRetiredEntryRecoversPartialProjectionWrite(t *testing.T) {
 	if !reflect.DeepEqual(original, loaded.business.material.Plan) || !bytes.Equal(committed, businessBytes(t, loaded)) {
 		t.Fatal("recovery rewrote history")
 	}
-	if err := loaded.PruneRetiredEntry(context.Background(), c); err != nil {
+	if err := loaded.RetireReturnedEntry(context.Background(), c); err != nil {
 		t.Fatal("retry failed", err)
 	}
 }
@@ -176,7 +176,7 @@ func TestPruneRetiredEntryHTTPRequiresAdministrator(t *testing.T) {
 		cert *x509.Certificate
 		want int
 	}{{nil, 401}, {nodeCert, 403}, {adminCert, 200}} {
-		req := httptest.NewRequest(http.MethodPost, "/v1/admin/prune-retired-entry", bytes.NewReader(raw))
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/retire-returned-entry", bytes.NewReader(raw))
 		req.Header.Set("Content-Type", "application/json")
 		if v.cert != nil {
 			req.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{v.cert}, VerifiedChains: [][]*x509.Certificate{{v.cert, ca}}}
@@ -186,5 +186,48 @@ func TestPruneRetiredEntryHTTPRequiresAdministrator(t *testing.T) {
 		if w.Code != v.want {
 			t.Fatal(w.Code, w.Body.String())
 		}
+	}
+}
+
+func TestPruneRetiredEntryPreservesDeferredSourceInventory(t *testing.T) {
+	s, d, cert, landingCert := subscriptionFixture(t, true)
+	if err := s.SetAvailability("entry-example", "maintenance", time.Time{}, s.availability.Revision); err != nil {
+		t.Fatal(err)
+	}
+	next := s.business.material
+	next.Endpoints = append([]glivela.ImportEndpoint(nil), next.Endpoints...)
+	next.Endpoints[0].Retired = true
+	accounts := append([]glivela.ImportAccount(nil), next.Plan.Accounts...)
+	for i := range accounts {
+		accounts[i].Grants = append([]glivela.RouteGrant(nil), accounts[i].Grants...)
+		for j := range accounts[i].Grants {
+			accounts[i].Grants[j].Enabled = false
+		}
+	}
+	var err error
+	next.Plan, err = glivela.PlanImport(accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveOwnedBusinessLocked(next); err != nil {
+		t.Fatal(err)
+	}
+	before := s.nodes[landingCert]
+	c := RetireLandingChange{ID: "entry-example", CertificateID: cert, ExpectedRevision: d.Revision, ExpectedAvailabilityRevision: s.availability.Revision, Confirmation: "entry-example", ConfirmHostReturned: true}
+	if err := s.RetireReturnedEntry(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, s.nodes[landingCert]) {
+		t.Fatal("retained landing policy or proof changed")
+	}
+	loaded, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = loaded.LoadBusiness(s.business.keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.deferredEntries(loaded.nodes[landingCert], time.Now())[c.ID] {
+		t.Fatal("historical verifier became active again")
 	}
 }

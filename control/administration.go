@@ -170,20 +170,6 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			_ = json.NewEncoder(w).Encode(struct {
 				Retired bool `json:"retired"`
 			}{true})
-		case "/v1/admin/prune-retired-entry":
-			var input PruneRetiredEntryChange
-			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
-				http.Error(w, "invalid cleanup request", http.StatusBadRequest)
-				return
-			}
-			if store.PruneRetiredEntry(r.Context(), input) != nil {
-				http.Error(w, "retired entry cleanup not confirmed", http.StatusConflict)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(struct {
-				Pruned bool `json:"pruned"`
-			}{true})
 		case "/v1/admin/retire-entry":
 			var input RetireEntryChange
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
