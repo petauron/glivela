@@ -108,7 +108,26 @@ func (s *Store) retireReturnedNode(ctx context.Context, change RetireLandingChan
 	if err := s.commit(projected); err != nil {
 		return err
 	}
-	return s.cleanLandingHistoryLocked(change.ID)
+	if err := s.cleanLandingHistoryLocked(change.ID); err != nil {
+		return err
+	}
+	if entry {
+		if _, found := s.availability.Nodes[change.ID]; found {
+			if s.availability.Revision == math.MaxUint64 {
+				return errors.New("control: availability revision exhausted")
+			}
+			v := availabilityState{Version: 1, Revision: s.availability.Revision + 1, Nodes: maps.Clone(s.availability.Nodes)}
+			delete(v.Nodes, change.ID)
+			if err := v.validate(); err != nil {
+				return err
+			}
+			if err := writeControlState(filepath.Join(filepath.Dir(s.path), "availability.json"), v); err != nil {
+				return err
+			}
+			s.availability = v
+		}
+	}
+	return nil
 }
 
 func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange) (glivela.ImportMaterial, map[string]bool, error) {
