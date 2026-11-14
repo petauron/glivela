@@ -189,8 +189,8 @@ func collectHistoricalSecrets(raw []byte) []string {
 	return words
 }
 
-func purgeArchiveHistory(a archive, ids map[string]bool, sourceKey []byte, protected map[string]bool) (archive, historyRedaction, error) {
-	r := historyRedaction{ids: map[string]bool{}}
+func purgeArchiveHistory(a archive, ids map[string]bool, sourceKey []byte, protected map[string]bool, additional ...string) (archive, historyRedaction, error) {
+	r := historyRedaction{ids: map[string]bool{}, words: slices.Clone(additional)}
 	for id := range ids {
 		r.ids[id] = true
 	}
@@ -707,6 +707,7 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	confirmed := f.Bool("confirm-stopped-writers", false, "both writers are stopped; permanently remove target historical secrets")
 	audit := f.String("audit-file", "", "new private file for nonrecoverable token fingerprints")
 	historyFiles := f.String("history-file-list", "", "private JSON list of explicit inactive history JSON files")
+	wordsFile := f.String("redaction-words-file", "", "private JSON array of target-only historical values absent from the original migration")
 	if f.Parse(args) != nil || f.NArg() != 0 || os.Geteuid() != 0 || !*confirmed || *directory == "" || *center == "" {
 		return errors.New("confirmed offline root history purge required")
 	}
@@ -783,7 +784,25 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 			archiveIDs[host] = true
 		}
 	}
-	a, r, err := purgeArchiveHistory(a, archiveIDs, sourceKey, protected)
+	var additional []string
+	if *wordsFile != "" {
+		raw, err := privateFile(*wordsFile, 1<<20)
+		if err != nil {
+			return err
+		}
+		if json.Unmarshal(raw, &additional) != nil || len(additional) > 1024 {
+			return errors.New("invalid explicit redaction values")
+		}
+		for _, word := range additional {
+			if len(word) < 8 || len(word) > 16384 || !utf8.ValidString(word) {
+				return errors.New("invalid explicit redaction value")
+			}
+			if protected[word] {
+				return errors.New("explicit redaction value is shared by a live identity")
+			}
+		}
+	}
+	a, r, err := purgeArchiveHistory(a, archiveIDs, sourceKey, protected, additional...)
 	if err != nil {
 		return err
 	}
