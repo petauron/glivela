@@ -206,6 +206,13 @@ func (s *Store) Put(node Node) error {
 func (s *Store) put(node Node, previousVerifierCertificate string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.business != nil {
+		for _, entry := range s.business.material.PrunedEntries {
+			if entry.CertificateID == node.CertificateID {
+				return errors.New("control: entry certificate is revoked")
+			}
+		}
+	}
 	if s.entryRetiredLocked(node.ID) {
 		return errors.New("control: entry is retired")
 	}

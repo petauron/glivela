@@ -66,6 +66,10 @@ func loadSubscriptionPresentation(directory string, m glivela.ImportMaterial) (s
 		return subscriptionPresentation{}, err
 	}
 	known := map[string]bool{}
+	// Archived display names remain evidence, never an executable endpoint.
+	for id := range m.PrunedEntries {
+		known[id] = true
+	}
 	for _, endpoint := range m.Endpoints {
 		known[endpoint.Reality.EntryID] = true
 	}
