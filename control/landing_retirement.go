@@ -13,6 +13,7 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 type RetireLandingChange struct {
@@ -64,7 +65,7 @@ func (s *Store) retireReturnedNode(ctx context.Context, change RetireLandingChan
 		if !ok || node.ID != change.ID || (node.Desired.Entry != nil) != entry || node.Desired.Revision != change.ExpectedRevision || node.TransportTail != nil {
 			return refused
 		}
-		if entry && (node.ReportedAt.IsZero() || time.Since(node.ReportedAt) < 5*time.Minute || s.speedHub != nil && s.speedHub.online(change.CertificateID)) {
+		if entry && (time.Since(pause.ChangedAt) < 5*time.Minute || !node.ReportedAt.IsZero() && time.Since(node.ReportedAt) < 5*time.Minute || s.speedHub != nil && s.speedHub.online(change.CertificateID)) {
 			return refused
 		}
 		change.hostID = runtimeHostID(s.business.material, node)
@@ -328,6 +329,39 @@ func projectRetiredLandings(nodes map[string]Node, m glivela.ImportMaterial) (ma
 		if _, retired := m.RetiredLandings[node.ID]; retired {
 			delete(next, cert)
 			changed = true
+			continue
+		}
+		if node.Desired.Landing != nil {
+			entries := maps.Clone(node.RouteEntries)
+			addresses := map[string]bool{}
+			for id, member := range entries {
+				if retired, ok := m.RetiredLandings[id]; ok {
+					if retired.CertificateID != member.CertificateID {
+						return nil, false, errors.New("control: retired source identity changed")
+					}
+					addresses[member.Address] = true
+					delete(entries, id)
+				}
+			}
+			if len(addresses) > 0 {
+				if node.TransportTail != nil || node.TransportPrevious != nil || node.Desired.Revision == math.MaxUint64 {
+					return nil, false, errors.New("control: landing source transition pending")
+				}
+				plan := *node.Desired.Landing
+				plan.Sources = slices.DeleteFunc(slices.Clone(plan.Sources), func(v landing.Source) bool { return addresses[v.Address] })
+				if len(plan.Sources) == 0 {
+					plan.Transport = glivela.PrivateTransport{}
+				}
+				plan.Revision++
+				desired, err := newLandingDesiredVersion(plan, node.Desired.LandingRenderVersion)
+				if err != nil {
+					return nil, false, err
+				}
+				node.Desired, node.RouteEntries = desired, entries
+				node.Receipt, node.Checks, node.ReportedAt = nil, nil, time.Time{}
+				next[cert] = node
+				changed = true
+			}
 			continue
 		}
 		if node.Desired.Entry == nil {
