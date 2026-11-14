@@ -41,7 +41,9 @@ func verifyEntryProcessResources(root string, uid, gid uint32, desired Desired, 
 	}
 	sockets := []entrySocket{{"tcp", "127.0.0.1", glivela.XrayAPIListenPort}}
 	for _, endpoint := range desired.Entry.RealityEndpoints {
-		sockets = append(sockets, entrySocket{"tcp", endpoint.ListenAddress, uint16(endpoint.ListenPort)})
+		for _, binding := range endpoint.ListenerBindings() {
+			sockets = append(sockets, entrySocket{"tcp", binding.Address, uint16(endpoint.ListenPort)})
+		}
 	}
 	for _, endpoint := range desired.Entry.HysteriaEndpoints {
 		sockets = append(sockets, entrySocket{"udp", "0.0.0.0", uint16(endpoint.ListenPort)})

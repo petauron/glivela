@@ -428,8 +428,24 @@ func (d *NativeEntryDriver) warmupFromProcess(ctx context.Context, desired Desir
 			return err
 		}
 		probe := func(ctx context.Context) error {
-			if err := probeEntryReadiness(ctx, d.Binary, d.BinarySHA256, plan, true); err != nil {
-				return err
+			plans := []glivela.XrayPlan{plan}
+			// Warm both actual sockets before publishing this generation.
+			for _, endpoint := range plan.RealityEndpoints {
+				if endpoint.IPv4ListenAddress != "" {
+					second := plan
+					second.RealityEndpoints = slices.Clone(plan.RealityEndpoints)
+					for i := range second.RealityEndpoints {
+						if second.RealityEndpoints[i].ID == endpoint.ID {
+							second.RealityEndpoints[i].AdvertiseHost = endpoint.IPv4ListenAddress
+						}
+					}
+					plans = append(plans, second)
+				}
+			}
+			for _, warm := range plans {
+				if err := probeEntryReadiness(ctx, d.Binary, d.BinarySHA256, warm, true); err != nil {
+					return err
+				}
 			}
 			ready := func(check context.Context, want Desired) error {
 				if err := d.readyProcess(check, want); err != nil {

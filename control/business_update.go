@@ -243,7 +243,7 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 			}
 			originalTarget := current.Target
 			current.Target = expected.Target
-			if (!reflect.DeepEqual(current, expected) || originalTarget != expected.Target && originalTarget != m.Endpoints[index].Reality.Target) && !authorizedRealityProjection(node, plan.RealityEndpoints[i], m.Endpoints[index]) && !authorizedAdvertiseHostProjection(node, plan.RealityEndpoints[i], m.Endpoints[index]) {
+			if (!reflect.DeepEqual(current, expected) || originalTarget != expected.Target && originalTarget != m.Endpoints[index].Reality.Target) && !authorizedRealityProjection(node, plan.RealityEndpoints[i], m.Endpoints[index]) && !authorizedAdvertiseHostProjection(node, plan.RealityEndpoints[i], m.Endpoints[index]) && !authorizedPublicIngressProjection(node, plan.RealityEndpoints[i], m.Endpoints[index]) {
 				return nil, false, errors.New("control: entry target or TLS identity differs from owned source")
 			}
 			plan.RealityEndpoints[i] = expected
