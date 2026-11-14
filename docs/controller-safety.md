@@ -207,3 +207,10 @@ DNS deletion is separate: check active listeners, publications, subscriptions an
 other services first, and remove only an unused operator-owned record. Historical
 source evidence is not another live configuration writer and is not rewritten to
 remove old names. Third-party DNS records are never deleted by this operation.
+
+The existing `retire-returned-entry` operation serves a different purpose: it
+removes historical credentials and rolls their cumulative usage into retired
+usage totals. Do not use it for cleanup that must preserve individual usage
+members and their original watermarks. `prune-retired-entry` preserves those
+records and leaves other nodes' source policy and deferred verification inventory
+unchanged; historical binding records are not another active entry enrollment.

@@ -188,3 +188,46 @@ func TestPruneRetiredEntryHTTPRequiresAdministrator(t *testing.T) {
 		}
 	}
 }
+
+func TestPruneRetiredEntryPreservesDeferredSourceInventory(t *testing.T) {
+	s, d, cert, landingCert := subscriptionFixture(t, true)
+	if err := s.SetAvailability("entry-example", "maintenance", time.Time{}, s.availability.Revision); err != nil {
+		t.Fatal(err)
+	}
+	next := s.business.material
+	next.Endpoints = append([]glivela.ImportEndpoint(nil), next.Endpoints...)
+	next.Endpoints[0].Retired = true
+	accounts := append([]glivela.ImportAccount(nil), next.Plan.Accounts...)
+	for i := range accounts {
+		accounts[i].Grants = append([]glivela.RouteGrant(nil), accounts[i].Grants...)
+		for j := range accounts[i].Grants {
+			accounts[i].Grants[j].Enabled = false
+		}
+	}
+	var err error
+	next.Plan, err = glivela.PlanImport(accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveOwnedBusinessLocked(next); err != nil {
+		t.Fatal(err)
+	}
+	before := s.nodes[landingCert]
+	c := PruneRetiredEntryChange{ID: "entry-example", CertificateID: cert, ExpectedRevision: d.Revision, Confirmation: "entry-example"}
+	if err := s.PruneRetiredEntry(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, s.nodes[landingCert]) {
+		t.Fatal("retained landing policy or proof changed")
+	}
+	loaded, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = loaded.LoadBusiness(s.business.keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.deferredEntries(loaded.nodes[landingCert], time.Now())[c.ID] {
+		t.Fatal("historical verifier became active again")
+	}
+}
