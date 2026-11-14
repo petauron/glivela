@@ -337,7 +337,24 @@ func (s *Store) Business() BusinessInventory {
 	if s.business.faulted {
 		view.State = "storage-unverified"
 	}
+	prunedHosts := map[string]bool{}
+	for id := range m.PrunedEntries {
+		prunedHosts[m.References.Applications[id].NodeID] = true
+	}
+	for id, app := range m.References.Applications {
+		if _, pruned := m.PrunedEntries[id]; !pruned {
+			delete(prunedHosts, app.NodeID)
+		}
+	}
+	for _, node := range s.nodes {
+		if _, pruned := m.PrunedEntries[node.ID]; !pruned {
+			delete(prunedHosts, runtimeHostID(m, node))
+		}
+	}
 	for id, node := range m.References.Nodes {
+		if prunedHosts[id] {
+			continue
+		}
 		view.Nodes = append(view.Nodes, BusinessNode{ID: id, Name: node.Name, CenterAgentID: s.hostBindings[id]})
 	}
 	slices.SortFunc(view.Nodes, func(a, b BusinessNode) int { return strings.Compare(a.ID, b.ID) })

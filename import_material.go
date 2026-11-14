@@ -31,6 +31,7 @@ type ImportMaterial struct {
 	// account/entry/exit; captured only after current mutual enrollment proof.
 	ManagedRouteLandings map[string]string `json:"managedRouteLandings,omitempty"`
 
+	PrunedEntries      map[string]PrunedEntry       `json:"prunedEntries,omitempty"`
 	RetiredLandings    map[string]RetiredLanding    `json:"retiredLandings,omitempty"`
 	SubscriptionOrders map[string]SubscriptionOrder `json:"subscriptionOrders,omitempty"`
 	// Deleted entries remain disabled and retained for identity and accounting history.
@@ -53,6 +54,9 @@ type ImportMaterial struct {
 }
 
 func (m ImportMaterial) Validate() error {
+	if err := m.validatePrunedEntries(); err != nil {
+		return err
+	}
 	if m.ServerTransportVersion > 1 || len(m.ServerTransports) > 1000 || len(m.ServerTransports) > 0 && m.ServerTransportVersion != 1 {
 		return errors.New("glivela: invalid server transport schema")
 	}

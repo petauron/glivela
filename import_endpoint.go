@@ -202,12 +202,22 @@ func (material ImportMaterial) validateEndpoints() error {
 	for _, account := range material.Plan.Accounts {
 		for _, credential := range account.Credentials {
 			endpoint, ok := byEntry[credential.EntryID]
+			if !ok {
+				if _, archived := material.PrunedEntries[credential.EntryID]; archived {
+					continue
+				}
+			}
 			if !ok || account.HysteriaIdentities[credential.ID] != "" && endpoint.Hysteria == nil {
 				return errors.New("glivela: missing credential endpoint")
 			}
 		}
 		for _, grant := range account.Grants {
 			endpoint, ok := byEntry[grant.EntryID]
+			if !ok {
+				if archived, found := material.PrunedEntries[grant.EntryID]; found && !grant.Enabled && grant.InboundTag == archived.InboundTag {
+					continue
+				}
+			}
 			if !ok || grant.InboundTag != endpoint.Reality.InboundTag {
 				return errors.New("glivela: changed route endpoint")
 			}

@@ -215,6 +215,12 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 	if err := validateServerTransportBindings(nodes, m); err != nil {
 		return nil, false, err
 	}
+	var pruned bool
+	var pruneErr error
+	nodes, pruned, pruneErr = projectPrunedEntries(nodes, m)
+	if pruneErr != nil {
+		return nil, false, pruneErr
+	}
 	credentials, grants, err := effectiveBusinessCredentials(m, now)
 	if err != nil {
 		return nil, false, err
@@ -223,6 +229,7 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 	if err != nil {
 		return nil, false, err
 	}
+	changed = changed || pruned
 	nodes = next
 	for cert, node := range nodes {
 		if node.Desired.Entry == nil || entryRetired(m, node.ID) {
