@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPrivateServerReusesListenerAfterClientWithdrawn(t *testing.T) {
