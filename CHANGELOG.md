@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.154](https://github.com/petauron/glivela/compare/v0.1.0-alpha.153...v0.1.0-alpha.154) (2026-11-14)
+
+
+### Bug Fixes
+
+* reconcile backup probe caches and current host names ([#174](https://github.com/petauron/glivela/issues/174)) ([d8b76ae](https://github.com/petauron/glivela/commit/d8b76ae806956562df2dce5885886f3cff4c4165))
+
 ## [0.1.0-alpha.153](https://github.com/petauron/glivela/compare/v0.1.0-alpha.152...v0.1.0-alpha.153) (2026-11-14)
 
 
