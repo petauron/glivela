@@ -91,7 +91,7 @@ func validateServerTransportBindings(nodes map[string]Node, material glivela.Imp
 		byID[node.ID] = node
 	}
 	for _, entry := range nodes {
-		if entry.Desired.Entry == nil {
+		if entry.Desired.Entry == nil || entryRetired(material, entry.ID) {
 			continue
 		}
 		for _, peer := range entry.Desired.Entry.Peers {

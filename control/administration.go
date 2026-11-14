@@ -156,6 +156,20 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			_ = json.NewEncoder(w).Encode(struct {
 				Retired bool `json:"retired"`
 			}{true})
+		case "/v1/admin/retire-returned-entry":
+			var input RetireLandingChange
+			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
+				http.Error(w, "invalid returned entry retirement", http.StatusBadRequest)
+				return
+			}
+			if store.RetireReturnedEntry(r.Context(), input) != nil {
+				http.Error(w, "returned entry retirement not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				Retired bool `json:"retired"`
+			}{true})
 		case "/v1/admin/retire-entry":
 			var input RetireEntryChange
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &input) != nil {
