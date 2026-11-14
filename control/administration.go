@@ -327,6 +327,20 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			_ = json.NewEncoder(w).Encode(struct {
 				Latencies []LatencyView `json:"latencies"`
 			}{views})
+		case "/v1/admin/server-transports":
+			var input ServerTransportChange
+			if decode(http.MaxBytesReader(w, r.Body, 64<<10), &input) != nil {
+				http.Error(w, "invalid server transport request", http.StatusBadRequest)
+				return
+			}
+			if store.ChangeServerTransport(r.Context(), input) != nil {
+				http.Error(w, "server transport change not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				Saved bool `json:"saved"`
+			}{true})
 		case "/v1/admin/routes":
 			var request RouteChange
 			if decode(http.MaxBytesReader(w, r.Body, 8192), &request) != nil {

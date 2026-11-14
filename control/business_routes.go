@@ -60,8 +60,8 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				}
 				for _, target := range s.nodes {
 					if target.ID == change.EgressID {
-						c, ok := s.boundClientListener(entry, target, peer)
-						found = ok && c.AccountID == change.AccountID && c.Relay != nil
+						c, ok := s.configuredServerTransport(entry, target, peer)
+						found = ok && c.AccountID == change.AccountID && c.Peer.Relay != nil
 					}
 				}
 			}
@@ -82,7 +82,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				authorized := false
 				for _, target := range s.nodes {
 					if target.ID == change.EgressID {
-						chain, ok := s.boundClientListener(entry, target, peer)
+						chain, ok := s.configuredServerTransport(entry, target, peer)
 						authorized = ok && chain.AccountID == change.AccountID
 					}
 				}
@@ -121,7 +121,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 			}
 			if !change.Delete {
 				if change.Enabled && next.ManagedRouteLandings[change.ID] != "" {
-					cert, err := s.managedRouteLandingCertificate(change)
+					cert, err := s.managedRouteReactivationCertificate(change)
 					if err != nil || cert != next.ManagedRouteLandings[change.ID] {
 						return AccountChangeResult{}, invalid
 					}
@@ -155,25 +155,17 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				return AccountChangeResult{}, invalid
 			}
 			if _, imported := next.References.Nodes[change.EgressID]; !imported {
-				shared, client := next.ClientLandings[change.EgressID]
-				if client && shared.AccountID != change.AccountID {
-					return AccountChangeResult{}, invalid
+				cert, err := s.managedRouteLandingCertificate(change)
+				if err != nil {
+					return AccountChangeResult{}, err
 				}
-				client = client && slices.ContainsFunc(next.ClientChains, func(c glivela.ClientChain) bool {
-					return c.AccountID == change.AccountID && c.EntryID == change.EntryID && c.EgressID == change.EgressID
-				})
-				if !client {
-					cert, err := s.managedRouteLandingCertificate(change)
-					if err != nil {
-						return AccountChangeResult{}, err
-					}
-					next.ManagedRouteLandings = maps.Clone(next.ManagedRouteLandings)
-					if next.ManagedRouteLandings == nil {
-						next.ManagedRouteLandings = map[string]string{}
-					}
-					next.ManagedRouteLandings[change.ID] = cert
+				next.ManagedRouteLandings = maps.Clone(next.ManagedRouteLandings)
+				if next.ManagedRouteLandings == nil {
+					next.ManagedRouteLandings = map[string]string{}
 				}
+				next.ManagedRouteLandings[change.ID] = cert
 			}
+
 			account.Grants = append(account.Grants, grant)
 			account.Credentials = append(slices.Clone(account.Credentials), credential)
 			account.Usage = append(slices.Clone(account.Usage), glivela.UsageMember{CredentialID: credential.ID, Active: true})
@@ -335,13 +327,56 @@ func (s *Store) managedRouteLandingCertificate(change RouteChange) (string, erro
 			if target.ID == proof.LandingID {
 				for _, peer := range entry.Desired.Entry.Peers {
 					if peer.EgressID == target.ID && peer.ClientChainID == change.ClientChainID && peer.Transport.ClientListenerID != "" {
-						c, ok := s.boundClientListener(entry, target, peer)
+						c, ok := s.boundServerTransport(entry, target, peer)
 						if !ok || c.AccountID != change.AccountID {
 							return "", refused
 						}
 					}
 				}
 				return targetCert, nil
+			}
+		}
+	}
+	return "", refused
+}
+
+// Reactivating an existing grant may restore a withdrawn owned listener. Check
+// current mTLS identities first; actual startup/publication still uses the full
+// applied-listener proof and cannot become ready through this metadata check.
+func (s *Store) managedRouteReactivationCertificate(change RouteChange) (string, error) {
+	refused := errors.New("control: managed server reactivation identity unavailable")
+	if change.IPv4EgressID != "" {
+		return "", refused
+	}
+	for _, entry := range s.nodes {
+		if entry.ID != change.EntryID || entry.Desired.Entry == nil || entry.Desired.EntryNetwork == nil {
+			continue
+		}
+		for _, peer := range entry.Desired.Entry.Peers {
+			if peer.EgressID != change.EgressID || peer.ClientChainID != change.ClientChainID {
+				continue
+			}
+			if peer.Transport.ClientListenerID == "" {
+				return s.managedRouteLandingCertificate(change)
+			}
+			for cert, target := range s.nodes {
+				if target.ID != change.EgressID {
+					continue
+				}
+				r, ok := s.configuredServerTransport(entry, target, peer)
+				if !ok || r.AccountID != change.AccountID {
+					return "", refused
+				}
+				for _, network := range entry.Desired.EntryNetwork.Peers {
+					if network.PeerKey() != peer.PeerKey() {
+						continue
+					}
+					now := time.Now()
+					if !s.availableRuntime(target, now) || target.Receipt.ManagementIdentity == nil || *target.Receipt.ManagementIdentity != network.Identity || network.Identity.Address != target.Desired.Landing.Address || !s.serverRelayLive(r, network, now) {
+						return "", refused
+					}
+					return cert, nil
+				}
 			}
 		}
 	}

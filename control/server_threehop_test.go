@@ -57,6 +57,7 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 	if err != nil {
 		t.Fatal("independent path", err)
 	}
+	ownServerFixtureTransports(t, s, entry)
 	if err = s.Put(entry); err != nil {
 		t.Fatal("enroll path", err)
 	}
@@ -68,7 +69,7 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 	}
 	entry = s.nodes[entryCert]
 	target := s.nodes[targetCert]
-	if _, ok := s.boundClientListener(entry, target, path); !ok {
+	if _, ok := s.boundServerTransport(entry, target, path); !ok {
 		t.Fatal("bound three-hop rejected")
 	}
 	request := landingAcceptanceRequest{SnapshotID: entry.ID, PeerID: c.ID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256}
@@ -89,7 +90,7 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 		case "direction":
 			r.ServerIPv6 = c.ServerIPv6
 		}
-		if _, ok := s.boundClientListener(entry, target, bad); ok {
+		if _, ok := s.boundServerTransport(entry, target, bad); ok {
 			t.Fatal("accepted bad relay", fault)
 		}
 	}

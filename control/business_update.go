@@ -83,7 +83,7 @@ func (s *Store) UpdateAccountPlan(ctx context.Context, id string, expected uint6
 func (s *Store) saveOwnedBusinessLocked(next glivela.ImportMaterial) error {
 	business := s.business
 	invalid := errors.New("control: owned business write refused")
-	if business == nil || business.faulted || next.Ownership == nil {
+	if business == nil || business.faulted || next.Ownership == nil || next.ServerTransportVersion != 1 {
 		return invalid
 	}
 	key, err := readBusinessKey(business.keyPath)
@@ -212,6 +212,9 @@ func pinnedRealityTarget(target, pin string) string {
 // inventory. This does not create/adopt containers, infer peer identities or
 // recover missing transport configuration from an old source archive.
 func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now time.Time) (map[string]Node, bool, error) {
+	if err := validateServerTransportBindings(nodes, m); err != nil {
+		return nil, false, err
+	}
 	credentials, grants, err := effectiveBusinessCredentials(m, now)
 	if err != nil {
 		return nil, false, err

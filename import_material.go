@@ -22,6 +22,9 @@ type RetiredLanding struct {
 // offline retirement operation may redact expired-host history while retaining
 // its source identity header. Never send this material in a receipt or logs.
 type ImportMaterial struct {
+	ServerTransportVersion uint8                      `json:"serverTransportVersion,omitempty"`
+	ServerTransports       map[string]ServerTransport `json:"serverTransports,omitempty"`
+
 	// Grant ID to enrolled landing certificate. Bound by the immutable grant
 	// account/entry/exit; captured only after current mutual enrollment proof.
 	ManagedRouteLandings map[string]string `json:"managedRouteLandings,omitempty"`
@@ -48,6 +51,26 @@ type ImportMaterial struct {
 }
 
 func (m ImportMaterial) Validate() error {
+	if m.ServerTransportVersion > 1 || len(m.ServerTransports) > 1000 || len(m.ServerTransports) > 0 && m.ServerTransportVersion != 1 {
+		return errors.New("glivela: invalid server transport schema")
+	}
+	for id, resource := range m.ServerTransports {
+		if id != resource.ID || resource.Validate() != nil {
+			return errors.New("glivela: invalid owned server transport")
+		}
+		found := false
+		for _, account := range m.Plan.Accounts {
+			if account.Account.ID == resource.AccountID {
+				for _, c := range account.Credentials {
+					found = found || c.EntryID == resource.EntryID && c.Kind == NativeCredential
+				}
+			}
+		}
+		if !found {
+			return errors.New("glivela: server transport account or entry missing")
+		}
+	}
+
 	if len(m.RetiredLandings) > 10000 {
 		return errors.New("glivela: too many retired landings")
 	}
@@ -56,6 +79,11 @@ func (m ImportMaterial) Validate() error {
 		_, shared := m.ClientLandings[id]
 		if !ValidIdentifier(id) || !ValidIdentity(retired.CertificateID) || retired.Revision == 0 || referenced || shared {
 			return errors.New("glivela: invalid retired landing")
+		}
+		for _, resource := range m.ServerTransports {
+			if resource.EntryID == id || resource.EgressID == id || resource.Peer.Relay != nil && resource.Peer.Relay.NodeID == id {
+				return errors.New("glivela: retired landing has owned server transports")
+			}
 		}
 		for _, chain := range m.ClientChains {
 			if chain.EntryID == id || chain.EgressID == id || chain.Relay != nil && chain.Relay.NodeID == id {

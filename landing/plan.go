@@ -25,17 +25,7 @@ type Source struct {
 // is a locally assigned source address (including an IPv4 NAT interface), not
 // the external address seen by a website. No automatic source selection is
 // performed while migrating an existing landing.
-type ClientListener struct {
-	Interface string `json:"interface,omitempty"`
-	EgressIP  string `json:"egressIp,omitempty"`
-	Shared    bool   `json:"shared,omitempty"`
-	Transport string `json:"transport,omitempty"`
-	Address   string `json:"address,omitempty"`
-	ID        string `json:"id"`
-	Port      int    `json:"port"`
-	Key       string `json:"key"`
-	Source    string `json:"source"`
-}
+type ClientListener = glivela.TransportListener
 
 type Plan struct {
 	// Explicit client-only IPv6 bind; retained IPv4 grants are inactive.

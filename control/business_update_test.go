@@ -417,25 +417,44 @@ func TestImportedRealityPreservesNativeDNSTargetAndLegacyPin(t *testing.T) {
 }
 
 func TestOwnedRouteToClientManagedLanding(t *testing.T) {
-	source, direct, _, _ := subscriptionFixture(t, false)
-	routed := withRoutedEntry(t, direct)
-	plan := *direct.Entry
-	plan.Peers = routed.Entry.Peers
-	desired, err := NewEntryDesired(plan, *routed.EntryNetwork)
+	s, entryCert, targetCert, change := managedServerLandingFixture(t)
+	revision := func() uint64 {
+		for _, a := range s.business.material.Plan.Accounts {
+			if a.Account.ID == change.AccountID {
+				return a.Account.DesiredRevision
+			}
+		}
+		t.Fatal("missing account")
+		return 0
+	}
+	exit := "8.8.8.8"
+	client := ClientChainChange{ID: "existing-client-chain", AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, Name: "Example chain", Enabled: true, Transport: "ipv6-ss2022", SourceIPv6: "2001:4860:4860::8888", ServerIPv6: "2606:4700:4700::1111", EgressIP: &exit, ExpectedRevision: revision()}
+	if _, err := s.ChangeClientChain(context.Background(), client); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.business.material.EffectiveClientChain(s.business.material.ClientChains[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := source.business.material
-	m.Ownership = nil
-	m.ClientLandings = map[string]glivela.ClientLanding{"landing-example": {AccountID: "account-example", Key: "MDEyMzQ1Njc4OWFiY2RlZg=="}}
-	m.ClientChains = []glivela.ClientChain{{ID: "existing-client-chain", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Name: "Example chain", Port: 24001, Key: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", Transport: glivela.IPv4ClientSS2022, Enabled: true}}
-	s, _, _, _ := ownedSubscriptionFixture(t, m, desired, true)
-	change := RouteChange{ID: "new-server-route", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Enabled: true}
-	for _, account := range m.Plan.Accounts {
-		if account.Account.ID == change.AccountID {
-			change.ExpectedRevision = account.Account.DesiredRevision
-		}
+	entry := s.nodes[entryCert]
+	plan := *entry.Desired.clone().Entry
+	plan.Revision++
+	plan.Peers[0].Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: c.Key, PublicAddress: c.ServerIPv6, Port: c.Port, ClientListenerID: c.ID}
+	plan.Peers[0].Port = c.Port
+	entry.Desired, err = NewEntryDesired(plan, *entry.Desired.EntryNetwork)
+	if err != nil {
+		t.Fatal(err)
 	}
+	ownServerFixtureTransports(t, s, entry)
+	if err = s.Put(entry); err != nil {
+		t.Fatal(err)
+	}
+	target := s.nodes[targetCert]
+	identity := entry.Desired.EntryNetwork.Peers[0].Identity
+	if _, err = s.Exchange(context.Background(), targetCert, &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: target.Desired.Revision, ConfigSHA256: target.Desired.ConfigSHA256, RuntimeReady: true}, ManagementIdentity: &identity}); err != nil {
+		t.Fatal(err)
+	}
+	change.ID, change.ExpectedRevision = "new-server-route", revision()
 	if _, err := s.ChangeRoute(context.Background(), change); err != nil {
 		t.Fatal("enrolled client-managed landing refused server grant:", err)
 	}

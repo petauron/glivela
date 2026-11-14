@@ -33,6 +33,11 @@ func (s *Store) retireLegacyVerifierReferences(nodes map[string]Node, entry Node
 			}
 		}
 	}
+	for _, resource := range material.ServerTransports {
+		if resource.EntryID == entry.ID {
+			return refused
+		}
+	}
 	for _, chain := range material.ClientChains {
 		if chain.EntryID == entry.ID && (!material.DeletedClientChains[chain.ID] || chain.Enabled) {
 			return refused
