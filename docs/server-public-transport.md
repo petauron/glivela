@@ -82,3 +82,24 @@ when no enabled client publication still needs it. This does not install a
 second listener, widen its sources, expose server credentials in subscriptions,
 or create a direct fallback. Native entry filtering and probes use the same
 IPv6 family and exact destination port as the worker.
+
+## Dedicated provider-LAN listener
+
+Related issue: #159.
+
+A two-hop server peer may reuse an existing client chain's explicit `privateLink`.
+Set `transport.clientListenerId`, key and port to that enrolled listener and copy
+its complete `privateLink` (both addresses and interfaces). The retained wire
+field `transport.publicAddress` must equal the link's private destination. The
+controller rejects any difference from the original account-owned binding.
+This exception does not authorize an arbitrary private address or subnet.
+
+The worker binds its SS2022 connection to the enrolled private source. Runtime
+validation checks the actual source interface; the output guard permits only
+the exact source/destination/port on that interface. The landing keeps its
+existing interface/source-limited listener. Startup still requires fresh mTLS
+identity evidence and a real encrypted HTTPS/expected-exit check. A failure
+leaves the peer closed, without trying public, overlay or direct alternatives.
+After server acceptance, disabling only the old client publication removes its
+native client-to-LAN forwarding rule but retains the listener and server path.
+Changing or clearing a private link used by an enabled server grant is refused.

@@ -199,7 +199,7 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 			v := *old.PrivateLink
 			c.PrivateLink = &v
 		}
-		if c.PrivateLink != nil && clientListenerUsedByServer(s.nodes, next, old, time.Now()) {
+		if (c.ClearPrivateLink || !reflect.DeepEqual(old.PrivateLink, c.PrivateLink)) && clientListenerUsedByServer(s.nodes, next, old, time.Now()) {
 			return AccountChangeResult{}, errors.New("control: client link is used by server forwarding")
 		}
 		same = reflect.DeepEqual(old.PrivateLink, c.PrivateLink) && old.Name == c.Name && old.Enabled == c.Enabled && deleted == c.Delete && (c.Transport == "" || c.Transport == old.Transport) && (c.EgressIP == nil || *c.EgressIP == old.EgressIP)

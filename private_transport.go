@@ -13,6 +13,9 @@ const SS2022Method = "2022-blake3-aes-128-gcm"
 // explicitly shared listener can use an already-issued client key, without
 // exposing any retained server-only key. Empty values read retained SOCKS policy.
 type PrivateTransport struct {
+	// PrivateLink binds an existing client listener to one enrolled provider-LAN
+	// socket. PublicAddress retains its wire field name but must equal Address.
+	PrivateLink *PrivateClientLink `json:"privateLink,omitempty"`
 	// Port is explicit only for the shared public SS2022 listener. Zero reads
 	// retained server policies at their original port; it is not dial fallback.
 	ClientListenerID string `json:"clientListenerId,omitempty"`
@@ -23,12 +26,16 @@ type PrivateTransport struct {
 }
 
 func (t PrivateTransport) Validate() error {
-	if t.Protocol == "" && t.Key == "" && t.PublicAddress == "" && t.Port == 0 && t.ClientListenerID == "" {
+	if t.Protocol == "" && t.Key == "" && t.PublicAddress == "" && t.Port == 0 && t.ClientListenerID == "" && t.PrivateLink == nil {
 		return nil
 	}
 	key, err := base64.StdEncoding.Strict().DecodeString(t.Key)
 	bound := t.ClientListenerID != ""
-	public := PublicTransportIPv4(t.PublicAddress) || bound && PublicTransportIPv6(t.PublicAddress)
+	private := bound && t.PrivateLink != nil && t.PrivateLink.Validate() == nil && t.PublicAddress == t.PrivateLink.Address
+	if t.PrivateLink != nil && !private {
+		return errors.New("glivela: private server transport requires an exact bound listener")
+	}
+	public := PublicTransportIPv4(t.PublicAddress) || bound && PublicTransportIPv6(t.PublicAddress) || private
 	validKey := len(key) == 16 || bound && len(key) == 32
 	validPort := t.Port == 0 || t.Port == 24000 || bound && t.Port >= 24000 && t.Port <= 24999
 	if bound && (!ValidIdentifier(t.ClientListenerID) || t.Port == 0 || !public) || !validPort || t.Port != 0 && t.PublicAddress == "" || t.Protocol != "ss2022" || err != nil || !validKey || base64.StdEncoding.EncodeToString(key) != t.Key || t.PublicAddress != "" && !public {
@@ -90,7 +97,11 @@ func (p RoutePeer) outbound(tag string) map[string]any {
 		protocol = "shadowsocks"
 		server["method"], server["password"] = p.Transport.Method(), p.Transport.Key
 	}
-	return map[string]any{"protocol": protocol, "tag": tag, "settings": map[string]any{"servers": []any{server}}}
+	out := map[string]any{"protocol": protocol, "tag": tag, "settings": map[string]any{"servers": []any{server}}}
+	if p.Transport.PrivateLink != nil {
+		out["sendThrough"] = p.Transport.PrivateLink.Source
+	}
+	return out
 }
 
 // DialTransport is the only socket opened by the entry. The final SS2022
