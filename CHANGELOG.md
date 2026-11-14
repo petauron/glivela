@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.152](https://github.com/petauron/glivela/compare/v0.1.0-alpha.151...v0.1.0-alpha.152) (2026-11-14)
+
+
+### Bug Fixes
+
+* **routes:** own server transport resources independently ([#168](https://github.com/petauron/glivela/issues/168)) ([b2cc8a9](https://github.com/petauron/glivela/commit/b2cc8a96ac71c80354f8d9070d1c7835f33f0b9f))
+
 ## [0.1.0-alpha.151](https://github.com/petauron/glivela/compare/v0.1.0-alpha.150...v0.1.0-alpha.151) (2026-11-14)
 
 
