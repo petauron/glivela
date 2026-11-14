@@ -12,7 +12,9 @@ import (
 )
 
 // RetiredLanding retains only a revocation fence, never a reusable credential.
+// HostID also fences the original host when an entry has a distinct runtime ID.
 type RetiredLanding struct {
+	HostID        string `json:"hostId,omitempty"`
 	CertificateID string `json:"certificateId"`
 	Revision      uint64 `json:"revision,string"`
 }
@@ -77,7 +79,7 @@ func (m ImportMaterial) Validate() error {
 	for id, retired := range m.RetiredLandings {
 		_, referenced := m.References.Nodes[id]
 		_, shared := m.ClientLandings[id]
-		if !ValidIdentifier(id) || !ValidIdentity(retired.CertificateID) || retired.Revision == 0 || referenced || shared {
+		if !ValidIdentifier(id) || !ValidIdentity(retired.CertificateID) || retired.Revision == 0 || retired.HostID != "" && !ValidIdentifier(retired.HostID) || referenced || shared {
 			return errors.New("glivela: invalid retired landing")
 		}
 		for _, resource := range m.ServerTransports {

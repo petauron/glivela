@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -211,6 +212,12 @@ func purgeArchiveHistory(a archive, ids map[string]bool, sourceKey []byte, prote
 	for id, v := range a.References.Publications {
 		if ids[v.EntryNodeID] || r.ids[v.ServiceID] {
 			r.ids[id] = true
+		}
+	}
+	endpoints := a.Tables["meridian_endpoints"]
+	for _, row := range endpoints.Rows {
+		if r.ids[textAt(endpoints, row, "application_id")] {
+			r.ids[textAt(endpoints, row, "id")] = true
 		}
 	}
 	for _, name := range []string{"meridian_credentials", "meridian_route_grants"} {
@@ -770,7 +777,13 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 			protected[endpoint.Hysteria.PrivateKeyPEM] = true
 		}
 	}
-	a, r, err := purgeArchiveHistory(a, ids, sourceKey, protected)
+	archiveIDs := maps.Clone(ids)
+	for id := range ids {
+		if host := m.RetiredLandings[id].HostID; host != "" {
+			archiveIDs[host] = true
+		}
+	}
+	a, r, err := purgeArchiveHistory(a, archiveIDs, sourceKey, protected)
 	if err != nil {
 		return err
 	}
