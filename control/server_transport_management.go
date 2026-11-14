@@ -139,6 +139,9 @@ func (s *Store) ChangeServerTransport(ctx context.Context, c ServerTransportChan
 	} else {
 		next.ServerTransports[c.Resource.ID] = c.Resource
 	}
+	if len(next.ServerTransports) == 0 {
+		next.ServerTransports = nil
+	}
 	accounts := slices.Clone(next.Plan.Accounts)
 	accounts[ai].Account.DesiredRevision++
 	next.Plan, err = glivela.PlanImport(accounts)

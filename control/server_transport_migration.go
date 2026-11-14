@@ -26,7 +26,7 @@ func migrateServerTransports(nodes map[string]Node, original glivela.ImportMater
 	}
 	next := original
 	next.ServerTransportVersion = 1
-	next.ServerTransports = map[string]glivela.ServerTransport{}
+	next.ServerTransports = nil
 	for _, entry := range nodes {
 		if entry.Desired.Entry == nil {
 			continue
@@ -72,6 +72,9 @@ func migrateServerTransports(nodes map[string]Node, original glivela.ImportMater
 			}
 			if existing, ok := next.ServerTransports[r.ID]; ok && !reflect.DeepEqual(existing, r) {
 				return original, false, errors.New("control: conflicting server transport owners")
+			}
+			if next.ServerTransports == nil {
+				next.ServerTransports = map[string]glivela.ServerTransport{}
 			}
 			next.ServerTransports[r.ID] = r
 		}
