@@ -3,6 +3,7 @@ package control
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
 	"time"
@@ -79,6 +80,9 @@ func migrateServerTransports(nodes map[string]Node, original glivela.ImportMater
 			next.ServerTransports[r.ID] = r
 		}
 	}
+	if err := migrateNativeServerLandings(nodes, original, &next); err != nil {
+		return original, false, err
+	}
 	if err := next.Validate(); err != nil {
 		return original, false, err
 	}
@@ -148,4 +152,74 @@ func migrationListenerMatches(listeners []landing.ClientListener, expected landi
 		}
 	}
 	return allowAbsent
+}
+
+// Native server peers already own the landing's main transport; they must not
+// keep using a client landing map as business authority after schema migration.
+// Capture only an existing grant with its exact enrolled mTLS/source/transport
+// bindings. No listener, grant, certificate or node plan is created here.
+func migrateNativeServerLandings(nodes map[string]Node, original glivela.ImportMaterial, next *glivela.ImportMaterial) error {
+	refused := errors.New("control: native server landing ownership migration requires exact enrolled binding")
+	if err := validateEnrollmentRoles(nodes); err != nil {
+		return refused
+	}
+	next.ManagedRouteLandings = maps.Clone(original.ManagedRouteLandings)
+	byID := make(map[string]Node, len(nodes))
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	for _, a := range original.Plan.Accounts {
+		for _, g := range a.Grants {
+			if original.DeletedRoutes[g.ID] || original.ManagedRouteLandings[g.ID] != "" {
+				continue
+			}
+			if _, imported := original.References.Nodes[g.EgressID]; imported {
+				continue
+			}
+			owned := false
+			for _, r := range next.ServerTransports {
+				owned = owned || r.AccountID == a.Account.ID && r.EntryID == g.EntryID && r.EgressID == g.EgressID && r.Peer.ClientChainID == g.ClientChainID
+			}
+			if owned {
+				continue
+			}
+			shared, known := original.ClientLandings[g.EgressID]
+			if !known || shared.AccountID != a.Account.ID || g.ClientChainID != "" || g.IPv4EgressID != "" || !slices.ContainsFunc(original.ClientChains, func(c glivela.ClientChain) bool {
+				return c.AccountID == a.Account.ID && c.EntryID == g.EntryID && c.EgressID == g.EgressID
+			}) {
+				return refused
+			}
+			entry, target := byID[g.EntryID], byID[g.EgressID]
+			if entry.Desired.Entry == nil || entry.Desired.EntryNetwork == nil || entry.Desired.EntryNetwork.Source == nil || target.Desired.Landing == nil || !glivela.ValidIdentity(target.CertificateID) {
+				return refused
+			}
+			member, enrolled := target.RouteEntries[entry.ID]
+			source := entry.Desired.EntryNetwork.Source
+			if !enrolled || member.CertificateID != entry.CertificateID || member.Address != source.Address {
+				return refused
+			}
+			matched := false
+			for _, peer := range entry.Desired.Entry.Peers {
+				if peer.EgressID != target.ID || peer.ClientChainID != "" || peer.Transport.ClientListenerID != "" || peer.Address != target.Desired.Landing.Address || !reflect.DeepEqual(peer.Transport, target.Desired.Landing.Transport) || peer.Port != target.Desired.Landing.Transport.ListenerPort() {
+					continue
+				}
+				if !slices.ContainsFunc(entry.Desired.EntryNetwork.Peers, func(p EntryPeer) bool {
+					return p.PeerKey() == peer.PeerKey() && p.Identity.Address == target.Desired.Landing.Address
+				}) {
+					continue
+				}
+				matched = slices.ContainsFunc(target.Desired.Landing.Sources, func(p landing.Source) bool {
+					return p.Address == source.Address && (peer.Transport.PublicAddress == "" || p.TCPOnly && glivela.PublicTransportIPv4(p.PublicAddress))
+				})
+			}
+			if !matched {
+				return refused
+			}
+			if next.ManagedRouteLandings == nil {
+				next.ManagedRouteLandings = map[string]string{}
+			}
+			next.ManagedRouteLandings[g.ID] = target.CertificateID
+		}
+	}
+	return nil
 }

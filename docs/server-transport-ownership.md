@@ -19,6 +19,11 @@ Active server paths require their exact listeners to remain enrolled. For inacti
 paths, an absent socket is captured from the authenticated saved policy; a
 same-ID listener with different fields is always rejected. Capturing inactive
 ownership never reactivates a listener.
+Native server grants that already use the landing main transport also capture
+the existing landing certificate into managed server authority. This requires
+the original account authority and exact entry certificate, source, peer,
+transport and landing management-address bindings; it creates no listener or
+permission. Client publication cleanup cannot remove this server authority.
 Unknown schemas, ambiguous ownership or mismatched bindings fail closed. The
 controller also requires projection of the migrated state to leave the complete
 node configuration unchanged. Migration does not delete client records or alter
