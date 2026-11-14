@@ -11,14 +11,21 @@ import (
 	glivela "github.com/petauron/glivela"
 )
 
-// RetireReturnedEntry removes only an already-retired offline execution source.
+type PruneRetiredEntryChange struct {
+	ID               string `json:"id"`
+	CertificateID    string `json:"certificateId"`
+	ExpectedRevision uint64 `json:"expectedRevision,string"`
+	Confirmation     string `json:"confirmation"`
+}
+
+// PruneRetiredEntry removes only an already-retired offline execution source.
 // Its accounting inventory is unchanged. Persist the revocation before removing
 // the recoverable nodes.json projection; a retry or restart finishes that step.
-func (s *Store) RetireReturnedEntry(ctx context.Context, change RetireLandingChange) error {
+func (s *Store) PruneRetiredEntry(ctx context.Context, change PruneRetiredEntryChange) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	bad := errors.New("control: retired entry cleanup refused")
-	if ctx.Err() != nil || !change.ConfirmHostReturned || !glivela.ValidIdentifier(change.ID) || !glivela.ValidIdentity(change.CertificateID) || change.ExpectedRevision == 0 || change.Confirmation != change.ID || s.business == nil || s.business.faulted || s.business.material.Ownership == nil {
+	if ctx.Err() != nil || !glivela.ValidIdentifier(change.ID) || !glivela.ValidIdentity(change.CertificateID) || change.ExpectedRevision == 0 || change.Confirmation != change.ID || s.business == nil || s.business.faulted || s.business.material.Ownership == nil {
 		return bad
 	}
 	next := s.business.material
@@ -27,9 +34,6 @@ func (s *Store) RetireReturnedEntry(ctx context.Context, change RetireLandingCha
 			return bad
 		}
 	} else {
-		if change.ExpectedAvailabilityRevision != s.availability.Revision {
-			return bad
-		}
 		index := slices.IndexFunc(next.Endpoints, func(e glivela.ImportEndpoint) bool { return e.Reality.EntryID == change.ID })
 		if index < 0 || !next.Endpoints[index].Retired || realityChangePending(next.Endpoints[index]) {
 			return bad

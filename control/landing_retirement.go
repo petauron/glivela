@@ -29,6 +29,15 @@ type RetireLandingChange struct {
 // A receipt from that host cannot prove an uninstall and is not required here.
 // Persist the revocation before changing recoverable runtime projections.
 func (s *Store) RetireLanding(ctx context.Context, change RetireLandingChange) error {
+	return s.retireReturnedNode(ctx, change, false)
+}
+
+// RetireReturnedEntry revokes a confirmed returned host; it never invents an offline receipt.
+func (s *Store) RetireReturnedEntry(ctx context.Context, change RetireLandingChange) error {
+	return s.retireReturnedNode(ctx, change, true)
+}
+
+func (s *Store) retireReturnedNode(ctx context.Context, change RetireLandingChange, entry bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	refused := errors.New("control: landing retirement refused")
@@ -52,7 +61,10 @@ func (s *Store) RetireLanding(ctx context.Context, change RetireLandingChange) e
 			return refused
 		}
 		node, ok := s.nodes[change.CertificateID]
-		if !ok || node.ID != change.ID || node.Desired.Entry != nil || node.Desired.Revision != change.ExpectedRevision || node.TransportTail != nil {
+		if !ok || node.ID != change.ID || (node.Desired.Entry != nil) != entry || node.Desired.Revision != change.ExpectedRevision || node.TransportTail != nil {
+			return refused
+		}
+		if entry && (node.ReportedAt.IsZero() || time.Since(node.ReportedAt) < 5*time.Minute || s.speedHub != nil && s.speedHub.online(change.CertificateID)) {
 			return refused
 		}
 		change.hostID = runtimeHostID(s.business.material, node)
@@ -75,7 +87,7 @@ func (s *Store) RetireLanding(ctx context.Context, change RetireLandingChange) e
 			return refused
 		}
 	}
-	next, removed, err := retiredLandingMaterial(s.business.material, change)
+	next, removed, err := retiredNodeMaterial(s.business.material, change, entry)
 	if err != nil {
 		return err
 	}
@@ -99,18 +111,51 @@ func (s *Store) RetireLanding(ctx context.Context, change RetireLandingChange) e
 	if err := s.cleanLandingHistoryLocked(change.ID); err != nil {
 		return err
 	}
+	if entry {
+		if _, found := s.availability.Nodes[change.ID]; found {
+			if s.availability.Revision == math.MaxUint64 {
+				return errors.New("control: availability revision exhausted")
+			}
+			v := availabilityState{Version: 1, Revision: s.availability.Revision + 1, Nodes: maps.Clone(s.availability.Nodes)}
+			delete(v.Nodes, change.ID)
+			if err := v.validate(); err != nil {
+				return err
+			}
+			if err := writeControlState(filepath.Join(filepath.Dir(s.path), "availability.json"), v); err != nil {
+				return err
+			}
+			s.availability = v
+		}
+	}
 	return nil
 }
 
 func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange) (glivela.ImportMaterial, map[string]bool, error) {
+	return retiredNodeMaterial(m, change, false)
+}
+
+func retiredNodeMaterial(m glivela.ImportMaterial, change RetireLandingChange, entry bool) (glivela.ImportMaterial, map[string]bool, error) {
 	refused := errors.New("control: disable dependent client chains and server routes first")
 	for _, endpoint := range m.Endpoints {
-		if endpoint.Reality.EntryID == change.ID {
+		if endpoint.Reality.EntryID == change.ID && !entry {
 			return m, nil, refused
 		}
 	}
 	next := m
+	next.Endpoints = slices.DeleteFunc(slices.Clone(m.Endpoints), func(e glivela.ImportEndpoint) bool { return entry && e.Reality.EntryID == change.ID })
+	next.ServerTransports = maps.Clone(m.ServerTransports)
 	removed := map[string]bool{}
+	if entry {
+		removed[change.ID] = true
+		for id, resource := range next.ServerTransports {
+			if resource.EntryID == change.ID {
+				delete(next.ServerTransports, id)
+				removed[id] = true
+			} else if resource.EgressID == change.ID || resource.Peer.Relay != nil && resource.Peer.Relay.NodeID == change.ID {
+				return m, nil, refused
+			}
+		}
+	}
 	next.ProtocolSecrets = maps.Clone(m.ProtocolSecrets)
 	next.HysteriaSecrets = maps.Clone(m.HysteriaSecrets)
 	next.TrafficCounters = maps.Clone(m.TrafficCounters)
@@ -122,7 +167,7 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 		a := &accounts[i]
 		a.Grants = slices.Clone(a.Grants)
 		for _, grant := range a.Grants {
-			if grant.EgressID != change.ID && grant.IPv4EgressID != change.ID {
+			if grant.EgressID != change.ID && grant.IPv4EgressID != change.ID && (!entry || grant.EntryID != change.ID) {
 				continue
 			}
 			if grant.Enabled {
@@ -136,10 +181,10 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 		removedCredentials := map[string]bool{}
 		a.Credentials = slices.Clone(a.Credentials)
 		for _, c := range a.Credentials {
-			if c.EgressID != change.ID {
+			if c.EgressID != change.ID && (!entry || c.EntryID != change.ID) {
 				continue
 			}
-			if c.Kind != glivela.RouteCredential {
+			if c.Kind != glivela.RouteCredential && (!entry || c.EntryID != change.ID) {
 				return m, nil, refused
 			}
 			// A composite route's other exit cannot be silently changed.
@@ -149,6 +194,9 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 				}
 			}
 			removedCredentials[c.ID] = true
+			if entry {
+				removed[c.ID] = true
+			}
 			delete(next.ProtocolSecrets, c.ID)
 			delete(next.HysteriaSecrets, c.ID)
 			delete(next.TrafficCounters, c.ID)
@@ -200,6 +248,10 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 	next.SubscriptionOrders = maps.Clone(m.SubscriptionOrders)
 	for id, order := range next.SubscriptionOrders {
 		ids := slices.DeleteFunc(slices.Clone(order.IDs), func(id string) bool {
+			parts := strings.Split(id, "/")
+			if entry && len(parts) == 3 && parts[0] == "native" && removed[parts[2]] {
+				return true
+			}
 			return removed[strings.TrimPrefix(id, "chain/")] && strings.HasPrefix(id, "chain/") || removedRoutes[strings.TrimPrefix(id, "route/")] && strings.HasPrefix(id, "route/")
 		})
 		if len(ids) != len(order.IDs) {
@@ -221,7 +273,7 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 	}
 	apps, services := map[string]bool{}, map[string]bool{}
 	for id, app := range next.References.Applications {
-		if app.NodeID == change.ID || change.hostID != "" && app.NodeID == change.hostID {
+		if app.NodeID == change.ID || entry && id == change.ID || change.hostID != "" && app.NodeID == change.hostID {
 			apps[id] = true
 			delete(next.References.Applications, id)
 		}
@@ -261,7 +313,10 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 	if next.RetiredLandings == nil {
 		next.RetiredLandings = map[string]glivela.RetiredLanding{}
 	}
-	hostID := ""
+	hostID := change.hostID
+	if !entry || hostID == change.ID {
+		hostID = ""
+	}
 	next.RetiredLandings[change.ID] = glivela.RetiredLanding{HostID: hostID, CertificateID: change.CertificateID, Revision: change.ExpectedRevision}
 	return next, removed, next.Validate()
 }

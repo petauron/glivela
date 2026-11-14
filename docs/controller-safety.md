@@ -181,11 +181,9 @@ included in the actual cleanup inventory when present.
 
 ## Pruning a retired entry
 
-The administrator mTLS endpoint `POST /v1/admin/retire-returned-entry` accepts
-`id`, `certificateId`, decimal-string `expectedRevision`, decimal-string
-`expectedAvailabilityRevision`, `confirmHostReturned: true`, and `confirmation`
-which must equal `id`. The existing returned-entry operation is the only cleanup
-entry point; there is no separate permanent-delete API. It only removes an already-retired, offline entry with
+The administrator mTLS endpoint `POST /v1/admin/prune-retired-entry` accepts
+`id`, `certificateId`, decimal-string `expectedRevision`, and `confirmation`
+which must equal `id`. It only removes an already-retired, offline entry with
 an exact enrolled identity and revision, no pending transport/network/speed
 operation, and no dependent client chain or owned server resource. Online entries
 and mismatched identities are refused. Any change to a surviving runtime is also
