@@ -1,5 +1,4 @@
 import { PrivateLinkFields,emptyPrivateLink,completePrivateLink } from "./PrivateClientLink";
-import { hostNames } from "./control-format";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,16 +7,15 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { LatencyCell, latencyKey, type RouteLatency } from "./RouteLatency";
 import type { Inventory, Plan } from "./control-types";
 const unlimited: Plan = { totalBytes: "0", expiryTime: "0", resetDays: 0, enabled: true };
-export function AvailabilityEditor({ inventory, disabled, save, initialNodeID = "", expanded = false }: { expanded?: boolean; initialNodeID?: string; inventory: Inventory; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean> }) {
+export function AvailabilityEditor({ inventory, names, disabled, save, initialNodeID = "", expanded = false }: { expanded?: boolean; initialNodeID?: string; inventory: Inventory; names: Map<string, string>; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean> }) {
   const formID = useId();
-  const names = hostNames(inventory);
   const [id, setID] = useState(initialNodeID);
   const [reason, setReason] = useState("traffic-exhausted");
   const [resumeAt, setResumeAt] = useState("");
   const [error, setError] = useState("");
   const entries = new Map(inventory.endpoints.filter(e => !e.retired).map(e => [e.entryId, names.get(e.entryId) ?? e.entryId]));
   for (const n of inventory.runtimes) if (!entries.has(n.id)) entries.set(n.id, names.get(n.id) ?? n.id);
-  if (inventory.state === "empty") for (const n of inventory.nodes) if (!entries.has(n.id)) entries.set(n.id, n.name);
+  if (inventory.state === "empty") for (const n of inventory.nodes) if (!entries.has(n.id)) entries.set(n.id, names.get(n.id) ?? n.name);
   const state = inventory.availability;
   const pause = state?.nodes[id];
   const reset = inventory.endpoints.find(e => e.entryId === id)?.nextResetAt;
@@ -53,9 +51,8 @@ export function PlanEditor({ initial, disabled, onSave, onDirtyChange }: { initi
  </FieldGroup></form>;
 }
 
-export function CreateAccount({ inventory, disabled, save }: { inventory: Inventory; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean> }) {
+export function CreateAccount({ inventory, names, disabled, save }: { inventory: Inventory; names: Map<string, string>; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean> }) {
   const id = useRef(crypto.randomUUID());
-  const names = hostNames(inventory);
   const [name, setName] = useState("");
   const [entries, setEntries] = useState<string[]>([]);
   useEffect(() => {

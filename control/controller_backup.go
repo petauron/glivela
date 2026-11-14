@@ -115,7 +115,12 @@ func (s *Store) BackupController(now time.Time) error {
 	defer clear(key)
 	directory := filepath.Dir(s.path)
 	material, snapshot, err := readOwnedBusiness(directory, key)
-	if err != nil || snapshot != s.business.snapshotID || !reflect.DeepEqual(material, s.business.material) {
+	// Optional empty maps are omitted on disk. Compare their canonical JSON
+	// meaning instead of Go's nil-versus-empty representation, while retaining
+	// every serialized identity, configuration and accounting field.
+	observedMaterial, observedErr := json.Marshal(material)
+	expectedMaterial, expectedErr := json.Marshal(s.business.material)
+	if err != nil || observedErr != nil || expectedErr != nil || snapshot != s.business.snapshotID || !bytes.Equal(observedMaterial, expectedMaterial) {
 		return errors.New("control: controller backup source changed")
 	}
 	value := controllerBackup{Version: 1, CreatedAt: now.UTC(), Files: map[string]json.RawMessage{}}
@@ -179,10 +184,27 @@ func (s *Store) BackupController(now time.Time) error {
 	for _, node := range nodes {
 		observed[node.CertificateID] = node
 	}
-	expectedNodes, expectedErr := json.Marshal(s.nodes)
-	observedNodes, observedErr := json.Marshal(observed)
-	if len(observed) != len(nodes) || expectedErr != nil || observedErr != nil || !bytes.Equal(expectedNodes, observedNodes) {
+	if len(observed) != len(nodes) || len(observed) != len(s.nodes) {
 		return errors.New("control: controller node snapshot differs")
+	}
+	for certificate, node := range observed {
+		expected, exists := s.nodes[certificate]
+		expectedRaw, expectedErr := json.Marshal(expected)
+		observedRaw, observedErr := json.Marshal(node)
+		if !exists || expectedErr != nil || observedErr != nil {
+			return errors.New("control: controller node snapshot differs")
+		}
+		if bytes.Equal(expectedRaw, observedRaw) {
+			continue
+		}
+		// Startup discards invalidated probe caches without changing the saved
+		// authoritative node. Accept only that same validated transformation;
+		// the backup retains the original bytes as historical evidence.
+		normalized, normalizeErr := normalizeStoredRouteChecks(node)
+		normalizedRaw, marshalErr := json.Marshal(normalized)
+		if normalizeErr != nil || marshalErr != nil || !bytes.Equal(expectedRaw, normalizedRaw) {
+			return errors.New("control: controller node snapshot differs")
+		}
 	}
 	plain, err := json.Marshal(value)
 	if err != nil || len(plain) > controllerBackupLimit-64 {
