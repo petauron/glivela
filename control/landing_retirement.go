@@ -353,7 +353,7 @@ func projectRetiredLandings(nodes map[string]Node, m glivela.ImportMaterial) (ma
 					plan.Transport = glivela.PrivateTransport{}
 				}
 				plan.Revision++
-				desired, err := NewDesired(plan)
+				desired, err := newLandingDesiredVersion(plan, node.Desired.LandingRenderVersion)
 				if err != nil {
 					return nil, false, err
 				}
