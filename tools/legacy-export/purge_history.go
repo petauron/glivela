@@ -778,6 +778,32 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 			protected[endpoint.Hysteria.PrivateKeyPEM] = true
 		}
 	}
+	// Runtime-owned private transport keys may be shared by surviving entries
+	// without belonging to a subscription credential in the business material.
+	rawNodes, err := privateFile(filepath.Join(*directory, "nodes.json"), 90<<20)
+	if err != nil {
+		return err
+	}
+	var live []control.Node
+	if json.Unmarshal(rawNodes, &live) != nil {
+		return errors.New("invalid current node protection inventory")
+	}
+	for _, node := range live {
+		if node.Desired.Landing != nil {
+			protected[node.Desired.Landing.Transport.Key] = true
+			for _, listener := range node.Desired.Landing.ClientListeners {
+				protected[listener.Key] = true
+			}
+		}
+		if node.Desired.Entry != nil {
+			for _, peer := range node.Desired.Entry.Peers {
+				protected[peer.Transport.Key] = true
+				if peer.Relay != nil {
+					protected[peer.Relay.Key] = true
+				}
+			}
+		}
+	}
 	archiveIDs := maps.Clone(ids)
 	for id := range ids {
 		if host := m.RetiredLandings[id].HostID; host != "" {
