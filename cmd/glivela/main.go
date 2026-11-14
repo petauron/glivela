@@ -484,7 +484,9 @@ func runConfiguration(ctx context.Context, cfg configuration) error {
 	defer func() { stopBackups(); <-backupsDone }()
 	go func() {
 		defer close(backupsDone)
-		store.RunControllerBackups(backups, func(err error) { log.Printf("Glivela controller backup not confirmed: %v; inspect retained recovery snapshots", err) })
+		store.RunControllerBackups(backups, func(err error) {
+			log.Printf("Glivela controller backup not confirmed: %v; inspect retained recovery snapshots", err)
+		})
 	}()
 	return serveController(ctx, server, subscriptions)
 }
