@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.156](https://github.com/petauron/glivela/compare/v0.1.0-alpha.155...v0.1.0-alpha.156) (2026-11-14)
+
+
+### Bug Fixes
+
+* **ci:** prepare version PRs with the existing maintainer identity ([065ccc6](https://github.com/petauron/glivela/commit/065ccc6c6f8096845580da6dc03386f99a9fa6a0))
+* **control:** permanently retire returned offline entries ([#182](https://github.com/petauron/glivela/issues/182)) ([d5e70fd](https://github.com/petauron/glivela/commit/d5e70fd1d334202d89c8a9ea8cf1eb47c202819b))
+
 ## [0.1.0-alpha.155](https://github.com/petauron/glivela/compare/v0.1.0-alpha.154...v0.1.0-alpha.155) (2026-11-14)
 
 
