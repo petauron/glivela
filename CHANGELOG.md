@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.157](https://github.com/petauron/glivela/compare/v0.1.0-alpha.156...v0.1.0-alpha.157) (2026-11-14)
+
+
+### Bug Fixes
+
+* **control:** complete returned entry retirement without stale receipts ([#184](https://github.com/petauron/glivela/issues/184)) ([0f86a6b](https://github.com/petauron/glivela/commit/0f86a6bec89eabb56b54de0ffebd9e5b58d94191))
+* **control:** prune retired entry configuration without losing history ([d468f80](https://github.com/petauron/glivela/commit/d468f805d18d826e4b1f996e57b365092de3c479))
+
 ## [0.1.0-alpha.156](https://github.com/petauron/glivela/compare/v0.1.0-alpha.155...v0.1.0-alpha.156) (2026-11-14)
 
 
