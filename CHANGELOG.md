@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.153](https://github.com/petauron/glivela/compare/v0.1.0-alpha.152...v0.1.0-alpha.153) (2026-11-14)
+
+
+### Bug Fixes
+
+* **routes:** migrate existing native server landing authority ([#171](https://github.com/petauron/glivela/issues/171)) ([20e5205](https://github.com/petauron/glivela/commit/20e5205fd1ba99d48956a3baa877d61c4f1ad797))
+
 ## [0.1.0-alpha.152](https://github.com/petauron/glivela/compare/v0.1.0-alpha.151...v0.1.0-alpha.152) (2026-11-14)
 
 
