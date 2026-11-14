@@ -225,10 +225,14 @@ func routeDeletionReady(nodes map[string]Node, grant glivela.RouteGrant, now tim
 			continue
 		}
 		for _, current := range node.Desired.Entry.Grants {
-			if current.ID == grant.ID && current.EntryID == grant.EntryID && current.EgressID == grant.EgressID && current.IPv4EgressID == grant.IPv4EgressID && !current.Enabled && !current.Route.Enabled {
-				return true
+			if current.ID == grant.ID {
+				return current.EntryID == grant.EntryID && current.EgressID == grant.EgressID && current.IPv4EgressID == grant.IPv4EgressID && current.ClientChainID == grant.ClientChainID && !current.Enabled && !current.Route.Enabled
 			}
 		}
+		// A fresh applied plan without this grant already proves withdrawal.
+		// Deletion only hides its disabled ledger record; projection below must
+		// still confirm that no runtime policy would change.
+		return true
 	}
 	return false
 }
