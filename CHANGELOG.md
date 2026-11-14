@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.151](https://github.com/petauron/glivela/compare/v0.1.0-alpha.150...v0.1.0-alpha.151) (2026-11-14)
+
+
+### Bug Fixes
+
+* **routes:** preserve withdrawn credentials during record deletion ([#165](https://github.com/petauron/glivela/issues/165)) ([88b48b8](https://github.com/petauron/glivela/commit/88b48b841de1be0381b8a4443d953a02a3438a58))
+
 ## [0.1.0-alpha.150](https://github.com/petauron/glivela/compare/v0.1.0-alpha.149...v0.1.0-alpha.150) (2026-11-14)
 
 
