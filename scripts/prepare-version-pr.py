@@ -14,7 +14,23 @@ import urllib.request
 
 REPOSITORY = "petauron/glivela"
 ACTION_SHA = "45996ed1f6d02564a971a2fa1b5860e934307cf7"
-BUNDLE_FILES = {'action.js': ('f4a102e2ed79b0c79b78df61566945ecf717759f', 59), 'commit.hbs': ('3b2cd68534637a1879ec2b5e9d8dfea589d85137', 1194), 'commit1.hbs': ('641c2f377774274d6854208ad90d02574565dde0', 670), 'commit2.hbs': ('641c2f377774274d6854208ad90d02574565dde0', 670), 'esprima.js': ('593021f5e3ed174a5037bd2c4b52dd7cffc3b851', 122126), 'footer.hbs': ('dca482f281686f481823e6f4e66aac7ed6ce4dd7', 111), 'footer1.hbs': ('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', 0), 'header.hbs': ('49f56073d89b9016ca52ad2b278d513a578d4495', 173), 'header1.hbs': ('d7efc8fbc60158889dc51d2bc1d98b66366ad5cf', 171), 'header2.hbs': ('a4d6ec439e7a5fc08f44c3c74393ffe238c26081', 216), 'index.js': ('e05257adc9edcba5e5326418591c0a1ede12feab', 4303242), 'module.js': ('a1329e396188386c55afbd5c62e7185fb425045e', 585), 'template.hbs': ('2c1349a6cfbf50eec858a89897d435bae96f4973', 115), 'template1.hbs': ('3b194f06aa08cb25b938c3339c6e1c82bb333ff2', 302), 'template2.hbs': ('3b194f06aa08cb25b938c3339c6e1c82bb333ff2', 302)}
+BUNDLE_FILES = {
+    'action.js': ('f4a102e2ed79b0c79b78df61566945ecf717759f', 59),
+    'commit.hbs': ('3b2cd68534637a1879ec2b5e9d8dfea589d85137', 1194),
+    'commit1.hbs': ('641c2f377774274d6854208ad90d02574565dde0', 670),
+    'commit2.hbs': ('641c2f377774274d6854208ad90d02574565dde0', 670),
+    'esprima.js': ('593021f5e3ed174a5037bd2c4b52dd7cffc3b851', 122126),
+    'footer.hbs': ('dca482f281686f481823e6f4e66aac7ed6ce4dd7', 111),
+    'footer1.hbs': ('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', 0),
+    'header.hbs': ('49f56073d89b9016ca52ad2b278d513a578d4495', 173),
+    'header1.hbs': ('d7efc8fbc60158889dc51d2bc1d98b66366ad5cf', 171),
+    'header2.hbs': ('a4d6ec439e7a5fc08f44c3c74393ffe238c26081', 216),
+    'index.js': ('e05257adc9edcba5e5326418591c0a1ede12feab', 4303242),
+    'module.js': ('a1329e396188386c55afbd5c62e7185fb425045e', 585),
+    'template.hbs': ('2c1349a6cfbf50eec858a89897d435bae96f4973', 115),
+    'template1.hbs': ('3b194f06aa08cb25b938c3339c6e1c82bb333ff2', 302),
+    'template2.hbs': ('3b194f06aa08cb25b938c3339c6e1c82bb333ff2', 302),
+}
 
 
 def main():
@@ -72,7 +88,11 @@ def main():
         environment.update({"INPUT_TOKEN": token, "INPUT_REPO-URL": REPOSITORY,
                             "INPUT_TARGET-BRANCH": "main", "INPUT_SKIP-GITHUB-RELEASE": "true",
                             "INPUT_SKIP-GITHUB-PULL-REQUEST": "false", "GITHUB_OUTPUT": str(output)})
-        result = subprocess.run(["node", str(program)], cwd=root, env=environment,
+        # Use the Action's supported fetch injection with this workstation's
+        # native transport; do not rely on the bundled runner transport.
+        invocation = ("require(process.argv[1]).main(globalThis.fetch)"
+                      ".catch(error => { console.error(error.message); process.exitCode = 1; })")
+        result = subprocess.run(["node", "-e", invocation, str(program)], cwd=root, env=environment,
                                 text=True, capture_output=True, timeout=1200)
         if result.returncode:
             diagnostic = (result.stdout + result.stderr).replace(token, "[REDACTED]")

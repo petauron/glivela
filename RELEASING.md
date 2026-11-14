@@ -20,7 +20,8 @@ The helper reuses the exact bundled Release Please v5 Action already pinned in
 this repository. It downloads that bundle into a temporary directory, verifies
 its pinned Git blob digest, and removes the temporary files afterward. It needs
 existing Python 3, Node.js 24 or newer, and the existing Git credential helper;
-it installs no packages and creates no App, PAT, login or CI secret. Credentials
+it uses Node native fetch through the Action's supported entry point, installs no
+packages and creates no App, PAT, login or CI secret. Credentials
 are passed only in the child process environment and are not written to disk or
 printed. Run it on a trusted workstation, never inside an Actions job.
 
