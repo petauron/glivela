@@ -115,7 +115,12 @@ func (s *Store) BackupController(now time.Time) error {
 	defer clear(key)
 	directory := filepath.Dir(s.path)
 	material, snapshot, err := readOwnedBusiness(directory, key)
-	if err != nil || snapshot != s.business.snapshotID || !reflect.DeepEqual(material, s.business.material) {
+	// Optional empty maps are omitted on disk. Compare their canonical JSON
+	// meaning instead of Go's nil-versus-empty representation, while retaining
+	// every serialized identity, configuration and accounting field.
+	observedMaterial, observedErr := json.Marshal(material)
+	expectedMaterial, expectedErr := json.Marshal(s.business.material)
+	if err != nil || observedErr != nil || expectedErr != nil || snapshot != s.business.snapshotID || !bytes.Equal(observedMaterial, expectedMaterial) {
 		return errors.New("control: controller backup source changed")
 	}
 	value := controllerBackup{Version: 1, CreatedAt: now.UTC(), Files: map[string]json.RawMessage{}}
