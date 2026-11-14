@@ -38,7 +38,11 @@ func NewHostGate(peer PeerIdentity, gid uint32, revision uint64, transport ...gl
 		return nil, errors.New("landing: invalid public listener port")
 	}
 	if endpoint != "" {
-		if !glivela.PublicTransportIPv4(endpoint) && !glivela.PublicTransportIPv6(endpoint) {
+		if len(transport) == 1 && transport[0].PrivateLink != nil && transport[0].Validate() != nil {
+			return nil, errors.New("landing: invalid bound private endpoint")
+		}
+		private := len(transport) == 1 && transport[0].PrivateLink != nil && transport[0].Validate() == nil && endpoint == transport[0].PrivateLink.Address
+		if !glivela.PublicTransportIPv4(endpoint) && !glivela.PublicTransportIPv6(endpoint) && !private {
 			return nil, errors.New("landing: invalid public endpoint")
 		}
 		identity = append(identity, []byte("\npublic:"+endpoint)...)

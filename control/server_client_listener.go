@@ -53,7 +53,10 @@ func boundClientListenerIn(nodes map[string]Node, material glivela.ImportMateria
 		if c.Transport == "ipv6-ss2022" {
 			address = c.ServerIPv6
 		}
-		if route.Transport.PublicAddress != address || route.Transport.Key != c.Key || route.Port != c.Port || route.Transport.ListenerPort() != c.Port || !slices.ContainsFunc(target.Desired.Landing.ClientListeners, func(l landing.ClientListener) bool { return reflect.DeepEqual(l, listener) }) {
+		if c.PrivateLink != nil {
+			address = c.PrivateLink.Address
+		}
+		if !reflect.DeepEqual(route.Transport.PrivateLink, c.PrivateLink) || route.Transport.PublicAddress != address || route.Transport.Key != c.Key || route.Port != c.Port || route.Transport.ListenerPort() != c.Port || !slices.ContainsFunc(target.Desired.Landing.ClientListeners, func(l landing.ClientListener) bool { return reflect.DeepEqual(l, listener) }) {
 			return glivela.ClientChain{}, false
 		}
 		return c, true

@@ -173,9 +173,17 @@ func TestOfficialXrayEntryPlanValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	privatePlan := routed.clone().Entry
+	link := &glivela.PrivateClientLink{Source: "10.20.0.3", Address: "10.20.0.2", SourceInterface: "ens8", Interface: "ens8"}
+	privatePlan.Peers[0].Transport = glivela.PrivateTransport{Protocol: "ss2022", PublicAddress: link.Address, PrivateLink: link, ClientListenerID: "enrolled-client", Port: 24000, Key: "MDEyMzQ1Njc4OWFiY2RlZg=="}
+	privatePlan.Peers[0].Port = 24000
+	private, err := NewEntryDesired(*privatePlan, network)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Empty authentication inventories must at least validate with the pinned
 	// original core. This is syntax evidence, not actual authentication denial.
-	for _, desired := range []Desired{d, routed, disabled} {
+	for _, desired := range []Desired{d, routed, disabled, private} {
 		path := filepath.Join(t.TempDir(), "entry.json")
 		if err := os.WriteFile(path, desired.Config, 0600); err != nil {
 			t.Fatal(err)

@@ -55,6 +55,13 @@ func (d *NativeEntryDriver) Validate(ctx context.Context, desired Desired, confi
 	if err := d.plan(desired); err != nil {
 		return err
 	}
+	for _, route := range desired.Entry.Peers {
+		if link := route.Transport.PrivateLink; link != nil {
+			if err := verifyPrivateClientInterface(link.SourceInterface, link.Source); err != nil {
+				return err
+			}
+		}
+	}
 	for _, link := range desired.Entry.ClientLinks {
 		if err := verifyPrivateClientInterface(link.SourceInterface, link.Source); err != nil {
 			return err
@@ -110,6 +117,20 @@ func (d *NativeEntryDriver) policy(desired Desired) (landing.EntryFirewall, erro
 			if route.PeerKey() == peer.PeerKey() {
 				dial := route.DialTransport()
 				address := dial.Endpoint(route.Address)
+				if link := dial.PrivateLink; link != nil {
+					if err := verifyPrivateClientInterface(link.SourceInterface, link.Source); err != nil {
+						return landing.EntryFirewall{}, err
+					}
+					if slices.ContainsFunc(policy.PrivateClients, func(p glivela.PrivateClientPolicy) bool {
+						return p.ID == dial.ClientListenerID && (p.PrivateClientLink != *link || p.Port != dial.ListenerPort())
+					}) {
+						return landing.EntryFirewall{}, errors.New("control: private server listener policy differs")
+					}
+					if !slices.ContainsFunc(policy.PrivateClients, func(p glivela.PrivateClientPolicy) bool { return p.ID == dial.ClientListenerID }) {
+						policy.PrivateClients = append(policy.PrivateClients, glivela.PrivateClientPolicy{PrivateClientLink: *link, ID: dial.ClientListenerID, Port: dial.ListenerPort()})
+					}
+					continue
+				}
 				if !slices.Contains(policy.Peers, address) {
 					policy.Peers = append(policy.Peers, address)
 				}

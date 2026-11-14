@@ -160,7 +160,7 @@ func (p RoutePeer) Validate() error {
 	if (p.Relay == nil) != (p.ClientChainID == "") {
 		return errors.New("glivela: incomplete three-hop peer")
 	}
-	if p.Relay != nil && (!ValidIdentifier(p.ClientChainID) || p.ClientChainID == p.EgressID || p.Transport.ClientListenerID != p.ClientChainID || p.Relay.ValidateServerRelay(p.Transport) != nil) {
+	if p.Relay != nil && (p.Transport.PrivateLink != nil || !ValidIdentifier(p.ClientChainID) || p.ClientChainID == p.EgressID || p.Transport.ClientListenerID != p.ClientChainID || p.Relay.ValidateServerRelay(p.Transport) != nil) {
 		return errors.New("glivela: invalid three-hop peer")
 	}
 	address, err := netip.ParseAddr(p.Address)

@@ -136,6 +136,10 @@ func (d Desired) clone() Desired {
 		plan.ClientLinks = slices.Clone(plan.ClientLinks)
 		plan.Peers = slices.Clone(plan.Peers)
 		for i := range plan.Peers {
+			if plan.Peers[i].Transport.PrivateLink != nil {
+				link := *plan.Peers[i].Transport.PrivateLink
+				plan.Peers[i].Transport.PrivateLink = &link
+			}
 			if plan.Peers[i].Relay != nil {
 				r := *plan.Peers[i].Relay
 				plan.Peers[i].Relay = &r
