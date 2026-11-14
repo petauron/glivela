@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.150](https://github.com/petauron/glivela/compare/v0.1.0-alpha.149...v0.1.0-alpha.150) (2026-11-14)
+
+
+### Bug Fixes
+
+* **routes:** delete withdrawn disabled route records ([#162](https://github.com/petauron/glivela/issues/162)) ([9a70abf](https://github.com/petauron/glivela/commit/9a70abfb2c3b1518bc6a4314b22afd71d67a09b5))
+
 ## [0.1.0-alpha.149](https://github.com/petauron/glivela/compare/v0.1.0-alpha.148...v0.1.0-alpha.149) (2026-11-14)
 
 
