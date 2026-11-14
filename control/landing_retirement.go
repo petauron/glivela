@@ -64,7 +64,7 @@ func (s *Store) retireReturnedNode(ctx context.Context, change RetireLandingChan
 		if !ok || node.ID != change.ID || (node.Desired.Entry != nil) != entry || node.Desired.Revision != change.ExpectedRevision || node.TransportTail != nil {
 			return refused
 		}
-		if entry && (node.ReportedAt.IsZero() || time.Since(node.ReportedAt) < 5*time.Minute || s.speedHub != nil && s.speedHub.online(change.CertificateID)) {
+		if entry && (time.Since(pause.ChangedAt) < 5*time.Minute || !node.ReportedAt.IsZero() && time.Since(node.ReportedAt) < 5*time.Minute || s.speedHub != nil && s.speedHub.online(change.CertificateID)) {
 			return refused
 		}
 		change.hostID = runtimeHostID(s.business.material, node)
