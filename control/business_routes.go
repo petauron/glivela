@@ -196,7 +196,15 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 			return AccountChangeResult{}, err
 		}
 	}
-	projected, err := projectManagedRoutes(s.nodes, next, change.EntryID)
+	var projected map[string]Node
+	var err error
+	if change.Delete {
+		// A ledger deletion must preserve the enrolled credential set, including
+		// credentials already withdrawn from native runtime during handover.
+		projected, _, err = projectBusinessEntries(s.nodes, next, time.Now())
+	} else {
+		projected, err = projectManagedRoutes(s.nodes, next, change.EntryID)
+	}
 	if err != nil {
 		return AccountChangeResult{}, err
 	}
