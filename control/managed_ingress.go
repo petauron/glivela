@@ -20,13 +20,14 @@ import (
 // never receives the provider's DNS key or the host manager's admin session.
 // Extra provider metadata is intentionally not part of this portable contract.
 type ManagedIngressResource struct {
-	ID              string `json:"id"`
-	Hostname        string `json:"hostname"`
-	Address         string `json:"address"`
-	Type            string `json:"type"`
-	Revision        int64  `json:"revision"`
-	AppliedRevision int64  `json:"appliedRevision"`
-	Status          string `json:"status"`
+	ID               string `json:"id"`
+	Hostname         string `json:"hostname"`
+	Address          string `json:"address"`
+	SecondaryAddress string `json:"secondaryAddress,omitempty"`
+	Type             string `json:"type"`
+	Revision         int64  `json:"revision"`
+	AppliedRevision  int64  `json:"appliedRevision"`
+	Status           string `json:"status"`
 }
 
 func (s *Store) managedIngressHost(ctx context.Context, input AdvertiseHostChange) (string, error) {
@@ -38,6 +39,14 @@ func (s *Store) managedIngressHost(ctx context.Context, input AdvertiseHostChang
 	address, err := netip.ParseAddr(resource.Address)
 	if err != nil || !landing.PublicIP(address) || resource.Type != "A" && resource.Type != "AAAA" || (resource.Type == "A") != address.Is4() {
 		return "", invalid
+	}
+	allowed := map[netip.Addr]bool{address.Unmap(): true}
+	if resource.SecondaryAddress != "" {
+		secondary, err := netip.ParseAddr(resource.SecondaryAddress)
+		if err != nil || !landing.PublicIP(secondary) || secondary.Is4() == address.Is4() || secondary.String() != resource.SecondaryAddress {
+			return "", invalid
+		}
+		allowed[secondary.Unmap()] = true
 	}
 	var previous string
 	s.mu.Lock()
@@ -66,10 +75,15 @@ func (s *Store) managedIngressHost(ctx context.Context, input AdvertiseHostChang
 		if err != nil || len(ips) == 0 {
 			return "", invalid
 		}
+		seen := map[netip.Addr]bool{}
 		for _, ip := range ips {
-			if ip.Unmap() != address.Unmap() {
+			if !allowed[ip.Unmap()] {
 				return "", invalid
 			}
+			seen[ip.Unmap()] = true
+		}
+		if len(seen) != len(allowed) {
+			return "", invalid
 		}
 	}
 	return resource.Hostname, nil

@@ -516,6 +516,19 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				Revision     uint64 `json:"revision"`
 				ConfigSHA256 string `json:"configSha256"`
 			}{desired.Revision, desired.ConfigSHA256})
+		case "/v1/admin/public-ingress":
+			var request PublicIngressChange
+			if decode(http.MaxBytesReader(w, r.Body, 8192), &request) != nil {
+				http.Error(w, "invalid public ingress change", http.StatusBadRequest)
+				return
+			}
+			view, err := store.ChangePublicIngress(r.Context(), request)
+			if err != nil {
+				http.Error(w, "public ingress change refused; refresh actual state", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(view)
 		case "/v1/admin/private-listener":
 			var request PrivateListenerChange
 			if decode(http.MaxBytesReader(w, r.Body, 4096), &request) != nil {

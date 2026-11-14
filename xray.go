@@ -49,19 +49,20 @@ func (m CredentialMaterial) Validate() error {
 }
 
 type RealityEndpoint struct {
-	ID            string   `json:"id"`
-	EntryID       string   `json:"entryId"`
-	InboundTag    string   `json:"inboundTag"`
-	ListenAddress string   `json:"listenAddress"`
-	ListenPort    int      `json:"listenPort"`
-	AdvertiseHost string   `json:"advertiseHost"`
-	AdvertisePort int      `json:"advertisePort"`
-	Target        string   `json:"target"`
-	ServerNames   []string `json:"serverNames"`
-	PrivateKey    string   `json:"privateKey"`
-	PublicKey     string   `json:"publicKey"`
-	ShortIDs      []string `json:"shortIds"`
-	Fingerprint   string   `json:"fingerprint"`
+	ID                string   `json:"id"`
+	EntryID           string   `json:"entryId"`
+	InboundTag        string   `json:"inboundTag"`
+	ListenAddress     string   `json:"listenAddress"`
+	IPv4ListenAddress string   `json:"ipv4ListenAddress,omitempty"`
+	ListenPort        int      `json:"listenPort"`
+	AdvertiseHost     string   `json:"advertiseHost"`
+	AdvertisePort     int      `json:"advertisePort"`
+	Target            string   `json:"target"`
+	ServerNames       []string `json:"serverNames"`
+	PrivateKey        string   `json:"privateKey"`
+	PublicKey         string   `json:"publicKey"`
+	ShortIDs          []string `json:"shortIds"`
+	Fingerprint       string   `json:"fingerprint"`
 }
 
 type HysteriaEndpoint struct {
@@ -109,10 +110,38 @@ func HysteriaCertificateNotAfter(endpoint HysteriaEndpoint) (time.Time, error) {
 
 func (e RealityEndpoint) Validate() error {
 	address, addressErr := netip.ParseAddr(e.ListenAddress)
-	if e.validateSubscription() != nil || !validInboundTag(e.InboundTag) || addressErr != nil || !(privateServiceIPv4(address) || address.Is6() && CompositePublicIP(address)) || address.String() != e.ListenAddress || (e.ListenPort < 1024 && !(e.ListenPort == DefaultRealityPort && privateServiceIPv4(address))) || !validPort(e.ListenPort) || !validRealityTarget(e.Target) || strings.TrimSpace(e.PrivateKey) == "" || len(e.PrivateKey) > 256 {
+	if e.validateSubscription() != nil || !validInboundTag(e.InboundTag) || addressErr != nil || !(privateServiceIPv4(address) || address.Is6() && CompositePublicIP(address)) || address.String() != e.ListenAddress || (e.ListenPort < 1024 && !(e.ListenPort == DefaultRealityPort && (privateServiceIPv4(address) || address.Is6() && CompositePublicIP(address)))) || !validPort(e.ListenPort) || !validRealityTarget(e.Target) || strings.TrimSpace(e.PrivateKey) == "" || len(e.PrivateKey) > 256 {
 		return errors.New("glivela: invalid REALITY endpoint")
 	}
+	if e.IPv4ListenAddress != "" {
+		ipv4, err := netip.ParseAddr(e.IPv4ListenAddress)
+		if err != nil || !ipv4.Is4() || !CompositePublicIP(ipv4) || ipv4.String() != e.IPv4ListenAddress || !address.Is6() || !CompositePublicIP(address) || e.ListenPort != DefaultRealityPort || e.AdvertisePort != DefaultRealityPort || !validInboundTag(e.InboundTag+"-ipv4") {
+			return errors.New("glivela: dual-stack REALITY requires exact public IPv6/IPv4 listeners on443")
+		}
+	}
 	return nil
+}
+
+// One logical endpoint retains its credentials, routes and user counters across
+// two exact sockets. No wildcard binding or second account is introduced.
+type RealityListenerBinding struct {
+	Address, Tag  string
+	ProxyProtocol bool
+}
+
+func (e RealityEndpoint) ListenerBindings() []RealityListenerBinding {
+	bindings := []RealityListenerBinding{{Address: e.ListenAddress, Tag: e.InboundTag, ProxyProtocol: privateServiceIPv4(netip.MustParseAddr(e.ListenAddress))}}
+	if e.IPv4ListenAddress != "" {
+		bindings = append(bindings, RealityListenerBinding{Address: e.IPv4ListenAddress, Tag: e.InboundTag + "-ipv4"})
+	}
+	return bindings
+}
+func (e RealityEndpoint) InboundTags() []string {
+	tags := []string{e.InboundTag}
+	if e.IPv4ListenAddress != "" {
+		tags = append(tags, e.InboundTag+"-ipv4")
+	}
+	return tags
 }
 
 func (e RealityEndpoint) validateSubscription() error {
@@ -221,27 +250,29 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 				"level": 0,
 			})
 		}
-		inbounds = append(inbounds, map[string]any{
-			"listen":   endpoint.ListenAddress,
-			"port":     endpoint.ListenPort,
-			"protocol": "vless",
-			"tag":      endpoint.InboundTag,
-			"settings": map[string]any{"clients": clients, "decryption": "none"},
-			// Restore HTTP/TLS hostnames when a client sends a resolved IP, so
-			// the final SOCKS egress can resolve the destination in its own family.
-			"sniffing": map[string]any{"enabled": true, "destOverride": []string{"http", "tls"}, "routeOnly": false},
-			"streamSettings": map[string]any{
-				"method":      "raw",
-				"rawSettings": map[string]any{"acceptProxyProtocol": !netip.MustParseAddr(endpoint.ListenAddress).Is6(), "header": map[string]any{"type": "none"}},
-				"security":    "reality",
-				"realitySettings": map[string]any{
-					"show": false, "xver": 0, "target": endpoint.Target,
-					"serverNames": slices.Clone(endpoint.ServerNames), "privateKey": endpoint.PrivateKey,
-					"minClientVer": XrayMinimumClient, "maxClientVer": "", "maxTimediff": 0,
-					"shortIds": slices.Clone(endpoint.ShortIDs),
+		for _, binding := range endpoint.ListenerBindings() {
+			inbounds = append(inbounds, map[string]any{
+				"listen":   binding.Address,
+				"port":     endpoint.ListenPort,
+				"protocol": "vless",
+				"tag":      binding.Tag,
+				"settings": map[string]any{"clients": clients, "decryption": "none"},
+				// Restore HTTP/TLS hostnames when a client sends a resolved IP, so
+				// the final SOCKS egress can resolve the destination in its own family.
+				"sniffing": map[string]any{"enabled": true, "destOverride": []string{"http", "tls"}, "routeOnly": false},
+				"streamSettings": map[string]any{
+					"method":      "raw",
+					"rawSettings": map[string]any{"acceptProxyProtocol": binding.ProxyProtocol, "header": map[string]any{"type": "none"}},
+					"security":    "reality",
+					"realitySettings": map[string]any{
+						"show": false, "xver": 0, "target": endpoint.Target,
+						"serverNames": slices.Clone(endpoint.ServerNames), "privateKey": endpoint.PrivateKey,
+						"minClientVer": XrayMinimumClient, "maxClientVer": "", "maxTimediff": 0,
+						"shortIds": slices.Clone(endpoint.ShortIDs),
+					},
 				},
-			},
-		})
+			})
+		}
 	}
 	for _, endpoint := range projection.hysteriaEndpoints {
 		users := make([]any, 0, len(projection.credentials[endpoint.EntryID]))
@@ -356,6 +387,22 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 		)
 	}
 	outbounds = append(outbounds, map[string]any{"protocol": "blackhole", "tag": "blocked", "settings": map[string]any{}})
+	for _, value := range rules {
+		rule, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		tags, ok := rule["inboundTag"].([]string)
+		if !ok {
+			continue
+		}
+		for _, endpoint := range projection.realityEndpoints {
+			if endpoint.IPv4ListenAddress != "" && slices.Contains(tags, endpoint.InboundTag) && !slices.Contains(tags, endpoint.InboundTag+"-ipv4") {
+				tags = append(tags, endpoint.InboundTag+"-ipv4")
+			}
+		}
+		rule["inboundTag"] = tags
+	}
 	config := map[string]any{
 		"log":       map[string]any{"loglevel": "warning"},
 		"inbounds":  inbounds,
@@ -438,7 +485,10 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 		return xrayProjection{}, err
 	}
 	for _, endpoint := range plan.RealityEndpoints {
-		for _, address := range []string{endpoint.AdvertiseHost, endpoint.ListenAddress} {
+		for _, address := range []string{endpoint.AdvertiseHost, endpoint.ListenAddress, endpoint.IPv4ListenAddress} {
+			if address == "" {
+				continue
+			}
 			if err := plan.PublicSSH.RequireHost(address); err != nil {
 				return xrayProjection{}, err
 			}
@@ -477,7 +527,13 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 		if endpoint.Validate() != nil || tags[endpoint.InboundTag] || ports[portKey] || endpoint.ListenPort == XrayAPIListenPort {
 			return xrayProjection{}, errors.New("glivela: conflicting Xray endpoint")
 		}
-		entryTags[endpoint.EntryID] = append(entryTags[endpoint.EntryID], endpoint.InboundTag)
+		if endpoint.IPv4ListenAddress != "" && tags[endpoint.InboundTag+"-ipv4"] {
+			return xrayProjection{}, errors.New("glivela: duplicate dual-stack inbound tag")
+		}
+		if endpoint.IPv4ListenAddress != "" {
+			tags[endpoint.InboundTag+"-ipv4"] = true
+		}
+		entryTags[endpoint.EntryID] = append(entryTags[endpoint.EntryID], endpoint.InboundTags()...)
 		if routeTags[endpoint.EntryID] != "" {
 			return xrayProjection{}, errors.New("glivela: multiple routable inbounds share one entry")
 		}
@@ -541,7 +597,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 				return xrayProjection{}, err
 			}
 			for _, endpoint := range projection.realityEndpoints {
-				if endpoint.InboundTag == grant.InboundTag && (endpoint.ListenAddress == peer.Address || endpoint.ListenAddress == secondary.Address) {
+				if endpoint.InboundTag == grant.InboundTag && (endpoint.ListenAddress == peer.Address || endpoint.ListenAddress == secondary.Address || endpoint.IPv4ListenAddress != "" && (endpoint.IPv4ListenAddress == peer.Address || endpoint.IPv4ListenAddress == secondary.Address)) {
 					return xrayProjection{}, errors.New("glivela: composite landing transport is the entry machine")
 				}
 			}

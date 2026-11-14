@@ -32,6 +32,7 @@ outside the source checkout.
 - [Manual subscription order](docs/subscription-order.md)
 - [REALITY target changes](docs/reality-target-change.md)
 - [Startup readiness](docs/startup-readiness.md)
+- [Public443 and dual-stack ingress](docs/public-ingress-443.md)
 
 ## Diagnostics
 

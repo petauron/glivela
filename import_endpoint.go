@@ -14,7 +14,8 @@ import (
 type ImportEndpoint struct {
 	// PreviousAdvertiseHost authorizes recovery of the latest metadata-only
 	// subscription address change, without accepting unrelated runtime drift.
-	PreviousAdvertiseHost string `json:"previousAdvertiseHost,omitempty"`
+	PreviousAdvertiseHost string                `json:"previousAdvertiseHost,omitempty"`
+	PreviousPublicIngress *RealityPublicIngress `json:"previousPublicIngress,omitempty"`
 
 	RealityChanges       []RealityTargetChange `json:"realityChanges,omitempty"`
 	Reality              RealityEndpoint       `json:"reality"`
@@ -45,7 +46,24 @@ type ImportEndpoint struct {
 	UpdatedAt           string          `json:"updatedAt"`
 }
 
+// RealityPublicIngress is the exact previous socket tuple for forward recovery;
+// it contains no credentials, target, account or traffic snapshot.
+type RealityPublicIngress struct {
+	ListenPort        int    `json:"listenPort"`
+	AdvertisePort     int    `json:"advertisePort"`
+	IPv4ListenAddress string `json:"ipv4ListenAddress,omitempty"`
+}
+
 func (e ImportEndpoint) Validate() error {
+	if p := e.PreviousPublicIngress; p != nil {
+		previous := e.Reality
+		previous.ListenPort = p.ListenPort
+		previous.AdvertisePort = p.AdvertisePort
+		previous.IPv4ListenAddress = p.IPv4ListenAddress
+		if previous.Validate() != nil {
+			return errors.New("glivela: invalid previous public listener")
+		}
+	}
 	if e.PreviousAdvertiseHost != "" && (!validShareHost(e.PreviousAdvertiseHost) || e.PreviousAdvertiseHost == e.Reality.AdvertiseHost) {
 		return errors.New("glivela: invalid previous subscription host")
 	}
