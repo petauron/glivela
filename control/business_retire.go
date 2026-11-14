@@ -79,6 +79,11 @@ func (s *Store) RetireEntry(ctx context.Context, change RetireEntryChange) error
 		}
 	}
 	next := s.business.material
+	for _, resource := range next.ServerTransports {
+		if resource.EntryID == change.ID || resource.EgressID == change.ID || resource.Peer.Relay != nil && resource.Peer.Relay.NodeID == change.ID {
+			return errors.New("control: retire owned server transport first")
+		}
+	}
 	for _, chain := range next.ClientChains {
 		if chain.EntryID != change.ID {
 			continue
@@ -86,7 +91,7 @@ func (s *Store) RetireEntry(ctx context.Context, change RetireEntryChange) error
 		if chain.Enabled {
 			return errors.New("control: retire active client chain first")
 		}
-		if !clientChainDeletionReady(s.nodes, chain, now) {
+		if !clientChainDeletionReady(s.nodes, next, chain, now) {
 			return errors.New("control: client chain listener retirement not verified")
 		}
 	}

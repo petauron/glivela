@@ -252,18 +252,16 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 		}
 		published := glivela.PublishedRoute{Grant: grant, Protocol: glivela.VLESSReality, EntryName: names[grant.Base.ID], BaseLink: links[grant.Base.ID], RouteLink: links[grant.Route.ID], BaseProtocolIdentity: base.Credential.Identity, RouteProtocolIdentity: route.Credential.Identity}
 		if grant.ClientChainID != "" {
-			for _, chain := range m.ClientChains {
-				if chain.ID == grant.ClientChainID {
-					published.Name = chain.Name
-					if issued := s.subscriptionNames[chain.ID]; issued != "" {
-						published.Name = issued
-					}
-				}
-			}
-			if published.Name == "" {
+			resource, ok := m.ServerTransports[grant.ClientChainID]
+			if !ok || resource.AccountID != grant.AccountID {
 				return subscriptionContent{}, errSubscriptionUnverified
 			}
+			published.Name = resource.Name
+			if issued := s.subscriptionNames[resource.ID]; issued != "" {
+				published.Name = issued
+			}
 		}
+
 		label := s.subscriptionLandingLocked(grant.EgressID)
 		published.EgressRegionPrefix = importedLandingRegionPrefix(label.RegionCode)
 		published.IPv4EgressRegionPrefix = importedLandingRegionPrefix(s.subscriptionLandingLocked(grant.IPv4EgressID).RegionCode)
@@ -363,10 +361,14 @@ func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now tim
 		}
 		for _, peer := range entry.Desired.Entry.Peers {
 			if peer.PeerKey() == key && peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
-				chain, authorized := s.boundClientListener(entry, node, peer)
-				if authorized && chain.Relay != nil {
-					relay, err := chainRelay(s.nodes, chain)
-					return err == nil && s.subscriptionNodeEnabled(relay, now)
+				chain, authorized := s.boundServerTransport(entry, node, peer)
+				if authorized && chain.Peer.Relay != nil {
+					for _, relay := range s.nodes {
+						if relay.ID == chain.Peer.Relay.NodeID {
+							return s.subscriptionNodeEnabled(relay, now)
+						}
+					}
+					return false
 				}
 				return authorized
 			}

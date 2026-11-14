@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	glivela "github.com/petauron/glivela"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -38,6 +39,7 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ownServerFixtureTransports(t, s, entry)
 	if err = s.Put(entry); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +64,7 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 	}
 	entry = s.nodes[entryCert]
 	target = s.nodes[targetCert]
-	if _, ok := s.boundClientListener(entry, target, plan.Peers[0]); !ok {
+	if _, ok := s.boundServerTransport(entry, target, plan.Peers[0]); !ok {
 		t.Fatalf("valid existing listener rejected: expected exit %s landing %s override %s", entry.Desired.EntryNetwork.Peers[0].ExpectedExit, target.Desired.Landing.EgressIP, c.EgressIP)
 	}
 	for _, fault := range []string{"key", "port", "address", "listener"} {
@@ -77,7 +79,7 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 		case "listener":
 			peer.Transport.ClientListenerID = "other-listener"
 		}
-		if _, ok := s.boundClientListener(entry, target, peer); ok {
+		if _, ok := s.boundServerTransport(entry, target, peer); ok {
 			t.Fatal("accepted mismatched", fault)
 		}
 	}
@@ -125,9 +127,9 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 	after := *s.nodes[targetCert].Desired.Landing
 	after.Revision = before.Revision
 	if !reflect.DeepEqual(before, after) {
-		t.Fatalf("listener retention failed: before=%d after=%d used=%v", len(before.ClientListeners), len(s.nodes[targetCert].Desired.Landing.ClientListeners), clientListenerUsedByServer(s.nodes, s.business.material, c, time.Now()))
+		t.Fatalf("listener retention failed: before=%d after=%d used=%v", len(before.ClientListeners), len(s.nodes[targetCert].Desired.Landing.ClientListeners), serverOwnsListener(s.business.material, c.ID))
 	}
-	if !clientListenerUsedByServer(s.nodes, s.business.material, c, time.Now()) {
+	if !serverOwnsListener(s.business.material, c.ID) {
 		t.Fatal("enabled server grant did not retain listener")
 	}
 	_, grants, err := effectiveBusinessCredentials(s.business.material, time.Now())
@@ -151,4 +153,22 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 		t.Fatal("revoked final publication retained socket")
 	}
 
+}
+
+// Fixture-only enrollment: create the new independent ownership state from
+// the existing synthetic listener before exercising server route behavior.
+func ownServerFixtureTransports(t *testing.T, s *Store, entry Node) {
+	t.Helper()
+	nodes := maps.Clone(s.nodes)
+	nodes[entry.CertificateID] = entry
+	original := s.business.material
+	original.ServerTransportVersion = 0
+	original.ServerTransports = nil
+	migrated, _, err := migrateServerTransports(nodes, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.saveOwnedBusinessLocked(migrated); err != nil {
+		t.Fatal(err)
+	}
 }

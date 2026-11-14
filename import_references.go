@@ -160,16 +160,27 @@ func (m ImportMaterial) validateReferences() error {
 	managed := map[string]bool{}
 	for _, a := range m.Plan.Accounts {
 		for _, g := range a.Grants {
-			if g.ClientChainID != "" && !slices.ContainsFunc(m.ClientChains, func(c ClientChain) bool {
-				return c.ID == g.ClientChainID && c.Relay != nil && c.AccountID == a.Account.ID && c.EntryID == g.EntryID && c.EgressID == g.EgressID && !m.DeletedClientChains[c.ID]
-			}) {
-				return invalid
+			if g.ClientChainID != "" && !m.DeletedRoutes[g.ID] {
+				if m.ServerTransportVersion == 1 {
+					owner, ok := m.ServerTransports[g.ClientChainID]
+					if !ok || owner.AccountID != a.Account.ID || owner.EntryID != g.EntryID || owner.EgressID != g.EgressID || owner.Peer.Relay == nil || owner.Peer.ClientChainID != g.ClientChainID {
+						return invalid
+					}
+				} else if !slices.ContainsFunc(m.ClientChains, func(c ClientChain) bool {
+					return c.ID == g.ClientChainID && c.Relay != nil && c.AccountID == a.Account.ID && c.EntryID == g.EntryID && c.EgressID == g.EgressID && !m.DeletedClientChains[c.ID]
+				}) {
+					return invalid
+				}
 			}
+
 			if cert, ok := m.ManagedRouteLandings[g.ID]; ok {
 				if len(cert) != 64 || strings.Trim(cert, "0123456789abcdef") != "" || g.IPv4EgressID != "" {
 					return invalid
 				}
 				managed[g.ID] = true
+			}
+			if m.DeletedRoutes[g.ID] {
+				continue
 			}
 			knownExit := func(id string) bool {
 				if _, imported := r.Nodes[id]; imported {
@@ -178,8 +189,15 @@ func (m ImportMaterial) validateReferences() error {
 				if managed[g.ID] && id == g.EgressID {
 					return true
 				}
-				// A managed client landing can be retained as the same account's
-				// server-forwarding exit. Do not fabricate an imported host alias.
+				if m.ServerTransportVersion == 1 {
+					for _, owner := range m.ServerTransports {
+						if owner.AccountID == a.Account.ID && owner.EntryID == g.EntryID && owner.EgressID == id && owner.Peer.ClientChainID == g.ClientChainID {
+							return true
+						}
+					}
+					return false
+				}
+				// Version zero is decoded only for the one-way ownership migration.
 				shared, managed := m.ClientLandings[id]
 				return managed && shared.AccountID == a.Account.ID && slices.ContainsFunc(m.ClientChains, func(c ClientChain) bool {
 					return c.AccountID == a.Account.ID && c.EntryID == g.EntryID && c.EgressID == id

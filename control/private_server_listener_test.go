@@ -39,12 +39,13 @@ func TestPrivateServerReusesListenerAfterClientWithdrawn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ownServerFixtureTransports(t, s, entry)
 	if err = s.Put(entry); err != nil {
 		t.Fatal(err)
 	}
 	entry = s.nodes[entryCert]
 	target := s.nodes[targetCert]
-	if _, ok := s.boundClientListener(entry, target, entry.Desired.Entry.Peers[0]); !ok {
+	if _, ok := s.boundServerTransport(entry, target, entry.Desired.Entry.Peers[0]); !ok {
 		t.Fatal("enrolled private listener rejected")
 	}
 	for _, fault := range []string{"source", "destination", "interface", "key", "listener", "missing-link"} {
@@ -63,7 +64,7 @@ func TestPrivateServerReusesListenerAfterClientWithdrawn(t *testing.T) {
 		case "missing-link":
 			p.Transport.PrivateLink = nil
 		}
-		if _, ok := s.boundClientListener(entry, target, p); ok {
+		if _, ok := s.boundServerTransport(entry, target, p); ok {
 			t.Fatal("accepted mismatched", fault)
 		}
 	}
@@ -85,7 +86,7 @@ func TestPrivateServerReusesListenerAfterClientWithdrawn(t *testing.T) {
 	if !reflect.DeepEqual(listeners, s.nodes[targetCert].Desired.Landing.ClientListeners) {
 		t.Fatal("server listener was removed or changed")
 	}
-	if !clientListenerUsedByServer(s.nodes, s.business.material, c, time.Now()) {
+	if !serverOwnsListener(s.business.material, c.ID) {
 		t.Fatal("server binding lost")
 	}
 	if len(s.nodes[entryCert].Desired.Entry.ClientLinks) != 0 {

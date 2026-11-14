@@ -62,7 +62,7 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 			return publicPeerProof{}, refused
 		}
 		if route.Transport.ClientListenerID != "" {
-			if c, ok := s.boundClientListener(entry, target, route); !ok || !s.serverRelayLive(c, peer, now) {
+			if c, ok := s.boundServerTransport(entry, target, route); !ok || !s.serverRelayLive(c, peer, now) {
 				return publicPeerProof{}, refused
 			}
 			return publicPeerProof{peer.ClientChainID, entry.ID, target.ID, entry.Desired.Revision, entry.Desired.ConfigSHA256, peer.Identity, target.Desired.Revision, target.Desired.ConfigSHA256, now}, nil
@@ -123,10 +123,15 @@ func (d *EntryDriver) SetPublicPeerVerifier(verify PublicPeerVerifier) {
 	d.monitors.verifyPublicPeer = verify
 }
 
-func (s *Store) serverRelayLive(c glivela.ClientChain, peer EntryPeer, now time.Time) bool {
-	if c.Relay == nil {
+func (s *Store) serverRelayLive(c glivela.ServerTransport, peer EntryPeer, now time.Time) bool {
+	if c.Peer.Relay == nil {
 		return true
 	}
-	relay, err := chainRelay(s.nodes, c)
-	return err == nil && !s.suspended(relay.ID, now) && s.availableRuntime(relay, now) && relay.Receipt.ManagementIdentity != nil && peer.RelayIdentity != nil && *relay.Receipt.ManagementIdentity == *peer.RelayIdentity && peer.RelayIdentity.Address == relay.Desired.Landing.Address
+	var relay Node
+	for _, node := range s.nodes {
+		if node.ID == c.Peer.Relay.NodeID {
+			relay = node
+		}
+	}
+	return relay.Desired.Landing != nil && relay.CertificateID == c.Peer.Relay.CertificateID && !s.suspended(relay.ID, now) && s.availableRuntime(relay, now) && relay.Receipt.ManagementIdentity != nil && peer.RelayIdentity != nil && *relay.Receipt.ManagementIdentity == *peer.RelayIdentity && peer.RelayIdentity.Address == relay.Desired.Landing.Address
 }

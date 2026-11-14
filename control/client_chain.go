@@ -135,6 +135,16 @@ func clientChainPort(next glivela.ImportMaterial, nodeID string) int {
 		if _, shared := next.ClientLandings[nodeID]; shared && port == 24000 {
 			continue
 		}
+		reserved := false
+		for _, resource := range next.ServerTransports {
+			if resource.EgressID == nodeID && resource.Listener.Port == port || resource.Peer.Relay != nil && resource.Peer.Relay.NodeID == nodeID && resource.RelayListener.Port == port {
+				reserved = true
+				break
+			}
+		}
+		if reserved {
+			continue
+		}
 		if !slices.ContainsFunc(next.ClientChains, func(v glivela.ClientChain) bool {
 			return !next.DeletedClientChains[v.ID] && (v.EgressID == nodeID && v.Port == port || v.Relay != nil && v.Relay.NodeID == nodeID && v.Relay.Port == port)
 		}) {
@@ -192,14 +202,14 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 		if c.Delete && (old.Name != c.Name || c.EgressIP != nil && *c.EgressIP != old.EgressIP) {
 			return AccountChangeResult{}, invalid
 		}
-		if c.Delete && !deleted && (old.Enabled || !clientChainDeletionReady(s.nodes, old, time.Now())) {
+		if c.Delete && !deleted && (old.Enabled || !clientChainDeletionReady(s.nodes, next, old, time.Now())) {
 			return AccountChangeResult{}, errors.New("control: client chain must be disabled and applied before deletion")
 		}
 		if old.PrivateLink != nil && c.PrivateLink == nil && !c.ClearPrivateLink {
 			v := *old.PrivateLink
 			c.PrivateLink = &v
 		}
-		if (c.ClearPrivateLink || !reflect.DeepEqual(old.PrivateLink, c.PrivateLink)) && clientListenerUsedByServer(s.nodes, next, old, time.Now()) {
+		if (c.ClearPrivateLink || !reflect.DeepEqual(old.PrivateLink, c.PrivateLink)) && serverOwnsListener(next, old.ID) {
 			return AccountChangeResult{}, errors.New("control: client link is used by server forwarding")
 		}
 		same = reflect.DeepEqual(old.PrivateLink, c.PrivateLink) && old.Name == c.Name && old.Enabled == c.Enabled && deleted == c.Delete && (c.Transport == "" || c.Transport == old.Transport) && (c.EgressIP == nil || *c.EgressIP == old.EgressIP)
@@ -364,9 +374,37 @@ func (s *Store) ChangeClientChain(ctx context.Context, c ClientChainChange) (Acc
 	return s.accountChangeResult(c.AccountID, time.Now()), nil
 }
 
-// A deleted chain keeps its identity and history, but its landing listener
-// must already be absent from the freshly confirmed desired configuration.
-func clientChainDeletionReady(nodes map[string]Node, chain glivela.ClientChain, now time.Time) bool {
+// A deleted publication retains its identity/history. Its listener must either
+// be freshly withdrawn or remain independently owned and freshly applied.
+func clientChainDeletionReady(nodes map[string]Node, material glivela.ImportMaterial, chain glivela.ClientChain, now time.Time) bool {
+	if resource, ok := material.ServerTransports[chain.ID]; ok {
+		if resource.AccountID != chain.AccountID || resource.EntryID != chain.EntryID || resource.EgressID != chain.EgressID {
+			return false
+		}
+		var entry, target Node
+		for _, n := range nodes {
+			if n.ID == resource.EntryID {
+				entry = n
+			}
+			if n.ID == resource.EgressID {
+				target = n
+			}
+		}
+		_, bound := boundServerTransportIn(nodes, material, entry, target, resource.Peer)
+		if bound && runtimeFresh(entry, now) && runtimeFresh(target, now) {
+			if resource.Peer.Relay == nil {
+				return true
+			}
+			for _, n := range nodes {
+				if n.ID == resource.Peer.Relay.NodeID && runtimeFresh(n, now) {
+					return true
+				}
+			}
+		}
+		// A withdrawn server route may already have removed the listener.
+		// In that case use the same applied-withdrawal check as a client route.
+	}
+
 	ids := []string{chain.EgressID}
 	if chain.Relay != nil {
 		ids = append(ids, chain.Relay.NodeID)
@@ -386,6 +424,9 @@ func clientChainDeletionReady(nodes map[string]Node, chain glivela.ClientChain, 
 }
 
 func projectClientLandings(nodes map[string]Node, m glivela.ImportMaterial, now time.Time) (bool, error) {
+	if err := validateServerTransportBindings(nodes, m); err != nil {
+		return false, err
+	}
 	credentials, _, err := effectiveBusinessCredentials(m, now)
 	if err != nil {
 		return false, err
@@ -396,7 +437,7 @@ func projectClientLandings(nodes map[string]Node, m glivela.ImportMaterial, now 
 		if err != nil {
 			return false, err
 		}
-		if !c.Enabled && !clientListenerUsedByServer(nodes, m, c, now) {
+		if !c.Enabled {
 			continue
 		}
 		active := false
@@ -423,13 +464,30 @@ func projectClientLandings(nodes map[string]Node, m glivela.ImportMaterial, now 
 			wanted[relay.ID] = append(wanted[relay.ID], clientRelayListener(c))
 		}
 	}
+	// Server resources independently project their listener/source policy. The
+	// original client publication may already have been deleted.
+	_, serverGrants, err := effectiveBusinessCredentials(m, now)
+	if err != nil {
+		return false, err
+	}
+	for _, resource := range m.ServerTransports {
+		if !serverTransportUsed(nodes, m, resource, serverGrants) {
+			continue
+		}
+		if err := appendServerListeners(nodes, wanted, resource); err != nil {
+			return false, err
+		}
+	}
 	changed := false
 	for cert, n := range nodes {
 		if n.Desired.Landing == nil {
 			continue
 		}
 		plan := *n.Desired.Landing
-		listeners := wanted[n.ID]
+		listeners, err := orderedTransportListeners(plan.ClientListeners, wanted[n.ID])
+		if err != nil {
+			return false, err
+		}
 		if reflect.DeepEqual(plan.ClientListeners, listeners) {
 			continue
 		}

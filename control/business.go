@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -82,15 +83,16 @@ func (a BusinessAccount) MarshalJSON() ([]byte, error) {
 // endpoint-private-key, certificate-private-key or retained-source fields.
 // Historical statuses are not current runtime-health evidence.
 type BusinessInventory struct {
-	ClientChains []ClientChainView  `json:"clientChains"`
-	Availability availabilityState  `json:"availability"`
-	State        string             `json:"state"`
-	SnapshotID   string             `json:"snapshotId,omitempty"`
-	Accounts     []BusinessAccount  `json:"accounts"`
-	Nodes        []BusinessNode     `json:"nodes"`
-	Endpoints    []BusinessEndpoint `json:"endpoints"`
-	Routes       []BusinessRoute    `json:"routes"`
-	Runtimes     []BusinessRuntime  `json:"runtimes"`
+	ServerTransports []ServerTransportView `json:"serverTransports"`
+	ClientChains     []ClientChainView     `json:"clientChains"`
+	Availability     availabilityState     `json:"availability"`
+	State            string                `json:"state"`
+	SnapshotID       string                `json:"snapshotId,omitempty"`
+	Accounts         []BusinessAccount     `json:"accounts"`
+	Nodes            []BusinessNode        `json:"nodes"`
+	Endpoints        []BusinessEndpoint    `json:"endpoints"`
+	Routes           []BusinessRoute       `json:"routes"`
+	Runtimes         []BusinessRuntime     `json:"runtimes"`
 }
 
 type BusinessRoute struct {
@@ -186,6 +188,27 @@ func (s *Store) LoadBusiness(keyPath string) error {
 	if err != nil {
 		return err
 	}
+	// Resolve the old ownership model before any runtime authorization or
+	// publication. This forward migration must not issue a node revision.
+	if material.Ownership != nil {
+		migrated, changed, migrationErr := migrateServerTransports(s.nodes, material)
+		if migrationErr != nil {
+			return migrationErr
+		}
+		if changed {
+			projected, nodeChanged, projectionErr := projectBusinessEntries(s.nodes, migrated, time.Now())
+			if projectionErr != nil || nodeChanged || !reflect.DeepEqual(projected, s.nodes) {
+				return errors.New("control: server ownership migration would change a runtime")
+			}
+			s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key)}
+			if err := s.saveOwnedBusinessLocked(migrated); err != nil {
+				s.business = nil
+				return err
+			}
+			material, fileSHA = s.business.material, s.business.fileSHA256
+			s.business = nil
+		}
+	}
 	if material.Ownership != nil {
 		projected, changed, err := projectBusinessEntries(s.nodes, material, time.Now())
 		if err != nil {
@@ -242,6 +265,7 @@ func (s *Store) Business() BusinessInventory {
 	defer s.mu.Unlock()
 	view := BusinessInventory{State: "empty", Availability: availabilityState{Version: s.availability.Version, Revision: s.availability.Revision, Nodes: s.effectiveAvailabilities()}, Accounts: []BusinessAccount{}, Nodes: []BusinessNode{}, Endpoints: []BusinessEndpoint{}, Routes: []BusinessRoute{}, Runtimes: []BusinessRuntime{}}
 	view.ClientChains = []ClientChainView{}
+	view.ServerTransports = []ServerTransportView{}
 	if s.business != nil {
 		for _, c := range s.business.material.ClientChains {
 			if s.business.material.DeletedClientChains[c.ID] || s.entryRetiredLocked(c.EntryID) {
@@ -289,6 +313,22 @@ func (s *Store) Business() BusinessInventory {
 		return view
 	}
 	m := s.business.material
+	for _, r := range m.ServerTransports {
+		viewResource := ServerTransportView{ID: r.ID, Name: r.Name, AccountID: r.AccountID, EntryID: r.EntryID, EgressID: r.EgressID, Port: r.Listener.Port, RouteIDs: []string{}}
+		if r.Peer.Relay != nil {
+			viewResource.RelayID = r.Peer.Relay.NodeID
+		}
+		for _, a := range m.Plan.Accounts {
+			for _, g := range a.Grants {
+				if !m.DeletedRoutes[g.ID] && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.AccountID == r.AccountID && g.ClientChainID == r.Peer.ClientChainID {
+					viewResource.RouteIDs = append(viewResource.RouteIDs, g.ID)
+				}
+			}
+		}
+		slices.Sort(viewResource.RouteIDs)
+		view.ServerTransports = append(view.ServerTransports, viewResource)
+	}
+	slices.SortFunc(view.ServerTransports, func(a, b ServerTransportView) int { return strings.Compare(a.ID, b.ID) })
 	view.State, view.SnapshotID = "awaiting-handover", s.business.snapshotID
 	if m.Ownership != nil {
 		// Ownership is independent of node and route acceptance below.

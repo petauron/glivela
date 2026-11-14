@@ -268,27 +268,7 @@ func (s *Store) put(node Node, previousVerifierCertificate string) error {
 	if err := validateEnrollmentRoles(next); err != nil {
 		return err
 	}
-	if node.Desired.Entry != nil && s.business != nil {
-		valid := true
-		for _, peer := range node.Desired.Entry.Peers {
-			if peer.ClientChainID == "" {
-				continue
-			}
-			found := false
-			for _, target := range next {
-				if target.ID == peer.EgressID {
-					_, found = boundClientListenerIn(next, s.business.material, node, target, peer)
-				}
-			}
-			if !found {
-				valid = false
-				break
-			}
-		}
-		if !valid {
-			return errors.New("control: three-hop enrollment differs from issued binding")
-		}
-	}
+
 	if s.business != nil && s.business.material.Ownership != nil {
 		if s.business.faulted {
 			return errors.New("control: owned business storage requires recovery")

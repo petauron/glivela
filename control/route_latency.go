@@ -136,13 +136,13 @@ func (s *Store) latencyTargetsLocked() map[string]latencyTarget {
 				continue
 			}
 			if peer.Transport.ClientListenerID != "" {
-				chain, authorized := s.boundClientListener(entry, node, peer)
+				chain, authorized := s.boundServerTransport(entry, node, peer)
 				if !authorized {
 					continue
 				}
 				target := latencyTarget{Certificate: cert, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Transport.Endpoint(peer.Address), EntryID: entry.ID, LandingID: node.ID, Port: peer.Port}
-				if chain.Transport == "ipv6-ss2022" {
-					target.Source = chain.SourceIPv6
+				if chain.Listener.Transport == "ipv6-ss2022" {
+					target.Source = chain.Listener.Source
 				}
 				out[latencyTargetKey(target)] = target
 				continue
