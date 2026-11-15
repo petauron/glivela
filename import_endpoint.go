@@ -159,16 +159,10 @@ func ValidateEndpointImport(material ImportMaterial, endpoints []ImportEndpoint)
 	return material.Validate()
 }
 
-func (material ImportMaterial) validateEndpoints() error {
+func (material ImportMaterial) validateEndpoints(source importSourceHeader) error {
 	endpoints := material.Endpoints
 	if len(endpoints) > 10000 {
 		return errors.New("glivela: invalid endpoint inventory")
-	}
-	var source struct {
-		Schema int `json:"sourceSchema"`
-	}
-	if json.Unmarshal(material.RetainedSource, &source) != nil {
-		return errors.New("glivela: invalid endpoint source")
 	}
 	byEntry := map[string]ImportEndpoint{}
 	ids, services := map[string]bool{}, map[string]bool{}

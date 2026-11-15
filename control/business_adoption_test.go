@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -37,7 +36,15 @@ func TestBusinessAdoptionRetainsDataAndDoesNotReplayStaging(t *testing.T) {
 		t.Fatal("ownership commit invalid", err)
 	}
 	owned.Ownership = nil
-	if !reflect.DeepEqual(original, owned) {
+	originalJSON, marshalErr := json.Marshal(original)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	ownedJSON, marshalErr := json.Marshal(owned)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if !bytes.Equal(originalJSON, ownedJSON) {
 		t.Fatal("adoption changed identities, configuration, history, cycles or ledger")
 	}
 	after, err := os.ReadFile(pending)

@@ -14,9 +14,10 @@ import (
 )
 
 type stagedImport struct {
-	Version    int    `json:"version"`
-	SnapshotID string `json:"snapshotId"`
-	Sealed     []byte `json:"sealed"`
+	Version       int    `json:"version"`
+	SnapshotID    string `json:"snapshotId"`
+	Sealed        []byte `json:"sealed"`
+	ArchiveSHA256 string `json:"archiveSha256,omitempty"`
 }
 
 // StageImport atomically retains accounts, endpoint configuration and immutable
@@ -39,6 +40,9 @@ func StageImport(directory, snapshotID string, sealed, transferKey, storageKey [
 		return err
 	}
 	defer unlock()
+	if started, err := businessAdoptionStarted(directory); err != nil || started {
+		return errors.New("control: owned business state cannot be reinitialized by staging")
+	}
 	store, err := OpenStore(filepath.Join(directory, "nodes.json"))
 	if err != nil {
 		return err
@@ -49,9 +53,6 @@ func StageImport(directory, snapshotID string, sealed, transferKey, storageKey [
 	stored, err := glivela.SealImportMaterial(material, storageKey, snapshotID)
 	if err != nil {
 		return err
-	}
-	if started, err := businessAdoptionStarted(directory); err != nil || started {
-		return errors.New("control: owned business state cannot be reinitialized by staging")
 	}
 	path := filepath.Join(directory, "business.pending.json")
 	if _, err := os.Lstat(path); err == nil {
@@ -110,7 +111,7 @@ func readOwnedBusinessVersion(directory string, storageKey []byte) (glivela.Impo
 	if err != nil {
 		return glivela.ImportMaterial{}, "", [32]byte{}, err
 	}
-	material, snapshot, err := decodeBusinessCheckpoint(raw, storageKey)
+	material, snapshot, err := decodeOwnedBusinessCheckpoint(directory, raw, storageKey)
 	if err != nil {
 		return glivela.ImportMaterial{}, "", [32]byte{}, err
 	}

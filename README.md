@@ -42,6 +42,7 @@ outside the source checkout.
 - [Path MTU](docs/path-mtu.md)
 - [Public egress policy](docs/public-egress.md)
 - [Temporary availability](docs/temporary-availability.md)
+- [Controller ledger storage and recovery](docs/controller-ledger-storage.md)
 
 ## Development
 
