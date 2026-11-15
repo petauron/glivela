@@ -14,6 +14,7 @@ import (
 const maxSubscriptionBytes = 4 << 20
 
 type PublishedRoute struct {
+	UDP                    bool         `json:"udp,omitempty"`
 	Name                   string       `json:"name,omitempty"`
 	Grant                  RouteGrant   `json:"grant"`
 	Protocol               ProtocolKind `json:"protocol"`
@@ -45,6 +46,7 @@ type resolvedSubscriptionEntry struct {
 	SubscriptionItem
 	link   string
 	routed bool
+	udp    bool
 }
 
 // resolveSubscription is the only final inventory path for both encodings and
@@ -89,7 +91,7 @@ func resolveSubscription(entries []NativeEntry, accountID string, mode Publishin
 		if item.ID == "" {
 			return nil, errors.New("glivela: subscription item has no owned identity")
 		}
-		result = append(result, resolvedSubscriptionEntry{SubscriptionItem: item, link: line, routed: item.Kind == "route"})
+		result = append(result, resolvedSubscriptionEntry{SubscriptionItem: item, link: line, routed: item.Kind == "route", udp: parsed.Query().Get("udp") == "1"})
 	}
 	return result, nil
 }
@@ -145,7 +147,7 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 			return nil, nil, err
 		}
 		if entry.routed {
-			proxy["udp"] = false
+			proxy["udp"] = entry.udp
 		}
 		values = append(values, proxyEntry{SubscriptionItem: entry.SubscriptionItem, value: proxy})
 		names = append(names, name)
@@ -381,10 +383,12 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 		if err != nil || !sameProtocolTransport(routed, base, VLESSReality) || routed.User.Username() == base.User.Username() || identities[string(VLESSReality)+"\x00"+routed.User.Username()] {
 			return nil, errors.New("glivela: invalid routed credential")
 		}
-		// URI clients such as Shadowrocket otherwise default to allowing UDP,
-		// while server-forwarded grants intentionally accept TCP only.
+		// Publish capability only after the managed entry and landing applied it.
 		query := routed.Query()
 		query.Set("udp", "0")
+		if item.UDP && item.Grant.UDP {
+			query.Set("udp", "1")
+		}
 		routed.RawQuery = query.Encode()
 		routed.Fragment, routed.RawFragment = "", ""
 		routeLink := routed.String()

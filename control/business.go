@@ -97,6 +97,7 @@ type BusinessInventory struct {
 }
 
 type BusinessRoute struct {
+	UDP           bool   `json:"udp"`
 	ClientChainID string `json:"clientChainId,omitempty"`
 	RelayID       string `json:"relayId,omitempty"`
 	Port          int    `json:"port"`
@@ -426,7 +427,7 @@ func (s *Store) Business() BusinessInventory {
 			if relayID != "" && s.suspended(relayID, now) {
 				state = "temporarily-suspended"
 			}
-			view.Routes = append(view.Routes, BusinessRoute{ClientChainID: grant.ClientChainID, RelayID: relayID, Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
+			view.Routes = append(view.Routes, BusinessRoute{UDP: grant.UDP, ClientChainID: grant.ClientChainID, RelayID: relayID, Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
 		}
 	}
 	for _, node := range s.nodes {

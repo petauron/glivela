@@ -24,6 +24,26 @@ const initial: SpeedList = { revision:"1", channels, tests:[
 let dispose: (()=>void)|undefined;
 afterEach(()=>{dispose?.();dispose=undefined;document.body.replaceChildren();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
+it("updates only UDP policy with the existing route identity and account revision",async()=>{
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
+ const container=document.createElement("div");document.body.append(container);
+ const root=createRoot(container);dispose=()=>act(()=>root.unmount());
+ const save=vi.fn(async()=>true);
+ const names=new Map(inventory.nodes.map(n=>[n.id,n.name]));
+ const latency={values:new Map(),now:Date.now(),busy:false,error:"",refresh:vi.fn(async()=>{})};
+ const render=(udp:boolean)=>root.render(<RouteWorkspace inventory={{...inventory,routes:[{...inventory.routes[0],udp}]}} names={names} disabled={false} save={save} latency={latency} loadSpeeds={vi.fn(async()=>initial)} active={false}/>);
+ await act(async()=>render(false));
+ await act(async()=>{container.querySelector<HTMLButtonElement>(".gl-route-name")!.click();});
+ const click=async(text:string)=>act(async()=>{[...container.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent===text)!.click();});
+ await click("启用 UDP");
+ let [operation,request]=save.mock.calls[0] as unknown as [string,Record<string,unknown>];
+ expect(operation).toBe("routes");
+ expect(JSON.parse(JSON.stringify(request))).toEqual({id:"route-a",accountId:"account-a",entryId:"entry-a",egressId:"landing-a",ipv4EgressId:"landing-alt",enabled:true,hideNative:false,udp:true,expectedRevision:"1"});
+ await act(async()=>render(true));
+ await click("停用 UDP");
+ expect(save.mock.calls[1]).toEqual(["routes",expect.objectContaining({id:"route-a",udp:false,enabled:true,expectedRevision:"1"})]);
+});
+
 it("shows each pair in the route table and detail, starts that pair, and stops waiting on page exit", async()=>{
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
  vi.stubGlobal("crypto",{randomUUID:()=>"11111111-1111-4111-8111-111111111111"});

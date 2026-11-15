@@ -412,7 +412,7 @@ func udpRuntimeExchangeOn(connection *net.UDPConn, target string, packet []byte)
 	if _, err := connection.WriteToUDP(packet, endpoint); err != nil {
 		return nil, err
 	}
-	var response [1024]byte
+	var response [2048]byte
 	n, sender, err := connection.ReadFromUDP(response[:])
 	if err != nil {
 		return nil, err

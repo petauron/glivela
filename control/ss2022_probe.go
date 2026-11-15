@@ -52,7 +52,7 @@ func probeWithCore(ctx context.Context, p RouteProbe, binary, digest string, roo
 	config := map[string]any{
 		"log":       map[string]any{"loglevel": "none"},
 		"inbounds":  []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "socks", "settings": map[string]any{"auth": "password", "accounts": []any{map[string]any{"user": "probe", "pass": password}}, "udp": false}}},
-		"outbounds": (glivela.RoutePeer{Address: endpoint.Addr().String(), Transport: p.Transport, Port: int(endpoint.Port()), Relay: p.Relay, ClientChainID: p.Transport.ClientListenerID}).ServerOutbounds("probe-exit"),
+		"outbounds": (glivela.RoutePeer{Address: endpoint.Addr().String(), Transport: p.Transport, Port: int(endpoint.Port()), Relay: p.Relay, ClientChainID: p.Transport.ClientListenerID}).ServerOutbounds("probe-exit", false),
 	}
 	raw, err := json.Marshal(config)
 	if err != nil {
