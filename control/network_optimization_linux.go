@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const networkSysctlFile = "/etc/sysctl.d/90-glivela-network.conf"
@@ -281,8 +283,46 @@ func networkOwned(b *networkBackup) bool {
 	return err == nil && (string(raw) == b.Content || b.Pending != "" && string(raw) == b.PreviousContent)
 }
 
+// A network namespace owned by a remapped user namespace cannot be the
+// host initial network namespace. Require the node and container init to share it.
+func isolatedNetworkNamespace() (string, error) {
+	self, err := os.Readlink("/proc/self/ns/net")
+	init, initErr := os.Readlink("/proc/1/ns/net")
+	if err != nil || initErr != nil || self != init {
+		return "", errors.New("cannot verify container network namespace")
+	}
+	raw, err := os.ReadFile("/proc/self/uid_map")
+	fields := strings.Fields(string(raw))
+	if err != nil || len(fields) != 3 || fields[0] != "0" || fields[1] == "0" {
+		return "", errors.New("requires remapped container user namespace")
+	}
+	for _, v := range fields {
+		if _, err := strconv.ParseUint(v, 10, 32); err != nil {
+			return "", err
+		}
+	}
+	net, err := os.Open("/proc/self/ns/net")
+	if err != nil {
+		return "", err
+	}
+	defer net.Close()
+	fd, err := unix.IoctlRetInt(int(net.Fd()), unix.NS_GET_USERNS)
+	if err != nil {
+		return "", err
+	}
+	defer unix.Close(fd)
+	var owner, current unix.Stat_t
+	if unix.Fstat(fd, &owner) != nil || unix.Stat("/proc/self/ns/user", &current) != nil || owner.Dev != current.Dev || owner.Ino != current.Ino {
+		return "", errors.New("network namespace belongs to another user namespace")
+	}
+	return self, nil
+}
+
 // Containers share the host kernel. Detection must fail closed before any writes.
 func networkIsContainer(ctx context.Context) (bool, error) {
+	if _, err := isolatedNetworkNamespace(); err == nil {
+		return true, nil
+	}
 	for _, marker := range []string{"/.dockerenv", "/run/.containerenv", "/run/systemd/container"} {
 		if _, err := os.Stat(marker); err == nil {
 			return true, nil
@@ -364,7 +404,45 @@ func inspectNetwork(ctx context.Context, directory string) NetworkSnapshot {
 		return finish("无法确认容器环境，禁止修改")
 	}
 	if container {
-		return inspectContainerNetwork(ctx, v)
+		v = inspectContainerNetwork(ctx, v)
+		ns, err := isolatedNetworkNamespace()
+		if err != nil {
+			return v
+		}
+		v.BufferOnly = true
+		v.NetworkNamespace = ns
+		raw, err := os.ReadFile("/proc/meminfo")
+		if err != nil {
+			return finish("无法读取容器内存")
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			f := strings.Fields(line)
+			if len(f) >= 2 && f[0] == "MemTotal:" {
+				n, _ := strconv.ParseInt(f[1], 10, 64)
+				v.MemoryBytes = n * 1024
+			}
+		}
+		v.Scope = "容器独立网络命名空间"
+		if !v.Observed || v.MemoryBytes <= 0 || v.Receive[2] <= 0 || v.Send[2] <= 0 || v.ReceiveMax <= 0 || v.SendMax <= 0 {
+			return finish("容器缓冲状态不完整")
+		}
+		b, err := loadNetworkBackup(directory)
+		if err != nil {
+			return finish(err.Error())
+		}
+		if b != nil && b.Content != "" {
+			if !b.Original.BufferOnly || b.Original.NetworkNamespace != ns || !networkOwned(b) {
+				return finish("容器归属或持久配置已变化，禁止覆盖")
+			}
+			v.CanRestore = true
+			if b.Pending != "" {
+				return finish("上次应用中断，请恢复原缓冲")
+			}
+		} else if _, err := os.Lstat(networkSysctlFile); !errors.Is(err, os.ErrNotExist) {
+			return finish("存在未归属的网络配置")
+		}
+		v.CanApply = true
+		return finish("")
 	}
 	self, err := os.Readlink("/proc/self/ns/net")
 	init, e := os.Readlink("/proc/1/ns/net")
@@ -462,9 +540,27 @@ func inspectNetwork(ctx context.Context, directory string) NetworkSnapshot {
 	return finish("")
 }
 func networkText(v NetworkSnapshot) string {
+	if v.BufferOnly {
+		return fmt.Sprintf("# Managed by Glivela; container TCP buffers only.\nnet.ipv4.tcp_rmem = %d %d %d\nnet.ipv4.tcp_wmem = %d %d %d\n", v.Receive[0], v.Receive[1], v.Receive[2], v.Send[0], v.Send[1], v.Send[2])
+	}
 	return fmt.Sprintf("# Managed by Glivela; restore from the network optimization panel.\nnet.ipv4.tcp_congestion_control = %s\nnet.core.default_qdisc = %s\nnet.ipv4.tcp_rmem = %d %d %d\nnet.ipv4.tcp_wmem = %d %d %d\nnet.core.rmem_max = %d\nnet.core.wmem_max = %d\n", v.Congestion, v.DefaultQdisc, v.Receive[0], v.Receive[1], v.Receive[2], v.Send[0], v.Send[1], v.Send[2], v.ReceiveMax, v.SendMax)
 }
 func applyNetworkValues(ctx context.Context, v NetworkSnapshot) error {
+	if v.BufferOnly {
+		ns, err := isolatedNetworkNamespace()
+		if err != nil || ns != v.NetworkNamespace {
+			return errors.New("container isolation changed")
+		}
+		for _, line := range strings.Split(networkText(v), "\n") {
+			k, value, ok := strings.Cut(line, " = ")
+			if ok {
+				if err := networkWrite(k, value); err != nil {
+					return fmt.Errorf("内核拒绝参数 %s", k)
+				}
+			}
+		}
+		return nil
+	}
 	if !safeNetworkName(v.Interface) || !slices.Contains([]string{"fq", "pfifo_fast", "fq_codel"}, v.Qdisc) {
 		return errors.New("unsafe saved queue")
 	}
@@ -489,7 +585,7 @@ func applyNetworkValues(ctx context.Context, v NetworkSnapshot) error {
 	return nil
 }
 func sameNetworkValues(a, b NetworkSnapshot) bool {
-	return a.Interface == b.Interface && a.Congestion == b.Congestion && a.DefaultQdisc == b.DefaultQdisc && a.Send == b.Send && a.Receive == b.Receive && a.SendMax == b.SendMax && a.ReceiveMax == b.ReceiveMax && a.Qdisc == b.Qdisc
+	return a.BufferOnly == b.BufferOnly && a.NetworkNamespace == b.NetworkNamespace && a.Interface == b.Interface && a.Congestion == b.Congestion && a.DefaultQdisc == b.DefaultQdisc && a.Send == b.Send && a.Receive == b.Receive && a.SendMax == b.SendMax && a.ReceiveMax == b.ReceiveMax && a.Qdisc == b.Qdisc
 }
 func executeNetwork(ctx context.Context, directory string, c NetworkCommand) NetworkReport {
 	current := inspectNetwork(ctx, directory)
@@ -571,14 +667,18 @@ func executeNetwork(ctx context.Context, directory string, c NetworkCommand) Net
 		return fail("缓冲建议超过内存预算")
 	}
 	target := current
-	target.Congestion = "bbr"
-	target.DefaultQdisc = "fq"
-	target.Qdisc = "fq"
+	if !current.BufferOnly {
+		target.Congestion = "bbr"
+		target.DefaultQdisc = "fq"
+		target.Qdisc = "fq"
+	}
 	if c.BufferBytes > 0 {
 		target.Send[2] = max(target.Send[2], c.BufferBytes)
 		target.Receive[2] = max(target.Receive[2], c.BufferBytes)
-		target.SendMax = max(target.SendMax, c.BufferBytes)
-		target.ReceiveMax = max(target.ReceiveMax, c.BufferBytes)
+		if !current.BufferOnly {
+			target.SendMax = max(target.SendMax, c.BufferBytes)
+			target.ReceiveMax = max(target.ReceiveMax, c.BufferBytes)
+		}
 	}
 	if b == nil || b.Content == "" {
 		b = &networkBackup{Original: current}
@@ -608,6 +708,9 @@ func executeNetwork(ctx context.Context, directory string, c NetworkCommand) Net
 	b.Pending = ""
 	out.Result.State = "succeeded"
 	out.Result.Message = "BBR/FQ 与所选缓冲上限已读回确认；既有连接可能继续使用旧算法"
+	if current.BufferOnly {
+		out.Result.Message = "容器 TCP 收发缓冲已读回确认"
+	}
 	b.Result = out.Result
 	if saveNetworkBackup(directory, b) != nil {
 		return fail("应用已执行，但结果保存失败；请核对")

@@ -7,6 +7,7 @@ type TCPBudget = {
   canApply: boolean; canRestore: boolean; reason?: string;
 };
 type Snapshot = {
+  bufferOnly?: boolean;
   tcpBudget?: TCPBudget;
   observed: boolean; kernel: string; checkedAt: string; fingerprint: string; scope: string; interface: string; mtu: number; memoryBytes: number;
   congestion: string; available: string[]; defaultQdisc: string; qdisc: string;
@@ -97,9 +98,9 @@ function NetworkForm({ nodeId, control }: { nodeId: string; control: NetworkCont
   const unknown = !snap?.observed || !current || waiting;
   const canChange = !!(snap?.canApply || snap?.canRestore);
   const chosenBuffer = view?.autoBufferBytes || 0;
-  const optimized = !!snap?.observed && snap.congestion === "bbr" && snap.qdisc === "fq" && snap.defaultQdisc === "fq"
+  const optimized = !!snap?.observed && (snap.bufferOnly || snap.congestion === "bbr" && snap.qdisc === "fq" && snap.defaultQdisc === "fq")
     && chosenBuffer > 0 && (snap.send?.[2] ?? 0) >= chosenBuffer && (snap.receive?.[2] ?? 0) >= chosenBuffer
-    && snap.sendMax >= chosenBuffer && snap.receiveMax >= chosenBuffer;
+    && (snap.bufferOnly || snap.sendMax >= chosenBuffer && snap.receiveMax >= chosenBuffer);
   const action = async (kind: "inspect" | "apply" | "restore") => {
     if (!view) return;
     const body: Body = { action: kind, nodeId, expectedRevision: view.settings.revision || "0" };
@@ -136,7 +137,7 @@ function NetworkForm({ nodeId, control }: { nodeId: string; control: NetworkCont
       {snap?.canApply ? <>
         <p className="text-xs text-muted-foreground">内存：{snap?.memoryBytes ? bytes(snap.memoryBytes) : "—"} · 缓冲建议：{chosenBuffer ? bytes(chosenBuffer) : "—"}（按内存）。不降低现有上限；操作可能短暂影响网络。</p>
         {!chosenBuffer ? <p className="text-xs text-muted-foreground">无法计算缓冲建议，请重新检测。</p> : null}
-        <div><Button disabled={disabled || !current || !chosenBuffer} onClick={() => void action("apply")}>{optimized ? "重新优化" : "一键优化"}</Button></div>
+        <div><Button disabled={disabled || !current || !chosenBuffer} onClick={() => void action("apply")}>{snap?.bufferOnly ? "应用收发缓冲" : optimized ? "重新优化" : "一键优化"}</Button></div>
       </> : null}
       {snap?.canRestore ? <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={confirmed} disabled={disabled || !current} onChange={event => setConfirmed(event.target.checked)} />确认恢复原配置</label>
