@@ -26,6 +26,8 @@ type TCPBudgetStatus struct {
 }
 
 type NetworkSnapshot struct {
+	BufferOnly       bool             `json:"bufferOnly,omitempty"`
+	NetworkNamespace string           `json:"networkNamespace,omitempty"`
 	TCPBudget        *TCPBudgetStatus `json:"tcpBudget,omitempty"`
 	CheckedAt        time.Time        `json:"checkedAt"`
 	Fingerprint      string           `json:"fingerprint"`
