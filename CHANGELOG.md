@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.158](https://github.com/petauron/glivela/compare/v0.1.0-alpha.157...v0.1.0-alpha.158) (2026-11-15)
+
+
+### Features
+
+* **control:** manage TCP memory budgets by host memory tier ([#189](https://github.com/petauron/glivela/issues/189)) ([14c7b5a](https://github.com/petauron/glivela/commit/14c7b5a49ef813c0dcee32c862a0ea50ec6671f2)), closes [#18](https://github.com/petauron/glivela/issues/18)
+
 ## [0.1.0-alpha.157](https://github.com/petauron/glivela/compare/v0.1.0-alpha.156...v0.1.0-alpha.157) (2026-11-14)
 
 
