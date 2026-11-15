@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 
+type TCPBudget = {
+  pageBytes: number; currentPages: number[]; tierMiB?: number; targetMiB: number[];
+  canApply: boolean; canRestore: boolean; reason?: string;
+};
 type Snapshot = {
+  tcpBudget?: TCPBudget;
   observed: boolean; kernel: string; checkedAt: string; fingerprint: string; scope: string; interface: string; mtu: number; memoryBytes: number;
   congestion: string; available: string[]; defaultQdisc: string; qdisc: string;
   send: number[]; receive: number[]; sendMax: number; receiveMax: number; scaling: number; autoReceive: number;
@@ -101,9 +106,14 @@ function NetworkForm({ nodeId, control }: { nodeId: string; control: NetworkCont
     if (kind === "apply" || kind === "restore") { body.expected = snap?.fingerprint; body.confirm = kind === "apply" || confirmed; body.bufferBytes = kind === "apply" ? chosenBuffer : 0; }
     if (await control.run(body)) setConfirmed(false);
   };
+  const budget = snap?.tcpBudget;
+  const budgetAction = async (kind: "apply-tcp-budget" | "restore-tcp-budget") => {
+    if (!view || !snap || !current) return;
+    await control.run({ action: kind, nodeId, expectedRevision: view.settings.revision || "0", expected: snap.fingerprint, confirm: true });
+  };
   const command = view?.settings.command;
   const result = view?.settings.result;
-  const commandText = control.busy ? "提交中…" : command ? result?.state === "failed" ? result.message : result?.state === "succeeded" ? command.action === "inspect" ? "检测完成。" : command.action === "restore" ? "已恢复原配置。" : "已应用并确认。" : waiting ? command.action === "inspect" ? "检测中…" : "正在处理…" : "结果未确认，请重新检测。" : "";
+  const commandText = control.busy ? "提交中…" : command ? result?.state === "failed" ? result.message : result?.state === "succeeded" ? command.action === "inspect" ? "检测完成。" : (command.action === "restore" || command.action === "restore-tcp-budget") ? "已恢复原配置。" : "已应用并确认。" : waiting ? command.action === "inspect" ? "检测中…" : "正在处理…" : "结果未确认，请重新检测。" : "";
   return <div className="flex flex-col gap-4 px-4 pb-6">
     {control.error ? <p role="alert" className="text-sm text-destructive">{control.error}</p> : null}
     <div className="grid grid-cols-2 gap-2" aria-label="网络优化状态">
@@ -133,6 +143,17 @@ function NetworkForm({ nodeId, control }: { nodeId: string; control: NetworkCont
         <Button variant="outline" disabled={disabled || !current || !confirmed} onClick={() => void action("restore")}>恢复原配置</Button>
       </div> : null}
     </div> : null}
+    {budget && <section className="grid gap-2 rounded-md border border-border px-3 py-3 text-sm" aria-label="TCP 总预算">
+      <h3 className="font-medium">TCP 总预算</h3>
+      <p className="text-xs text-muted-foreground">低水位 / 压力阈值 / 上限（MiB）</p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+        <dt>当前</dt><dd>{budget.currentPages[0] > 0 ? budget.currentPages.map(p => Number((p * budget.pageBytes / 1048576).toFixed(1))).join(" / ") : "—"}</dd>
+        {Boolean(budget.tierMiB) && <><dt>{budget.tierMiB} MiB 档</dt><dd>{budget.targetMiB.join(" / ")}</dd></>}
+      </dl>
+      {budget.reason && <p className="text-xs text-muted-foreground">{budget.reason}</p>}
+      {budget.canApply && <div><Button variant="outline" disabled={disabled || !current || !snap?.observed} onClick={() => void budgetAction("apply-tcp-budget")}>应用主机预算</Button></div>}
+      {budget.canRestore && <div><Button variant="outline" disabled={disabled || !current || !snap?.observed} onClick={() => void budgetAction("restore-tcp-budget")}>恢复原预算</Button></div>}
+    </section>}
     <details className="rounded-md border border-border">
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium">查看详情</summary>
       <div className="flex flex-col gap-4 border-t border-border px-3 py-3">

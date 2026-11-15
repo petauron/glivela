@@ -186,10 +186,14 @@ func networkAncestry(directory string) error {
 	return nil
 }
 func loadNetworkBackup(directory string) (*networkBackup, error) {
+	return readNetworkBackup[networkBackup](directory, networkBackupFile)
+}
+
+func readNetworkBackup[T any](directory, filename string) (*T, error) {
 	if err := networkAncestry(directory); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(directory, networkBackupFile)
+	path := filepath.Join(directory, filename)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -205,7 +209,7 @@ func loadNetworkBackup(directory string) (*networkBackup, error) {
 	if err != nil {
 		return nil, err
 	}
-	var b networkBackup
+	var b T
 	if json.Unmarshal(raw, &b) != nil {
 		return nil, errors.New("invalid network backup")
 	}
@@ -219,6 +223,10 @@ func saveNetworkBackup(directory string, b *networkBackup) error {
 	return networkAtomic(filepath.Join(directory, networkBackupFile), raw, 0600)
 }
 func networkAtomic(path string, raw []byte, mode os.FileMode) error {
+	return writeNetworkFile(path, raw, mode, true)
+}
+
+func writeNetworkFile(path string, raw []byte, mode os.FileMode, replace bool) error {
 	if err := networkAncestry(filepath.Dir(path)); err != nil {
 		return err
 	}
@@ -245,7 +253,13 @@ func networkAtomic(path string, raw []byte, mode os.FileMode) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(f.Name(), path); err != nil {
+	if replace {
+		err = os.Rename(f.Name(), path)
+	} else {
+		// Publish a complete new file without replacing another owner's configuration.
+		err = os.Link(f.Name(), path)
+	}
+	if err != nil {
 		return err
 	}
 	d, err := os.Open(filepath.Dir(path))
@@ -376,6 +390,7 @@ func inspectNetwork(ctx context.Context, directory string) NetworkSnapshot {
 			v.MemoryBytes = n * 1024
 		}
 	}
+	v.TCPBudget = inspectTCPBudget(directory, v.MemoryBytes)
 	v.Congestion, err = networkRead("net.ipv4.tcp_congestion_control")
 	if err != nil {
 		return finish("无法读取 TCP 算法")
@@ -482,6 +497,15 @@ func executeNetwork(ctx context.Context, directory string, c NetworkCommand) Net
 	fail := func(message string) NetworkReport {
 		out.Result.State = "failed"
 		out.Result.Message = message
+		out.Snapshot = inspectNetwork(ctx, directory)
+		return out
+	}
+	if c.Action == "apply-tcp-budget" || c.Action == "restore-tcp-budget" {
+		if err := executeTCPBudget(directory, current, c); err != nil {
+			return fail(err.Error())
+		}
+		out.Result.State = "succeeded"
+		out.Result.Message = "TCP 总预算已读回确认"
 		out.Snapshot = inspectNetwork(ctx, directory)
 		return out
 	}

@@ -14,29 +14,40 @@ import (
 
 // Network optimization is separate from proxy desired state and accounting.
 // Only administrator requests create mutations; nodes cannot nominate targets.
+type TCPBudgetStatus struct {
+	PageBytes    int64    `json:"pageBytes"`
+	CurrentPages [3]int64 `json:"currentPages"`
+	TierMiB      int64    `json:"tierMiB,omitempty"`
+	TargetMiB    [3]int64 `json:"targetMiB"`
+	CanApply     bool     `json:"canApply"`
+	CanRestore   bool     `json:"canRestore"`
+	Reason       string   `json:"reason,omitempty"`
+}
+
 type NetworkSnapshot struct {
-	CheckedAt        time.Time `json:"checkedAt"`
-	Fingerprint      string    `json:"fingerprint"`
-	Scope            string    `json:"scope"`
-	Observed         bool      `json:"observed"`
-	Kernel           string    `json:"kernel"`
-	QdiscFingerprint string    `json:"qdiscFingerprint"`
-	Interface        string    `json:"interface"`
-	MTU              int       `json:"mtu"`
-	MemoryBytes      int64     `json:"memoryBytes"`
-	Congestion       string    `json:"congestion"`
-	Available        []string  `json:"available"`
-	DefaultQdisc     string    `json:"defaultQdisc"`
-	Qdisc            string    `json:"qdisc"`
-	Send             [3]int64  `json:"send"`
-	Receive          [3]int64  `json:"receive"`
-	SendMax          int64     `json:"sendMax"`
-	ReceiveMax       int64     `json:"receiveMax"`
-	Scaling          int       `json:"scaling"`
-	AutoReceive      int       `json:"autoReceive"`
-	CanApply         bool      `json:"canApply"`
-	CanRestore       bool      `json:"canRestore"`
-	Reason           string    `json:"reason,omitempty"`
+	TCPBudget        *TCPBudgetStatus `json:"tcpBudget,omitempty"`
+	CheckedAt        time.Time        `json:"checkedAt"`
+	Fingerprint      string           `json:"fingerprint"`
+	Scope            string           `json:"scope"`
+	Observed         bool             `json:"observed"`
+	Kernel           string           `json:"kernel"`
+	QdiscFingerprint string           `json:"qdiscFingerprint"`
+	Interface        string           `json:"interface"`
+	MTU              int              `json:"mtu"`
+	MemoryBytes      int64            `json:"memoryBytes"`
+	Congestion       string           `json:"congestion"`
+	Available        []string         `json:"available"`
+	DefaultQdisc     string           `json:"defaultQdisc"`
+	Qdisc            string           `json:"qdisc"`
+	Send             [3]int64         `json:"send"`
+	Receive          [3]int64         `json:"receive"`
+	SendMax          int64            `json:"sendMax"`
+	ReceiveMax       int64            `json:"receiveMax"`
+	Scaling          int              `json:"scaling"`
+	AutoReceive      int              `json:"autoReceive"`
+	CanApply         bool             `json:"canApply"`
+	CanRestore       bool             `json:"canRestore"`
+	Reason           string           `json:"reason,omitempty"`
 }
 type NetworkCommand struct {
 	PathMTU     *PathMTUCommand `json:"pathMtu,omitempty"`
@@ -173,7 +184,7 @@ func (s *Store) manageNetwork(w http.ResponseWriter, r *http.Request) {
 			fail("operation in progress")
 			return
 		}
-		if input.Action == "inspect" || input.Action == "apply" || input.Action == "restore" {
+		if input.Action == "inspect" || input.Action == "apply" || input.Action == "restore" || input.Action == "apply-tcp-budget" || input.Action == "restore-tcp-budget" {
 			if !s.availableRuntime(n, time.Now()) {
 				fail("node offline or runtime unverified")
 				return
@@ -183,6 +194,13 @@ func (s *Store) manageNetwork(w http.ResponseWriter, r *http.Request) {
 				if !input.Confirm || !ok || time.Since(snap.CheckedAt) > 2*time.Minute || snap.Fingerprint != input.Expected {
 					fail("fresh inspection and confirmation required")
 					return
+				}
+				if input.Action == "apply-tcp-budget" || input.Action == "restore-tcp-budget" {
+					budget := snap.TCPBudget
+					if !snap.Observed || budget == nil || (input.Action == "apply-tcp-budget" && !budget.CanApply) || (input.Action == "restore-tcp-budget" && !budget.CanRestore) {
+						fail("TCP memory budget operation unavailable; inspect node")
+						return
+					}
 				}
 				if input.Action == "apply" && !snap.CanApply || input.Action == "restore" && !snap.CanRestore {
 					fail("operation unavailable; inspect node reason")
