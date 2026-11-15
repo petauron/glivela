@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.160](https://github.com/petauron/glivela/compare/v0.1.0-alpha.159...v0.1.0-alpha.160) (2026-11-15)
+
+
+### Bug Fixes
+
+* **network:** apply TCP memory budgets through the managed host ([#194](https://github.com/petauron/glivela/issues/194)) ([330c60c](https://github.com/petauron/glivela/commit/330c60cff7ea2e331d0fddc5376b3be34403cd8c))
+
 ## [0.1.0-alpha.159](https://github.com/petauron/glivela/compare/v0.1.0-alpha.158...v0.1.0-alpha.159) (2026-11-15)
 
 
