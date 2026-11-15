@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.159](https://github.com/petauron/glivela/compare/v0.1.0-alpha.158...v0.1.0-alpha.159) (2026-11-15)
+
+
+### Performance Improvements
+
+* **control:** detach immutable archives from durable traffic ledger ([#192](https://github.com/petauron/glivela/issues/192)) ([4eb856e](https://github.com/petauron/glivela/commit/4eb856e14fbfea43a58e931e30b4041a0d11039e))
+
 ## [0.1.0-alpha.158](https://github.com/petauron/glivela/compare/v0.1.0-alpha.157...v0.1.0-alpha.158) (2026-11-15)
 
 
