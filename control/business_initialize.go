@@ -29,6 +29,9 @@ func InitializeBusiness(directory string, topology FreshBusiness, storageKey []b
 	if len(storageKey) != 32 {
 		return errors.New("control: 256-bit storage key required")
 	}
+	if started, checkErr := businessAdoptionStarted(directory); checkErr != nil || started {
+		return errors.New("control: initialization requires a fresh business directory; existing state retained")
+	}
 	for _, name := range []string{"business.json", "business.pending.json", "business.adoption.json", "business.nodes.applied.json"} {
 		if _, err := os.Lstat(filepath.Join(directory, name)); !errors.Is(err, os.ErrNotExist) {
 			return errors.New("control: initialization requires a fresh business directory; existing state retained")

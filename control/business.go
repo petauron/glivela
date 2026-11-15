@@ -20,12 +20,13 @@ import (
 // the sole current business source after offline ownership commit. Loading
 // either does not establish runtime or end-to-end route health.
 type businessState struct {
-	snapshotID string
-	material   glivela.ImportMaterial
-	keyPath    string
-	faulted    bool
-	fileSHA256 [32]byte
-	keySHA256  [32]byte
+	snapshotID   string
+	material     glivela.ImportMaterial
+	keyPath      string
+	faulted      bool
+	fileSHA256   [32]byte
+	keySHA256    [32]byte
+	sourceSHA256 [32]byte
 }
 
 type BusinessAccount struct {
@@ -200,7 +201,7 @@ func (s *Store) LoadBusiness(keyPath string) error {
 			if projectionErr != nil || nodeChanged || !reflect.DeepEqual(projected, s.nodes) {
 				return errors.New("control: server ownership migration would change a runtime")
 			}
-			s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key)}
+			s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key), sourceSHA256: sha256.Sum256(material.RetainedSource)}
 			if err := s.saveOwnedBusinessLocked(migrated); err != nil {
 				s.business = nil
 				return err
@@ -222,7 +223,14 @@ func (s *Store) LoadBusiness(keyPath string) error {
 	}
 	s.subscriptionNames = presentation.Names
 	s.subscriptionLandings = presentation.Landings
-	s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key)}
+	s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key), sourceSHA256: sha256.Sum256(material.RetainedSource)}
+	if owned {
+		// One forward storage migration; no node plan, identity or counter changes.
+		if err := s.saveOwnedBusinessLocked(material); err != nil {
+			s.business = nil
+			return err
+		}
+	}
 	return nil
 }
 

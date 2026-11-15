@@ -126,7 +126,9 @@ func TestImportPersistsWithoutReinitializing(t *testing.T) {
 		t.Fatal("plaintext credentials persisted")
 	}
 	got, id, err := ReadStagedImport(r.Directory, storageKey)
-	if err != nil || id != "snapshot-example" || !reflect.DeepEqual(got, material) {
+	gotJSON, gotErr := json.Marshal(got)
+	materialJSON, materialErr := json.Marshal(material)
+	if err != nil || gotErr != nil || materialErr != nil || id != "snapshot-example" || !bytes.Equal(gotJSON, materialJSON) {
 		t.Fatal("account identities or counters changed", err)
 	}
 	if _, _, err := ReadStagedImport(r.Directory, transferKey); err == nil {

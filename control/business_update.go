@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -101,12 +102,21 @@ func (s *Store) saveOwnedBusinessLocked(next glivela.ImportMaterial) error {
 		business.faulted = true
 		return errors.New("control: owned business storage changed; explicit recovery required")
 	}
-	if !reflect.DeepEqual(next, business.material) {
-		sealed, err := glivela.SealImportMaterial(next, key, business.snapshotID)
+	if sha256.Sum256(next.RetainedSource) != business.sourceSHA256 || !bytes.Equal(next.RetainedSource, business.material.RetainedSource) {
+		business.faulted = true
+		return errors.New("control: immutable business archive changed; explicit offline operation required")
+	}
+	archiveSHA, legacy, err := prepareOwnedLedgerArchive(directory, disk, business.snapshotID)
+	if err != nil {
+		business.faulted = true
+		return err
+	}
+	if legacy || !reflect.DeepEqual(next, business.material) {
+		sealed, err := glivela.SealImportLedger(next, key, business.snapshotID, archiveSHA)
 		if err != nil {
 			return invalid
 		}
-		raw, err := json.Marshal(stagedImport{Version: 1, SnapshotID: business.snapshotID, Sealed: sealed})
+		raw, err := json.Marshal(stagedImport{Version: 2, SnapshotID: business.snapshotID, Sealed: sealed, ArchiveSHA256: archiveSHA})
 		if err != nil {
 			return invalid
 		}

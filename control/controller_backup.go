@@ -58,7 +58,7 @@ func openControllerBackup(raw, key []byte) (controllerBackup, error) {
 		return value, errors.New("control: controller backup authentication failed")
 	}
 	defer clear(plain)
-	if decode(bytes.NewReader(plain), &value) != nil || value.Version != 1 || value.CreatedAt.IsZero() || value.CreatedAt.After(time.Now().Add(5*time.Minute)) || len(value.Files) < 3 || len(value.Files) > 7 {
+	if decode(bytes.NewReader(plain), &value) != nil || value.Version != 1 || value.CreatedAt.IsZero() || value.CreatedAt.After(time.Now().Add(5*time.Minute)) || len(value.Files) < 3 || len(value.Files) > 8 {
 		return controllerBackup{}, errors.New("control: invalid controller backup contents")
 	}
 	for _, name := range []string{"nodes.json", "business.json", "business.adoption.json"} {
@@ -72,9 +72,16 @@ func openControllerBackup(raw, key []byte) (controllerBackup, error) {
 			return controllerBackup{}, errors.New("control: invalid availability backup")
 		}
 	}
+	var ledger stagedImport
+	if decode(bytes.NewReader(value.Files["business.json"]), &ledger) != nil {
+		return controllerBackup{}, errors.New("control: invalid backup ledger")
+	}
+	if ledger.Version == 2 && !json.Valid(value.Files[businessArchiveFile]) {
+		return controllerBackup{}, errors.New("control: missing backup archive")
+	}
 	for name := range value.Files {
 		switch name {
-		case "nodes.json", "business.json", "business.adoption.json", "availability.json", "quality.json", subscriptionNamesFile, hostBindingsFile:
+		case "nodes.json", "business.json", "business.adoption.json", "availability.json", "quality.json", subscriptionNamesFile, hostBindingsFile, businessArchiveFile:
 		default:
 			return controllerBackup{}, errors.New("control: unknown backup file")
 		}
@@ -175,6 +182,20 @@ func (s *Store) BackupController(now time.Time) error {
 			return err
 		}
 		value.Files[name] = raw
+	}
+	var liveEnvelope stagedImport
+	if decode(bytes.NewReader(value.Files["business.json"]), &liveEnvelope) != nil {
+		return errors.New("control: invalid live ledger backup")
+	}
+	if liveEnvelope.Version == 2 {
+		archiveRaw, archiveErr := readLedgerArchive(directory, liveEnvelope.ArchiveSHA256)
+		if archiveErr != nil {
+			return archiveErr
+		}
+		value.Files[businessArchiveFile] = archiveRaw
+	}
+	if _, _, err := decodeDetachedBusinessCheckpoint(value.Files["business.json"], value.Files[businessArchiveFile], key); err != nil {
+		return err
 	}
 	var nodes []Node
 	if json.Unmarshal(value.Files["nodes.json"], &nodes) != nil {
@@ -294,7 +315,7 @@ func RestoreControllerBackup(source, keyPath, destination string) error {
 	if decode(bytes.NewReader(value.Files["business.json"]), &staged) != nil || !glivela.ValidIdentifier(staged.SnapshotID) {
 		return errors.New("control: invalid backup business identity")
 	}
-	if _, err := glivela.OpenImportMaterial(staged.Sealed, key, staged.SnapshotID); err != nil {
+	if _, _, err := decodeDetachedBusinessCheckpoint(value.Files["business.json"], value.Files[businessArchiveFile], key); err != nil {
 		return err
 	}
 	// Runtime observations are caches, not restored proof of a live process.
@@ -342,6 +363,15 @@ func RestoreControllerBackup(source, keyPath, destination string) error {
 		value.Files["quality.json"] = raw
 	}
 	names := []string{"business.adoption.json", "business.json", "nodes.json"}
+	if archive, ok := value.Files[businessArchiveFile]; ok {
+		// The logical backup slot restores to the digest-selected live name.
+		name := businessArchiveName(staged.ArchiveSHA256)
+		if !glivela.ValidIdentity(staged.ArchiveSHA256) {
+			return errors.New("control: invalid restored archive reference")
+		}
+		value.Files[name] = archive
+		names = append([]string{name}, names...)
+	}
 	if _, ok := value.Files["availability.json"]; ok {
 		names = append(names, "availability.json")
 	}

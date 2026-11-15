@@ -46,7 +46,7 @@ func businessAdoptionStarted(directory string) (bool, error) {
 			return false, err
 		}
 	}
-	return false, nil
+	return hasBusinessArchive(directory)
 }
 
 // AdoptStagedBusiness is a local, offline commit used ONLY after the one-time
@@ -82,6 +82,9 @@ func AdoptStagedBusiness(directory, snapshotID string, ownership glivela.Busines
 		return finishBusinessNodes(directory, intent, current)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	if started, checkErr := businessAdoptionStarted(directory); checkErr != nil || started {
+		return errors.New("control: owned business evidence remains; explicit recovery required")
 	}
 	material, id, err := readStagedImport(directory, storageKey)
 	if err != nil {

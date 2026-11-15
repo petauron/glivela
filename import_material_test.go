@@ -50,6 +50,8 @@ func TestImportMaterialPreservesOriginalIdentitiesAndCounters(t *testing.T) {
 		t.Fatal("plaintext transfer")
 	}
 	opened, err := OpenImportMaterial(sealed, key, "snapshot-a")
+	// The authenticated-load cache is not transferred business data.
+	opened.sourceCache = nil
 	if err != nil || !reflect.DeepEqual(m, opened) {
 		t.Fatal("transfer changed identity, revision or counters")
 	}

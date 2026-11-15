@@ -78,7 +78,15 @@ func TestControllerLoadsOriginalBusinessWithoutActivating(t *testing.T) {
 	if reflect.DeepEqual(view, s.Business()) {
 		t.Fatal("inventory view aliases controller business state")
 	}
-	if !reflect.DeepEqual(s.business.material, m) {
+	observedJSON, marshalErr := json.Marshal(s.business.material)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	originalJSON, marshalErr := json.Marshal(m)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if !bytes.Equal(observedJSON, originalJSON) {
 		t.Fatal("view mutation changed private state")
 	}
 	if s.LoadBusiness(key) == nil {

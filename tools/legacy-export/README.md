@@ -305,3 +305,21 @@ cell, checks account/credential/ledger/endpoint preservation, and loads the stag
 checkpoint through the controller as `awaiting-handover`. It does not run
 `capture-final`/`adopt-final`, start listeners, enroll nodes or transfer authority.
 Only aggregate counts are logged; remove the private input copy/keys separately.
+
+## Offline retired-history maintenance
+
+`purge-retired-history` requires root, explicit `-confirm-stopped-writers`, exact
+retired node IDs and both writers stopped. It supports the controller's owned
+format-1 checkpoint and linked format-2 ledger using the same authenticated
+reader, storage key and adoption identity. It does not reconstruct missing data
+from staging or downgrade the ledger. The controller directory lease is held
+throughout; current node state and live credential protections remain required.
+
+The tool finishes historical Center redaction first, installs a complete immutable
+archive, then atomically switches the ledger's authenticated archive reference.
+Only authenticated superseded archives of the same source and ownership are
+removed after that commit is durable. Retry reuses the audit scope and preserves
+all live counters, watermarks, routes and identities. Explicit inactive-history
+file lists cannot bypass this binding by naming current controller state files.
+See [controller storage](../../docs/controller-ledger-storage.md) for recovery
+boundaries; this command does not stop writers or grant maintenance permission.

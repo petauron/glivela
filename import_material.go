@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,10 @@ type RetiredLanding struct {
 // offline retirement operation may redact expired-host history while retaining
 // its source identity header. Never send this material in a receipt or logs.
 type ImportMaterial struct {
+	// Only authenticated loads populate this cache; its fingerprint is checked
+	// against current bytes on use, so in-place archive edits cannot reuse it.
+	sourceCache *importSourceCache
+
 	ServerTransportVersion uint8                      `json:"serverTransportVersion,omitempty"`
 	ServerTransports       map[string]ServerTransport `json:"serverTransports,omitempty"`
 
@@ -54,6 +59,15 @@ type ImportMaterial struct {
 }
 
 func (m ImportMaterial) Validate() error {
+	source, err := m.sourceHeader()
+	if err != nil {
+		return err
+	}
+	return m.validateWithSource(source)
+}
+
+// A single validation keeps one checked source header for this call only.
+func (m ImportMaterial) validateWithSource(source importSourceHeader) error {
 	if err := m.validatePrunedEntries(); err != nil {
 		return err
 	}
@@ -176,7 +190,7 @@ func (m ImportMaterial) Validate() error {
 		}
 	}
 
-	if _, err := m.sourceSnapshot(); err != nil {
+	if _, err := m.sourceSnapshotHeader(source); err != nil {
 		return err
 	}
 	if m.Ownership != nil {
@@ -239,7 +253,7 @@ func (m ImportMaterial) Validate() error {
 	if len(m.SubscriptionTokens) != len(plan.Accounts) || len(m.ProtocolSecrets) != credentials || len(m.HysteriaSecrets) != hysteria {
 		return errors.New("glivela: unreferenced import credentials")
 	}
-	if err := m.validateEndpoints(); err != nil {
+	if err := m.validateEndpoints(source); err != nil {
 		return err
 	}
 	return m.validateReferences()
@@ -247,15 +261,49 @@ func (m ImportMaterial) Validate() error {
 
 // Only the archive identity header is interpreted here. Legacy table formats
 // are read by the one-time offline tool, not by the controller or node runtime.
-func (m ImportMaterial) sourceSnapshot() (string, error) {
-	var header struct {
-		Origin       string `json:"origin,omitempty"`
-		Version      int    `json:"version"`
-		Schema       int    `json:"sourceSchema"`
-		SnapshotID   string `json:"snapshotId"`
-		SourceSHA256 string `json:"sourceSha256"`
+type importSourceHeader struct {
+	Origin       string `json:"origin,omitempty"`
+	Version      int    `json:"version"`
+	Schema       int    `json:"sourceSchema"`
+	SnapshotID   string `json:"snapshotId"`
+	SourceSHA256 string `json:"sourceSha256"`
+}
+type importSourceCache struct {
+	Digest [32]byte
+	Header importSourceHeader
+}
+
+func (m ImportMaterial) sourceHeader() (importSourceHeader, error) {
+	if len(m.RetainedSource) > maxImportMaterial {
+		return importSourceHeader{}, errors.New("glivela: source archive too large")
 	}
-	if len(m.RetainedSource) > maxImportMaterial || json.Unmarshal(m.RetainedSource, &header) != nil || header.Version != 1 || !((header.Origin == "" && (header.Schema == 113 || header.Schema == 114 || header.Schema == 115 || header.Schema == 116 || header.Schema == 120)) || (header.Origin == "native" && header.Schema == 0 && m.Ownership != nil && m.Ownership.Origin == "native")) || !ValidIdentifier(header.SnapshotID) || !ValidIdentity(m.SourceSHA256) || header.SourceSHA256 != m.SourceSHA256 {
+	digest := sha256.Sum256(m.RetainedSource)
+	if m.sourceCache != nil && m.sourceCache.Digest == digest {
+		return m.sourceCache.Header, nil
+	}
+	var h importSourceHeader
+	if json.Unmarshal(m.RetainedSource, &h) != nil {
+		return h, errors.New("glivela: invalid source archive")
+	}
+	return h, nil
+}
+func (m *ImportMaterial) cacheSource() error {
+	h, err := m.sourceHeader()
+	if err != nil {
+		return err
+	}
+	m.sourceCache = &importSourceCache{Digest: sha256.Sum256(m.RetainedSource), Header: h}
+	return nil
+}
+func (m ImportMaterial) sourceSnapshot() (string, error) {
+	header, err := m.sourceHeader()
+	if err != nil {
+		return "", err
+	}
+	return m.sourceSnapshotHeader(header)
+}
+func (m ImportMaterial) sourceSnapshotHeader(header importSourceHeader) (string, error) {
+	if header.Version != 1 || !((header.Origin == "" && (header.Schema == 113 || header.Schema == 114 || header.Schema == 115 || header.Schema == 116 || header.Schema == 120)) || (header.Origin == "native" && header.Schema == 0 && m.Ownership != nil && m.Ownership.Origin == "native")) || !ValidIdentifier(header.SnapshotID) || !ValidIdentity(m.SourceSHA256) || header.SourceSHA256 != m.SourceSHA256 {
 		return "", errors.New("glivela: missing or changed source snapshot identity")
 	}
 	if m.Ownership != nil && (m.Ownership.Origin == "native") != (header.Origin == "native") {
@@ -307,7 +355,7 @@ func OpenImportMaterial(sealed, key []byte, snapshotID string) (ImportMaterial, 
 	decoder.DisallowUnknownFields()
 	var m ImportMaterial
 	var extra any
-	if decoder.Decode(&m) != nil || decoder.Decode(&extra) != io.EOF || m.Validate() != nil {
+	if decoder.Decode(&m) != nil || decoder.Decode(&extra) != io.EOF || m.cacheSource() != nil || m.Validate() != nil {
 		return ImportMaterial{}, errors.New("glivela: invalid import material")
 	}
 	if source, _ := m.sourceSnapshot(); source != snapshotID {

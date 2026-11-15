@@ -711,38 +711,38 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	if f.Parse(args) != nil || f.NArg() != 0 || os.Geteuid() != 0 || !*confirmed || *directory == "" || *center == "" {
 		return errors.New("confirmed offline root history purge required")
 	}
-	unlock, err := control.LockDirectory(*directory)
+	return purgeStoppedHistory(ctx, historyPurgeOptions{directory: *directory, center: *center, nodes: *nodes, audit: *audit, historyFiles: *historyFiles, wordsFile: *wordsFile})
+}
+
+type historyPurgeOptions struct{ directory, center, nodes, audit, historyFiles, wordsFile string }
+
+// Called only after the CLI's root/stopped-writers confirmation. It keeps the
+// same directory lease throughout authenticated reads and the offline commit.
+func purgeStoppedHistory(ctx context.Context, o historyPurgeOptions) error {
+	unlock, err := control.LockDirectory(o.directory)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	ids := map[string]bool{}
-	for _, id := range strings.Split(*nodes, ",") {
+	for _, id := range strings.Split(o.nodes, ",") {
 		if !glivela.ValidIdentifier(id) || ids[id] {
 			return errors.New("exact retired identities required")
 		}
 		ids[id] = true
 	}
-	path := filepath.Join(*directory, "business.json")
+	path := filepath.Join(o.directory, "business.json")
 	before, err := privateFile(path, 90<<20)
 	if err != nil {
 		return err
 	}
-	var checkpoint struct {
-		Version    int    `json:"version"`
-		SnapshotID string `json:"snapshotId"`
-		Sealed     []byte `json:"sealed"`
-	}
-	if json.Unmarshal(before, &checkpoint) != nil || checkpoint.Version != 1 {
-		return errors.New("owned checkpoint invalid")
-	}
-	key, err := privateFile(filepath.Join(*directory, "business.key"), 32)
+	key, err := privateFile(filepath.Join(o.directory, "business.key"), 32)
 	if err != nil {
 		return err
 	}
 	defer clear(key)
-	m, err := glivela.OpenImportMaterial(checkpoint.Sealed, key, checkpoint.SnapshotID)
-	if err != nil || m.Ownership == nil {
+	m, snapshot, fingerprint, err := control.ReadOwnedBusinessForHistory(o.directory, key)
+	if err != nil || m.Ownership == nil || fingerprint != sha256.Sum256(before) {
 		return errors.New("owned checkpoint authentication failed")
 	}
 	for id := range ids {
@@ -750,13 +750,13 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 			return errors.New("landing retirement must complete first")
 		}
 	}
-	sourceKey, err := privateFile(filepath.Join(*center, "center.key"), 32)
+	sourceKey, err := privateFile(filepath.Join(o.center, "center.key"), 32)
 	if err != nil {
 		return err
 	}
 	defer clear(sourceKey)
 	var a archive
-	if json.Unmarshal(m.RetainedSource, &a) != nil || a.SourceSHA256 != m.SourceSHA256 || a.SnapshotID != checkpoint.SnapshotID {
+	if json.Unmarshal(m.RetainedSource, &a) != nil || a.SourceSHA256 != m.SourceSHA256 || a.SnapshotID != snapshot {
 		return errors.New("retained source identity differs")
 	}
 	protected := map[string]bool{}
@@ -780,7 +780,7 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	}
 	// Runtime-owned private transport keys may be shared by surviving entries
 	// without belonging to a subscription credential in the business material.
-	rawNodes, err := privateFile(filepath.Join(*directory, "nodes.json"), 90<<20)
+	rawNodes, err := privateFile(filepath.Join(o.directory, "nodes.json"), 90<<20)
 	if err != nil {
 		return err
 	}
@@ -811,8 +811,8 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 		}
 	}
 	var additional []string
-	if *wordsFile != "" {
-		raw, err := privateFile(*wordsFile, 1<<20)
+	if o.wordsFile != "" {
+		raw, err := privateFile(o.wordsFile, 1<<20)
 		if err != nil {
 			return err
 		}
@@ -832,7 +832,7 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *audit != "" {
+	if o.audit != "" {
 		fingerprints := make([]string, 0, len(r.words))
 		for _, word := range r.words {
 			sum := sha256.Sum256([]byte(word))
@@ -847,13 +847,22 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 		if e != nil {
 			return e
 		}
-		if old, e := privateFile(*audit, 1<<20); e == nil {
-			if !bytes.Equal(old, raw) {
-				return errors.New("existing redaction audit differs")
+		if old, e := privateFile(o.audit, 1<<20); e == nil {
+			var saved struct {
+				Version      int      `json:"version"`
+				Fingerprints []string `json:"fingerprints"`
+			}
+			if json.Unmarshal(old, &saved) != nil || saved.Version != 1 {
+				return errors.New("existing redaction audit invalid")
+			}
+			for _, current := range fingerprints {
+				if !slices.Contains(saved.Fingerprints, current) {
+					return errors.New("existing redaction audit differs")
+				}
 			}
 		} else if !errors.Is(e, os.ErrNotExist) {
 			return e
-		} else if e = writeNewPrivate(*audit, raw); e != nil {
+		} else if e = writeNewPrivate(o.audit, raw); e != nil {
 			return e
 		}
 	}
@@ -861,12 +870,12 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	checkpoint.Sealed, err = glivela.SealImportMaterial(m, key, checkpoint.SnapshotID)
+	_, err = glivela.SealImportMaterial(m, key, snapshot)
 	if err != nil {
 		return err
 	}
-	if *historyFiles != "" {
-		raw, e := privateFile(*historyFiles, 1<<20)
+	if o.historyFiles != "" {
+		raw, e := privateFile(o.historyFiles, 1<<20)
 		if e != nil {
 			return e
 		}
@@ -875,7 +884,11 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 			return errors.New("history file list invalid")
 		}
 		for _, path := range paths {
-			if !filepath.IsAbs(path) || filepath.Clean(path) != path || !strings.HasSuffix(path, ".json") || path == filepath.Join(*directory, "business.json") {
+			parent, parentErr := filepath.EvalSymlinks(filepath.Dir(path))
+			state, stateErr := filepath.EvalSymlinks(o.directory)
+			fileName := filepath.Base(path)
+			active := parent == state && (fileName == "nodes.json" || strings.HasPrefix(fileName, "business.") || fileName == "availability.json" || fileName == "host-bindings.json" || fileName == "subscription-names.json")
+			if parentErr != nil || stateErr != nil || active || !filepath.IsAbs(path) || filepath.Clean(path) != path || !strings.HasSuffix(path, ".json") {
 				return errors.New("history file scope invalid")
 			}
 			before, e := privateFile(path, 90<<20)
@@ -921,50 +934,19 @@ func purgeHistoryCommand(ctx context.Context, args []string) error {
 	}
 	// Complete Center first: an interrupted retry can still derive the exact
 	// scope from the not-yet-replaced controller archive, without a new backup.
-	changed, err := redactCenterHistory(ctx, *center, r)
+	observedNodes, err := privateFile(filepath.Join(o.directory, "nodes.json"), 90<<20)
+	if err != nil || !bytes.Equal(rawNodes, observedNodes) {
+		return errors.New("current node policy changed during history purge")
+	}
+	changed, err := redactCenterHistory(ctx, o.center, r)
 	if err != nil {
 		return err
 	}
-	after, err := json.Marshal(checkpoint)
-	if err != nil {
-		return err
+	observedNodes, err = privateFile(filepath.Join(o.directory, "nodes.json"), 90<<20)
+	if err != nil || !bytes.Equal(rawNodes, observedNodes) {
+		return errors.New("current node policy changed during history purge")
 	}
-	observed, err := privateFile(path, 90<<20)
-	if err != nil || !bytes.Equal(before, observed) {
-		return errors.New("controller writer changed during history purge")
-	}
-	tmp, err := os.CreateTemp(*directory, ".history-purge-")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if err = tmp.Chmod(0600); err == nil {
-		err = preserveHistoryOwner(tmp, path)
-	}
-	if err == nil {
-		_, err = tmp.Write(after)
-	}
-	if err == nil {
-		err = tmp.Sync()
-	}
-	closeErr := tmp.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err = os.Rename(name, path); err != nil {
-		return err
-	}
-	d, err := os.Open(*directory)
-	if err != nil {
-		return err
-	}
-	err = d.Sync()
-	d.Close()
-	if err != nil {
+	if err = control.ReplaceOwnedBusinessHistory(o.directory, key, sha256.Sum256(before), m.RetainedSource); err != nil {
 		return err
 	}
 	fmt.Printf("Historical archive redacted; Center encrypted payloads changed: %d; current node policy and account ledger unchanged.\n", changed)
