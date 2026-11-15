@@ -12,12 +12,13 @@ import (
 )
 
 type distributionMetadata struct {
-	Version      string            `json:"version"`
-	Commit       string            `json:"commit"`
-	OS           string            `json:"os"`
-	Architecture string            `json:"architecture"`
-	UI           map[string]string `json:"ui,omitempty"`
-	Iperf3       struct {
+	HostTCPBudget string            `json:"hostTCPBudget,omitempty"`
+	Version       string            `json:"version"`
+	Commit        string            `json:"commit"`
+	OS            string            `json:"os"`
+	Architecture  string            `json:"architecture"`
+	UI            map[string]string `json:"ui,omitempty"`
+	Iperf3        struct {
 		Version string `json:"version"`
 		SHA256  string `json:"sha256"`
 	} `json:"iperf3,omitempty"`
