@@ -72,7 +72,7 @@ for arch in amd64 arm64; do
   ui_css_digest=$(sha256sum "$bundle/glivela-ui.css" | cut -d ' ' -f 1)
   jq -n --arg version "$version" --arg commit "$commit" --arg arch "$arch" \
     --arg xray "$xray_digest" --arg archive "$digest" --arg iperf "$iperf_digest" --arg uiJS "$ui_js_digest" --arg uiCSS "$ui_css_digest" \
-    '{version:$version,commit:$commit,os:"linux",architecture:$arch,xray:{version:"26.10.31",sha256:$xray,sourceArchiveSHA256:$archive},iperf3:{version:"3.22",sha256:$iperf},ui:{"glivela-ui.js":$uiJS,"glivela-ui.css":$uiCSS}}' > "$bundle/runtime.json"
+    '{hostTCPBudget:"vastora-v1",version:$version,commit:$commit,os:"linux",architecture:$arch,xray:{version:"26.10.31",sha256:$xray,sourceArchiveSHA256:$archive},iperf3:{version:"3.22",sha256:$iperf},ui:{"glivela-ui.js":$uiJS,"glivela-ui.css":$uiCSS}}' > "$bundle/runtime.json"
   chmod 0644 "$bundle/LICENSE.glivela" "$bundle/LICENSE.xray" "$bundle/LICENSE.iperf3" "$bundle/runtime.json"
   archive="glivela-$version-linux-$arch.tar.gz"
   tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \

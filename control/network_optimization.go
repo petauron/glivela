@@ -15,6 +15,7 @@ import (
 // Network optimization is separate from proxy desired state and accounting.
 // Only administrator requests create mutations; nodes cannot nominate targets.
 type TCPBudgetStatus struct {
+	Revision     string   `json:"revision,omitempty"`
 	PageBytes    int64    `json:"pageBytes"`
 	CurrentPages [3]int64 `json:"currentPages"`
 	TierMiB      int64    `json:"tierMiB,omitempty"`
