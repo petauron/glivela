@@ -12,6 +12,10 @@ func compositeXrayRules(grant RouteGrant, publicSSH *PublicSSHPolicy, legacy boo
 	scope := func(network, outbound string) map[string]any {
 		return map[string]any{"type": "field", "inboundTag": []string{grant.InboundTag}, "user": []string{grant.Route.User}, "network": network, "outboundTag": outbound}
 	}
+	network := "tcp"
+	if grant.UDP {
+		network = "tcp,udp"
+	}
 	ports := make([]string, 0, len(legacyCompositeBlockedPorts))
 	for _, port := range legacyCompositeBlockedPorts {
 		if port != 22 || publicSSH == nil {
@@ -20,13 +24,16 @@ func compositeXrayRules(grant RouteGrant, publicSSH *PublicSSHPolicy, legacy boo
 	}
 	management := scope("tcp", "blocked")
 	management["port"] = strings.Join(ports, ",")
-	private := scope("tcp", "blocked")
+	private := scope(network, "blocked")
 	private["ip"] = slices.Clone(compositeBlockedCIDRs)
-	ipv6 := scope("tcp", routeOutboundTag(grant.ID))
+	ipv6 := scope(network, routeOutboundTag(grant.ID))
 	ipv6["ip"] = []string{"::/0"}
-	ipv4 := scope("tcp", routeOutboundTag(grant.ID)+"-ipv4")
+	ipv4 := scope(network, routeOutboundTag(grant.ID)+"-ipv4")
 	ipv4["ip"] = []string{"0.0.0.0/0"}
-	rules := []any{scope("udp", "blocked")}
+	rules := []any{}
+	if !grant.UDP {
+		rules = append(rules, scope("udp", "blocked"))
+	}
 	if legacy {
 		rules = append(rules, management)
 	}

@@ -86,6 +86,7 @@ func (c Credential) Validate() error {
 }
 
 type RouteGrant struct {
+	UDP bool `json:"udp,omitempty"`
 	// ClientChainID selects one retained three-hop path without replacing a direct peer.
 	ClientChainID string         `json:"clientChainId,omitempty"`
 	ID            string         `json:"id"`

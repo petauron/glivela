@@ -29,6 +29,7 @@ type ClientListenerPolicy struct {
 }
 
 type ServerFirewall struct {
+	UDPEgressIPs    []string                 `json:"udpEgressIps,omitempty"`
 	Port            int                      `json:"port,omitempty"`
 	IPv6Only        bool                     `json:"ipv6Only,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
@@ -71,6 +72,13 @@ func (policy ServerFirewall) validate() error {
 	}
 	if !ValidEgressIP(policy.EgressIP) {
 		return errors.New("landing: invalid firewall egress IP")
+	}
+	seen := map[string]bool{}
+	for _, ip := range policy.UDPEgressIPs {
+		if seen[ip] || ip != policy.EgressIP && !slices.ContainsFunc(policy.ClientListeners, func(c ClientListenerPolicy) bool { return c.EgressIP == ip }) {
+			return errors.New("landing: UDP exit is not an authorized egress")
+		}
+		seen[ip] = true
 	}
 	return policy.validateIdentity()
 }
@@ -132,6 +140,8 @@ func (policy ServerFirewall) identity() (string, string) {
 	slices.Sort(policy.Sources)
 	policy.TCPOnlySources = slices.Clone(policy.TCPOnlySources)
 	slices.Sort(policy.TCPOnlySources)
+	policy.UDPEgressIPs = slices.Clone(policy.UDPEgressIPs)
+	slices.Sort(policy.UDPEgressIPs)
 	data, _ := json.Marshal(policy)
 	digest := sha256.Sum256(data)
 	return "glivela_landing_server_v2_" + hex.EncodeToString(digest[:8]), "glivela-landing-server-v2:" + hex.EncodeToString(digest[:])
@@ -295,9 +305,12 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 	for _, ip := range addresses {
 		if strings.Contains(ip, ":") {
 			rule("destinations", match(payload("ip6", "saddr"), ip), match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": "2000::", "len": 3}}), match(meta("l4proto"), "tcp"), nftObject{"return": nil})
+			if slices.Contains(policy.UDPEgressIPs, ip) {
+				rule("destinations", match(payload("ip6", "saddr"), ip), match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": "2000::", "len": 3}}), match(meta("l4proto"), "udp"), nftObject{"return": nil})
+			}
 		} else {
 			for _, protocol := range []string{"tcp", "udp"} {
-				if protocol == "udp" && ip != policy.EgressIP {
+				if protocol == "udp" && ip != policy.EgressIP && !slices.Contains(policy.UDPEgressIPs, ip) {
 					continue
 				}
 				// EgressIP is mandatory. Its IP payload match enforces IPv4;

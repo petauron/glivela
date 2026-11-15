@@ -14,6 +14,7 @@ import (
 )
 
 type RouteChange struct {
+	UDP              bool   `json:"udp,omitempty"`
 	ClientChainID    string `json:"clientChainId,omitempty"`
 	ID               string `json:"id"`
 	AccountID        string `json:"accountId"`
@@ -95,7 +96,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	account := &accounts[ai]
 	gi := slices.IndexFunc(account.Grants, func(g glivela.RouteGrant) bool { return g.ID == change.ID })
 	deleted := next.DeletedRoutes[change.ID]
-	same := gi >= 0 && account.Grants[gi].EntryID == change.EntryID && account.Grants[gi].EgressID == change.EgressID && account.Grants[gi].IPv4EgressID == change.IPv4EgressID && account.Grants[gi].ClientChainID == change.ClientChainID && account.Grants[gi].HideNative == change.HideNative && account.Grants[gi].Enabled == change.Enabled && deleted == change.Delete
+	same := gi >= 0 && account.Grants[gi].UDP == change.UDP && account.Grants[gi].EntryID == change.EntryID && account.Grants[gi].EgressID == change.EgressID && account.Grants[gi].IPv4EgressID == change.IPv4EgressID && account.Grants[gi].ClientChainID == change.ClientChainID && account.Grants[gi].HideNative == change.HideNative && account.Grants[gi].Enabled == change.Enabled && deleted == change.Delete
 	if change.Delete && (change.Enabled || gi < 0 || account.Grants[gi].HideNative != change.HideNative) || deleted && !same {
 		return AccountChangeResult{}, invalid
 	}
@@ -126,7 +127,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 						return AccountChangeResult{}, invalid
 					}
 				}
-				grant.Enabled, grant.HideNative = change.Enabled, change.HideNative
+				grant.Enabled, grant.HideNative, grant.UDP = change.Enabled, change.HideNative, change.UDP
 				grant.DesiredRev++
 				grant.AppliedRev, grant.RuntimeGood = 0, false
 			}
@@ -150,7 +151,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				return AccountChangeResult{}, err
 			}
 			credential := glivela.Credential{ID: cid.String(), AccountID: change.AccountID, Kind: glivela.RouteCredential, User: glivela.RouteUser(change.ID), Identity: glivela.Identity(identity.String()), EntryID: change.EntryID, EgressID: change.EgressID, Enabled: true}
-			grant := glivela.RouteGrant{ClientChainID: change.ClientChainID, ID: change.ID, AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, IPv4EgressID: change.IPv4EgressID, InboundTag: next.Endpoints[ei].Reality.InboundTag, Base: account.Credentials[base], Route: credential, Mode: glivela.FixedMode, Enabled: true, HideNative: change.HideNative, DesiredRev: 1}
+			grant := glivela.RouteGrant{UDP: change.UDP, ClientChainID: change.ClientChainID, ID: change.ID, AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, IPv4EgressID: change.IPv4EgressID, InboundTag: next.Endpoints[ei].Reality.InboundTag, Base: account.Credentials[base], Route: credential, Mode: glivela.FixedMode, Enabled: true, HideNative: change.HideNative, DesiredRev: 1}
 			if grant.Validate() != nil {
 				return AccountChangeResult{}, invalid
 			}
@@ -290,6 +291,9 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 			return nil, errors.New("control: entry revision exhausted")
 		}
 		plan.Revision++
+		if slices.ContainsFunc(plan.Grants, func(g glivela.RouteGrant) bool { return g.UDP }) {
+			desired.EntryRenderVersion = glivela.XrayRenderVersion
+		}
 		desired, err = newEntryDesiredVersion(*plan, *desired.EntryNetwork, desired.EntryRenderVersion)
 		if err != nil {
 			return nil, err

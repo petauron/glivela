@@ -16,6 +16,8 @@ import (
 )
 
 type Source struct {
+	// UDPOverTCP permits authenticated datagrams inside the existing TCP socket.
+	UDPOverTCP    bool   `json:"udpOverTcp,omitempty"`
 	Address       string `json:"address"`
 	TCPOnly       bool   `json:"tcpOnly"`
 	PublicAddress string `json:"publicAddress,omitempty"`
@@ -28,6 +30,7 @@ type Source struct {
 type ClientListener = glivela.TransportListener
 
 type Plan struct {
+	UDPOverTCPListeners []string `json:"udpOverTcpListeners,omitempty"`
 	// Explicit client-only IPv6 bind; retained IPv4 grants are inactive.
 	IPv6OnlyAddress string                   `json:"ipv6OnlyAddress,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
@@ -45,6 +48,23 @@ func tailnetIPv4(value string) bool {
 }
 
 func (p Plan) Validate() error {
+	if len(p.UDPOverTCPListeners) > 1000 {
+		return errors.New("landing: too many UDP transport grants")
+	}
+	seenUDP := map[string]bool{}
+	for _, id := range p.UDPOverTCPListeners {
+		if seenUDP[id] || !slices.ContainsFunc(p.ActiveClientListeners(), func(c ClientListener) bool {
+			return c.ID == id && (c.Shared || c.Transport == glivela.IPv4ClientSS2022 || c.Transport == "ipv6-ss2022")
+		}) {
+			return errors.New("landing: UDP requires an existing exact listener")
+		}
+		seenUDP[id] = true
+	}
+	for _, source := range p.Sources {
+		if source.UDPOverTCP && (!source.TCPOnly || p.Transport.Protocol != "ss2022") {
+			return errors.New("landing: UDP-over-TCP requires an existing SS2022 TCP source")
+		}
+	}
 	if p.Transport.ClientListenerID != "" {
 		return errors.New("landing: client binding belongs to the entry")
 	}
@@ -127,7 +147,7 @@ const legacyManagementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3
 // Render targets official Xray 26.10.31. SOCKS does not receive the core's
 // default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
 // remains mandatory for post-resolution targets and address-family limits.
-const RenderVersion uint8 = 7
+const RenderVersion uint8 = 15
 
 func (p Plan) Render() ([]byte, error) {
 	return p.RenderVersion(RenderVersion)
@@ -135,6 +155,9 @@ func (p Plan) Render() ([]byte, error) {
 
 // RenderVersion reads old signed artifacts without changing their hash.
 func (p Plan) RenderVersion(version uint8) ([]byte, error) {
+	if version&8 == 0 && (len(p.UDPOverTCPListeners) != 0 || slices.ContainsFunc(p.Sources, func(s Source) bool { return s.UDPOverTCP })) {
+		return nil, errors.New("landing: UDP-over-TCP requires the current landing format")
+	}
 	if version > RenderVersion || version < 7 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Interface != "" }) || p.HasClientEgress() && version < 6 || p.IPv6OnlyAddress != "" && version < 3 || version < 4 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
 		return nil, errors.New("landing: unsupported render version")
 	}
@@ -191,6 +214,9 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		}
 		rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{tag}, "source": []string{source}, "network": network, "outboundTag": outbound})
 	}
+	denyQUIC := func(tag, source string) {
+		rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{tag}, "source": []string{source}, "network": "udp", "port": "443", "outboundTag": "deny"})
+	}
 	if version == 0 {
 		rules = append(rules, managementPortRule(p.PublicSSH))
 	}
@@ -217,7 +243,15 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		if p.Transport.PublicAddress != "" {
 			address = source.PublicAddress
 		}
-		route("landing", address+"/32", network, p.EgressIP)
+		routeNetwork := network
+		sharedUDP := slices.ContainsFunc(p.ActiveClientListeners(), func(c ClientListener) bool {
+			return c.Shared && c.Address == "" && c.Port == p.Transport.ListenerPort() && c.Source == address && slices.Contains(p.UDPOverTCPListeners, c.ID)
+		})
+		if source.UDPOverTCP || sharedUDP {
+			routeNetwork = "tcp,udp"
+			denyQUIC("landing", address+"/32")
+		}
+		route("landing", address+"/32", routeNetwork, p.EgressIP)
 	}
 	inbound := map[string]any{"tag": "landing", "listen": p.Address, "port": p.Transport.ListenerPort(), "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": udp, "ip": p.Address}}
 	if p.Transport.Protocol == "ss2022" {
@@ -263,7 +297,12 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		if ip == "" {
 			ip = p.EgressIP
 		}
-		route(tag, c.Source+prefix, "tcp", ip)
+		network := "tcp"
+		if slices.Contains(p.UDPOverTCPListeners, c.ID) {
+			network = "tcp,udp"
+			denyQUIC(tag, c.Source+prefix)
+		}
+		route(tag, c.Source+prefix, network, ip)
 	}
 	outbounds := []any{map[string]any{"tag": "deny", "protocol": "blackhole"}, map[string]any{"tag": "egress", "protocol": "freedom", "sendThrough": p.EgressIP, "settings": map[string]any{"domainStrategy": strategy}}, resolverOutbound}
 	queryStrategy, routingStrategy := strategy, "IPOnDemand"
@@ -332,13 +371,25 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 			address = source.PublicAddress
 		}
 		result.Sources = append(result.Sources, address)
+		if source.UDPOverTCP {
+			result.UDPEgressIPs = append(result.UDPEgressIPs, p.EgressIP)
+		}
 		if source.TCPOnly {
 			result.TCPOnlySources = append(result.TCPOnlySources, address)
 		}
 	}
 	for _, c := range p.ActiveClientListeners() {
+		if slices.Contains(p.UDPOverTCPListeners, c.ID) {
+			ip := c.EgressIP
+			if ip == "" {
+				ip = p.EgressIP
+			}
+			result.UDPEgressIPs = append(result.UDPEgressIPs, ip)
+		}
 		result.ClientListeners = append(result.ClientListeners, ClientListenerPolicy{Interface: c.Interface, EgressIP: c.EgressIP, Shared: c.Shared, Port: c.Port, Source: c.Source, Transport: c.Transport, Address: c.Address})
 	}
+	slices.Sort(result.UDPEgressIPs)
+	result.UDPEgressIPs = slices.Compact(result.UDPEgressIPs)
 	return result, result.validate()
 }
 

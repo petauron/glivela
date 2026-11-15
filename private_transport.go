@@ -90,7 +90,7 @@ func (t PrivateTransport) Endpoint(privateAddress string) string {
 	return privateAddress
 }
 
-func (p RoutePeer) outbound(tag string) map[string]any {
+func (p RoutePeer) outbound(tag string, udp bool) map[string]any {
 	server := map[string]any{"address": p.Transport.Endpoint(p.Address), "port": p.Port}
 	protocol := "socks"
 	if p.Transport.Protocol == "ss2022" {
@@ -98,6 +98,9 @@ func (p RoutePeer) outbound(tag string) map[string]any {
 		server["method"], server["password"] = p.Transport.Method(), p.Transport.Key
 	}
 	out := map[string]any{"protocol": protocol, "tag": tag, "settings": map[string]any{"servers": []any{server}}}
+	if udp {
+		out["mux"] = map[string]any{"enabled": true, "concurrency": -1, "xudpConcurrency": 1, "xudpProxyUDP443": "reject"}
+	}
 	if p.Transport.PrivateLink != nil {
 		out["sendThrough"] = p.Transport.PrivateLink.Source
 	}
@@ -130,13 +133,13 @@ func (r ClientChainRelay) ValidateServerRelay(final PrivateTransport) error {
 
 // ServerOutbounds retains both independent issued credentials and chains the
 // final proxy through the relay. Neither outbound has a direct fallback.
-func (p RoutePeer) ServerOutbounds(tag string) []any {
-	final := p.outbound(tag)
+func (p RoutePeer) ServerOutbounds(tag string, udp bool) []any {
+	final := p.outbound(tag, udp)
 	if p.Relay == nil {
 		return []any{final}
 	}
 	relayTag := tag + "-relay"
 	final["streamSettings"] = map[string]any{"sockopt": map[string]any{"dialerProxy": relayTag}}
 	relay := RoutePeer{Transport: p.DialTransport(), Port: p.Relay.Port}
-	return []any{final, relay.outbound(relayTag)}
+	return []any{final, relay.outbound(relayTag, false)}
 }

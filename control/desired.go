@@ -38,6 +38,9 @@ func NewDesired(plan landing.Plan) (Desired, error) {
 	if plan.HasClientEgress() && version < 6 {
 		version = 6
 	}
+	if len(plan.UDPOverTCPListeners) != 0 || slices.ContainsFunc(plan.Sources, func(s landing.Source) bool { return s.UDPOverTCP }) {
+		version = landing.RenderVersion
+	}
 	return newLandingDesiredVersion(plan, version)
 }
 
@@ -51,6 +54,7 @@ func newLandingDesiredVersion(plan landing.Plan, version uint8) (Desired, error)
 	}
 	plan.Sources = slices.Clone(plan.Sources)
 	plan.ClientListeners = slices.Clone(plan.ClientListeners)
+	plan.UDPOverTCPListeners = slices.Clone(plan.UDPOverTCPListeners)
 	return Desired{DesiredArtifact: a, LandingRenderVersion: version, Landing: &plan}, nil
 }
 
@@ -120,6 +124,7 @@ func (d Desired) clone() Desired {
 		plan.PublicSSH = plan.PublicSSH.Clone()
 		plan.Sources = slices.Clone(plan.Sources)
 		plan.ClientListeners = slices.Clone(plan.ClientListeners)
+		plan.UDPOverTCPListeners = slices.Clone(plan.UDPOverTCPListeners)
 		d.Landing = &plan
 	}
 	if d.Entry != nil {

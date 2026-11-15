@@ -6,7 +6,7 @@ import { SelectControl } from "@/components/SelectControl";
 import { LatencyCell, latencyKey, type RouteLatency } from "./RouteLatency";
 import { LinkSpeed, RouteSpeedSummary, speedKey, useLinkSpeed, type SpeedBody, type SpeedList } from "./LinkSpeed";
 import { routeLabels } from "./control-format";
-import type { Inventory,ClientChain } from "./control-types";
+import type { Inventory,ClientChain,Route } from "./control-types";
 import { PathMTU } from "./PathMTU";
 
 export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds,active}: {
@@ -71,6 +71,10 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
   const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account)return;
   void save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined,port:undefined,ipv4Port:undefined,relayId:undefined}),enabled:!row.enabled,expectedRevision:account.account.desiredRevision});
  };
+ const toggleUDP=(row:typeof rows[number])=>{
+  const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account||row.mode!=="server")return;
+  void save("routes",{...row.value,state:undefined,port:undefined,ipv4Port:undefined,relayId:undefined,udp:!(row.value as Route).udp,expectedRevision:account.account.desiredRevision});
+ };
  const remove=async(row:typeof rows[number])=>{
   const account=inventory.accounts.find(a=>a.account.id===row.accountId);if(!account||row.enabled)return;
   const ok=await save(row.mode==="client"?"client-chains":"routes",{...row.value,...(row.mode==="client"?{port:undefined,shared:undefined,unavailableReason:undefined}:{state:undefined,port:undefined,ipv4Port:undefined,relayId:undefined}),enabled:false,delete:true,expectedRevision:account.account.desiredRevision});
@@ -107,12 +111,13 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  <p className="gl-context-copy">{listState(current).detail}</p>
  {current.mode==="client"&&(current.value as ClientChain).privateLink?<p className="gl-context-copy">专属内网 IPv4 · {((current.value as ClientChain).privateLink)!.source} → {((current.value as ClientChain).privateLink)!.address}</p>:null}
  {current.mode==="client"?<p className="gl-context-copy">仅 TCP · 落地端口 {current.port}{current.shared?" · 共享凭据":""}。停用或配置变更后，请刷新客户端订阅并验证。</p>:null}
+ {current.mode==="server"?<p className="gl-context-copy">{(current.value as Route).udp?"UDP 已配置，节点应用后写入订阅；请刷新订阅。":"UDP 未启用。"} UDP 443 保持阻断。</p>:null}
  <details className="gl-context-details gl-route-verification"><summary>查看验证信息</summary><p>{state(current)}</p></details>
  {current.relayId?<p className="gl-context-copy">三跳线路暂不显示直连测速或 MTU 结果；请通过客户端验证。</p>:<><section className="gl-route-latencies"><h3>TCP 连接记录</h3>{landingIds(current).map(landingId=><div className="gl-route-latency-detail" key={landingId}><p>{nodeName(landingId)}</p><LatencyCell value={routeLatency(current,landingId)} now={latency.now} failed={!!latency.error}/></div>)}</section>
  {!current.relayId && landingIds(current).map(landingId=><PathMTU key={`mtu/${current.mode}/${current.id}/${landingId}`} routeId={current.id} mode={current.mode} landingId={landingId} landingName={nodeName(landingId)} disabled={disabled}/>)}
  {landingIds(current).map(landingId=><LinkSpeed key={`${current.id}/${landingId}`} entryId={current.entryId} entryName={nodeName(current.entryId)} landingId={landingId} landingName={nodeName(landingId)} reason={reason(current,landingId)} disabled={disabled} control={speed}/>)}</>}
  {current.mode==="client"?<EditPrivateClientLink key={current.id+JSON.stringify((current.value as ClientChain).privateLink)} chain={current.value as ClientChain} revision={inventory.accounts.find(a=>a.account.id===current.accountId)?.account.desiredRevision??""} disabled={disabled} save={save}/>:null}
- <section>{current.mode==="client"&&!current.shared?<Button className="gl-wide" variant="outline" disabled={disabled} onClick={()=>shareLanding(current)}>落地统一 24000</Button>:null}<Button className="gl-wide" variant="outline" disabled={disabled||!inventory.accounts.some(a=>a.account.id===current.accountId)} onClick={()=>toggle(current)}>{current.enabled?(listState(current).enabled?"停用线路":"关闭线路开关"):"启用线路"}</Button>
+ <section>{current.mode==="server"?<Button className="gl-wide" variant="outline" disabled={disabled||!inventory.accounts.some(a=>a.account.id===current.accountId)} onClick={()=>toggleUDP(current)}>{(current.value as Route).udp?"停用 UDP":"启用 UDP"}</Button>:null}{current.mode==="client"&&!current.shared?<Button className="gl-wide" variant="outline" disabled={disabled} onClick={()=>shareLanding(current)}>落地统一 24000</Button>:null}<Button className="gl-wide" variant="outline" disabled={disabled||!inventory.accounts.some(a=>a.account.id===current.accountId)} onClick={()=>toggle(current)}>{current.enabled?(listState(current).enabled?"停用线路":"关闭线路开关"):"启用线路"}</Button>
   {deleteKey===selected?<div className="gl-route-delete-confirm" role="group" aria-label="确认删除线路"><p>删除后线路将从列表和新订阅中移除，历史流量保留。{current.ipv4EgressId?"这条线路的两个落地会一并删除。":""}</p><div><Button variant="outline" disabled={disabled} onClick={()=>setDeleteKey("")}>取消</Button><Button variant="destructive" disabled={disabled||current.enabled} onClick={()=>void remove(current)}>确认删除</Button></div></div>:<Button className="gl-wide gl-route-delete-button" variant="ghost" disabled={disabled||current.enabled} onClick={()=>setDeleteKey(selected)}>删除线路</Button>}
   {current.enabled?<p className="gl-route-delete-hint">请先停用线路，待节点应用后再删除。</p>:null}
  </section>

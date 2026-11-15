@@ -14,6 +14,7 @@ import (
 	"time"
 
 	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 var errSubscriptionMissing = errors.New("control: subscription unavailable")
@@ -251,6 +252,7 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 			continue
 		}
 		published := glivela.PublishedRoute{Grant: grant, Protocol: glivela.VLESSReality, EntryName: names[grant.Base.ID], BaseLink: links[grant.Base.ID], RouteLink: links[grant.Route.ID], BaseProtocolIdentity: base.Credential.Identity, RouteProtocolIdentity: route.Credential.Identity}
+		published.UDP = s.routeUDPApplied(entry, grant)
 		if grant.ClientChainID != "" {
 			resource, ok := m.ServerTransports[grant.ClientChainID]
 			if !ok || resource.AccountID != grant.AccountID {
@@ -342,6 +344,60 @@ func sameGrantPolicy(a, b glivela.RouteGrant) bool {
 	a.AppliedRev, b.AppliedRev = 0, 0
 	a.RuntimeGood, b.RuntimeGood = false, false
 	return a == b
+}
+
+// A matching applied receipt confirms configuration capability, independently
+// of transient probe health. Pending application keeps the route visible.
+func (s *Store) routeUDPApplied(entry Node, grant glivela.RouteGrant) bool {
+	if !grant.UDP || entry.Desired.Entry == nil || entry.Desired.EntryNetwork == nil || !udpConfigurationApplied(entry) {
+		return false
+	}
+	ids := []string{grant.EgressID}
+	if grant.IPv4EgressID != "" {
+		ids = append(ids, grant.IPv4EgressID)
+	}
+	for _, id := range ids {
+		found := false
+		for _, n := range s.nodes {
+			if n.ID != id || n.Desired.Landing == nil {
+				continue
+			}
+			if !udpConfigurationApplied(n) {
+				continue
+			}
+			for _, p := range entry.Desired.Entry.Peers {
+				if p.EgressID != id || p.PeerKey() != grant.PeerKey() && p.PeerKey() != grant.IPv4EgressID || p.Transport.Protocol != "ss2022" {
+					continue
+				}
+				if p.Transport.ClientListenerID != "" {
+					found = slices.Contains(n.Desired.Landing.UDPOverTCPListeners, p.Transport.ClientListenerID)
+				} else if entry.Desired.EntryNetwork.Source != nil {
+					found = slices.ContainsFunc(n.Desired.Landing.Sources, func(source landing.Source) bool {
+						return source.Address == entry.Desired.EntryNetwork.Source.Address && source.UDPOverTCP
+					})
+				}
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	for _, p := range entry.Desired.Entry.Peers {
+		if p.PeerKey() != grant.PeerKey() || p.Relay == nil {
+			continue
+		}
+		for _, n := range s.nodes {
+			if n.ID == p.Relay.NodeID {
+				return udpConfigurationApplied(n)
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func udpConfigurationApplied(n Node) bool {
+	return n.Receipt != nil && n.Receipt.RuntimeReady && n.Receipt.Revision == n.Desired.Revision && n.Receipt.ConfigSHA256 == n.Desired.ConfigSHA256
 }
 
 // Publication is configured authorization, not a claim of current reachability.

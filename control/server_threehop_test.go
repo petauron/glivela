@@ -6,6 +6,7 @@ import (
 	glivela "github.com/petauron/glivela"
 	"github.com/petauron/glivela/landing"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -157,5 +158,28 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 	}
 	if relays != 1 {
 		t.Fatal("expected one server-side dialer", relays)
+	}
+	grant.ExpectedRevision = revision()
+	grant.UDP = true
+	if _, err = s.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatal("enable three-hop UDP", err)
+	}
+	if !slices.Contains(s.nodes[targetCert].Desired.Landing.UDPOverTCPListeners, c.ID) || !reflect.DeepEqual(beforeRelay, s.nodes[relayCert].Desired) {
+		t.Fatal("final UDP authorization missing or relay changed")
+	}
+	if err = json.Unmarshal(s.nodes[entryCert].Desired.Config, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	udpOutbounds := 0
+	for _, o := range cfg.Outbounds {
+		if o["mux"] != nil {
+			udpOutbounds++
+			if o["streamSettings"] == nil {
+				t.Fatal("UDP bypassed existing relay")
+			}
+		}
+	}
+	if udpOutbounds != 1 {
+		t.Fatal("UDP authorization escaped final transport")
 	}
 }

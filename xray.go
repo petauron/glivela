@@ -216,22 +216,26 @@ type XrayPlan struct {
 // management-port blacklist. Bit two enables automatic TCP family fallback.
 // Bit three selects IPv6 resolver transport for explicit IPv6-only entries.
 // Bit four permits explicitly scoped provider-LAN client sockets.
-// Versions 0..3, 7 and 15 remain immutable snapshot readers.
-const XrayRenderVersion uint8 = 31
+// Bit five enables explicitly authorized UDP-over-TCP server routes.
+// Versions 0..3, 7, 15 and 31 remain immutable snapshot readers.
+const XrayRenderVersion uint8 = 63
 
 func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 	return renderXrayConfiguration(plan, XrayRenderVersion)
 }
 
 func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
-	if version > 3 && version != 7 && version != 15 && version != XrayRenderVersion {
+	if version > 3 && version != 7 && version != 15 && version != 31 && version != XrayRenderVersion {
 		return nil, errors.New("glivela: unsupported Xray render version")
 	}
 	if version >= 2 {
 		plan.PublicSSH = nil // Retired field is read only for historical artifacts.
 	}
-	if len(plan.ClientLinks) != 0 && version != XrayRenderVersion {
+	if len(plan.ClientLinks) != 0 && version&16 == 0 {
 		return nil, errors.New("glivela: private client links require the current runtime")
+	}
+	if version&32 == 0 && slices.ContainsFunc(plan.Grants, func(g RouteGrant) bool { return g.UDP }) {
+		return nil, errors.New("glivela: UDP forwarding requires the current entry format")
 	}
 	projection, err := prepareXrayProjection(plan)
 	if err != nil {
@@ -365,26 +369,30 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 	for _, grant := range projection.grants {
 		peer := projection.peers[grant.PeerKey()]
 		tag := routeOutboundTag(grant.ID)
-		outbound := peer.outbound(tag)
+		if grant.UDP && (peer.Transport.Protocol != "ss2022" || grant.IPv4EgressID != "" && projection.peers[grant.IPv4EgressID].Transport.Protocol != "ss2022") {
+			return nil, errors.New("glivela: UDP forwarding requires authorized SS2022 peers")
+		}
+		outbound := peer.outbound(tag, grant.UDP)
 		if grant.IPv4EgressID != "" {
 			composite = true
 			outbound["targetStrategy"] = "ForceIPv6"
 			ipv4 := projection.peers[grant.IPv4EgressID]
-			fallback := ipv4.outbound(tag + "-ipv4")
+			fallback := ipv4.outbound(tag+"-ipv4", grant.UDP)
 			fallback["targetStrategy"] = "ForceIPv4"
 			outbounds = append(outbounds, outbound, fallback)
 			rules = append(rules, compositeXrayRules(grant, plan.PublicSSH, version < 2)...)
 			continue
 		}
-		outbounds = append(outbounds, peer.ServerOutbounds(tag)...)
+		outbounds = append(outbounds, peer.ServerOutbounds(tag, grant.UDP)...)
 		scope := func(network, outbound string) map[string]any {
 			return map[string]any{"type": "field", "inboundTag": []string{grant.InboundTag}, "user": []string{grant.Route.User}, "network": network, "outboundTag": outbound}
 		}
-		rules = append(rules,
-			scope("udp", "blocked"),
-			scope("tcp", tag),
-			map[string]any{"type": "field", "user": []string{grant.Route.User}, "outboundTag": "blocked"},
-		)
+		if grant.UDP {
+			rules = append(rules, scope("tcp,udp", tag))
+		} else {
+			rules = append(rules, scope("udp", "blocked"), scope("tcp", tag))
+		}
+		rules = append(rules, map[string]any{"type": "field", "user": []string{grant.Route.User}, "outboundTag": "blocked"})
 	}
 	outbounds = append(outbounds, map[string]any{"protocol": "blackhole", "tag": "blocked", "settings": map[string]any{}})
 	for _, value := range rules {
