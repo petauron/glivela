@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.161](https://github.com/petauron/glivela/compare/v0.1.0-alpha.160...v0.1.0-alpha.161) (2026-11-15)
+
+
+### Features
+
+* enable managed UDP over SS2022 TCP routes ([#195](https://github.com/petauron/glivela/issues/195)) ([166192b](https://github.com/petauron/glivela/commit/166192b4d074c6b7b7c17deb5f97a1bdd1c62c06))
+
 ## [0.1.0-alpha.160](https://github.com/petauron/glivela/compare/v0.1.0-alpha.159...v0.1.0-alpha.160) (2026-11-15)
 
 
