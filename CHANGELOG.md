@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.162](https://github.com/petauron/glivela/compare/v0.1.0-alpha.161...v0.1.0-alpha.162) (2026-11-15)
+
+
+### Features
+
+* **network:** support isolated LXC TCP buffer tuning ([#199](https://github.com/petauron/glivela/issues/199)) ([4b1032d](https://github.com/petauron/glivela/commit/4b1032d7c246501eed8796a39a986dbe0e61eefc))
+
 ## [0.1.0-alpha.161](https://github.com/petauron/glivela/compare/v0.1.0-alpha.160...v0.1.0-alpha.161) (2026-11-15)
 
 
