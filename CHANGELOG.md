@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.164](https://github.com/petauron/glivela/compare/v0.1.0-alpha.163...v0.1.0-alpha.164) (2026-11-16)
+
+
+### Bug Fixes
+
+* **control:** wake startup recovery when control reconnects ([714b282](https://github.com/petauron/glivela/commit/714b28227c2841dd0c0cd4bfdf76b23dc1ae62ea))
+
 ## [0.1.0-alpha.163](https://github.com/petauron/glivela/compare/v0.1.0-alpha.162...v0.1.0-alpha.163) (2026-11-16)
 
 
