@@ -1,4 +1,12 @@
-import type { Account } from "./control-types";
+import type { Account, Suspension } from "./control-types";
+
+// Expired suspensions retain the recovery barrier but no longer suspend a node.
+export function isSuspensionActive(pause: Suspension | undefined, now: number) {
+ if (!pause) return false;
+ if (!pause.resumeAt || pause.resumeAt.startsWith("0001-")) return true;
+ const resume = Date.parse(pause.resumeAt);
+ return !Number.isFinite(resume) || resume > now;
+}
 export function amount(value: string) { return `${(Number(BigInt(value) / 1048576n) / 1024).toFixed(2)} GiB`; }
 export function used(account: Account) { return account.usage.reduce((sum, item) => sum + BigInt(item.observed) - BigInt(item.baseline), BigInt(account.retiredUsageBytes ?? "0")).toString(); }
 export function reported(value: string) {
