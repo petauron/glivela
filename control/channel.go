@@ -81,6 +81,14 @@ type Client struct {
 	desiredWake, routeWake, latencyWake, networkWake, qualityWake chan struct{}
 }
 
+// Bound control-channel reconnect latency without probing or changing the
+// data plane. Existing authentication and startup acceptance remain required.
+func nodeControlBackoff() backoff.Config {
+	policy := backoff.DefaultConfig
+	policy.MaxDelay = 5 * time.Second
+	return policy
+}
+
 func NewClient(endpoint string, identity tls.Certificate, roots *x509.CertPool) (*Client, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" || roots == nil || len(identity.Certificate) == 0 {
@@ -98,7 +106,7 @@ func NewClient(endpoint string, identity tls.Certificate, roots *x509.CertPool) 
 	if err != nil {
 		return nil, err
 	}
-	options := []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(transport.TLSClientConfig.Clone())), grpc.WithNoProxy(), grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: time.Minute, Timeout: 20 * time.Second}), grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 5 * time.Second}), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessage+4096), grpc.MaxCallSendMsgSize(maxMessage+4096))}
+	options := []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(transport.TLSClientConfig.Clone())), grpc.WithNoProxy(), grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: time.Minute, Timeout: 20 * time.Second}), grpc.WithConnectParams(grpc.ConnectParams{Backoff: nodeControlBackoff(), MinConnectTimeout: 5 * time.Second}), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessage+4096), grpc.MaxCallSendMsgSize(maxMessage+4096))}
 	target := "dns:///" + u.Host
 	if dialer != nil {
 		target = "passthrough:///" + u.Host

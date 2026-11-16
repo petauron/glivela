@@ -14,6 +14,7 @@ import (
 	pb "github.com/petauron/glivela/internal/controlpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -413,7 +414,29 @@ func (c *Client) signalNodes(mask uint32) {
 		}
 	}
 }
+
+// watchNodeConnectivity reacts to the existing gRPC channel; it does not add a
+// periodic end-to-end probe or change the policy of a running proxy.
+func (c *Client) watchNodeConnectivity(ctx context.Context, ready chan<- struct{}) {
+	state := c.grpc.GetState()
+	for ctx.Err() == nil {
+		if state == connectivity.Ready {
+			c.signalNodes(nodeSignalDesired)
+			select {
+			case ready <- struct{}{}:
+			default:
+			}
+		}
+		if !c.grpc.WaitForStateChange(ctx, state) {
+			return
+		}
+		state = c.grpc.GetState()
+	}
+}
+
 func (c *Client) RunNodeUpdates(ctx context.Context) {
+	ready := make(chan struct{}, 1)
+	go c.watchNodeConnectivity(ctx, ready)
 	delay := time.Second
 	for ctx.Err() == nil {
 		started := time.Now()
@@ -444,6 +467,9 @@ func (c *Client) RunNodeUpdates(ctx context.Context) {
 			timer.Stop()
 			return
 		case <-timer.C:
+		case <-ready:
+			timer.Stop()
+			delay = time.Second
 		}
 		delay = min(delay*2, 30*time.Second)
 	}
