@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { SelectControl } from "@/components/SelectControl";
 import { LatencyCell, latencyKey, type RouteLatency } from "./RouteLatency";
 import { LinkSpeed, RouteSpeedSummary, speedKey, useLinkSpeed, type SpeedBody, type SpeedList } from "./LinkSpeed";
-import { routeLabels } from "./control-format";
+import { isSuspensionActive, routeLabels } from "./control-format";
 import type { Inventory,ClientChain,Route } from "./control-types";
 import { PathMTU } from "./PathMTU";
 
@@ -23,13 +23,7 @@ export function RouteWorkspace({inventory,names,disabled,save,latency,loadSpeeds
  const landingIds=(row:typeof rows[number])=>[...new Set([row.egressId,row.ipv4EgressId].filter((id):id is string=>!!id))];
  const routeLatency=(row:typeof rows[number],landingId:string)=>row.mode==="client"&&(row.value as ClientChain).privateLink||row.relayId||row.transport==="ipv6-ss2022"&&(!row.sourceIpv6||!row.serverIpv6)?undefined:latency.values.get(latencyKey(row.entryId,landingId,landingId===row.ipv4EgressId?row.ipv4Port??0:row.port,row.transport==="ipv6-ss2022"?row.sourceIpv6:"",row.transport==="ipv6-ss2022"?row.serverIpv6:""));
  const state=(row:typeof rows[number])=>row.mode==="client"&&row.enabled?"已配置 · 待客户端验证":routeLabels[row.state]??"未确认";
- const paused=(id:string)=>{
-  const pause=inventory.availability?.nodes[id];
-  if (!pause) return false;
-  if (!pause.resumeAt || pause.resumeAt.startsWith("0001-")) return true;
-  const resume=Date.parse(pause.resumeAt);
-  return !Number.isFinite(resume) || resume>latency.now;
- };
+ const paused=(id:string)=>isSuspensionActive(inventory.availability?.nodes[id],latency.now);
  const listState=(row:typeof rows[number])=>{
   if (!row.enabled) return {enabled:false,detail:"线路开关已关闭。"};
   if (row.unavailableReason==="landing_ipv6_only") return {enabled:false,detail:"落地仅支持 IPv6，此线路不发布；原配置和凭据保留。"};
