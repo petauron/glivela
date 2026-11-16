@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.163](https://github.com/petauron/glivela/compare/v0.1.0-alpha.162...v0.1.0-alpha.163) (2026-11-16)
+
+
+### Bug Fixes
+
+* **ui:** show recovered node availability accurately ([d634e4e](https://github.com/petauron/glivela/commit/d634e4e065e3f00562bbb2b63813e30af5c1b4aa))
+
 ## [0.1.0-alpha.162](https://github.com/petauron/glivela/compare/v0.1.0-alpha.161...v0.1.0-alpha.162) (2026-11-15)
 
 
