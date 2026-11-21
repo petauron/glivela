@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.165](https://github.com/petauron/glivela/compare/v0.1.0-alpha.164...v0.1.0-alpha.165) (2026-11-21)
+
+
+### Performance Improvements
+
+* **control:** omit unchanged desired config in Exchange and enable gRPC gzip ([#207](https://github.com/petauron/glivela/issues/207)) ([a7b67a5](https://github.com/petauron/glivela/commit/a7b67a5c1f8c2d0893c09c60aa3e7761e8841256)), closes [#206](https://github.com/petauron/glivela/issues/206)
+
 ## [0.1.0-alpha.164](https://github.com/petauron/glivela/compare/v0.1.0-alpha.163...v0.1.0-alpha.164) (2026-11-16)
 
 
