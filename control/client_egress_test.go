@@ -41,7 +41,7 @@ func TestSingleLandingClientExitPreservesIdentityAndAccount(t *testing.T) {
 	}
 	after := s.business.material
 	plan := s.nodes[cert].Desired.Landing
-	if len(s.nodes) != nodeCount || s.nodes[cert].ID != "landing-example" || plan.EgressIP != p.EgressIP || plan.Transport != p.Transport || !reflect.DeepEqual(plan.Sources, p.Sources) || s.nodes[cert].Desired.LandingRenderVersion != 6 || len(plan.ClientListeners) != 2 || plan.ClientListeners[0] != retained || plan.ClientListeners[1].EgressIP != ip {
+	if len(s.nodes) != nodeCount || s.nodes[cert].ID != "landing-example" || plan.EgressIP != p.EgressIP || plan.Transport != p.Transport || !reflect.DeepEqual(plan.Sources, p.Sources) || s.nodes[cert].Desired.LandingRenderVersion != 6|16 || len(plan.ClientListeners) != 2 || plan.ClientListeners[0] != retained || plan.ClientListeners[1].EgressIP != ip {
 		t.Fatal("default relay, enrollment or fixed exits changed")
 	}
 	if !reflect.DeepEqual(before.TrafficCounters, after.TrafficCounters) || !reflect.DeepEqual(before.SubscriptionTokens, after.SubscriptionTokens) || !reflect.DeepEqual(before.ProtocolSecrets, after.ProtocolSecrets) || !reflect.DeepEqual(before.ResetSchedules, after.ResetSchedules) || !reflect.DeepEqual(before.RetainedSource, after.RetainedSource) {

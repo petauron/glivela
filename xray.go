@@ -217,24 +217,26 @@ type XrayPlan struct {
 // Bit three selects IPv6 resolver transport for explicit IPv6-only entries.
 // Bit four permits explicitly scoped provider-LAN client sockets.
 // Bit five enables explicitly authorized UDP-over-TCP server routes.
-// Versions 0..3, 7, 15 and 31 remain immutable snapshot readers.
-const XrayRenderVersion uint8 = 63
+// Bit six disables Xray access logging while retaining warning/error logs.
+// Versions 0..3, 7, 15, 31 and 63 remain immutable snapshot readers.
+const XrayRenderVersion uint8 = 127
 
 func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 	return renderXrayConfiguration(plan, XrayRenderVersion)
 }
 
 func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
-	if version > 3 && version != 7 && version != 15 && version != 31 && version != XrayRenderVersion {
+	base := version &^ 64
+	if base > 3 && base != 7 && base != 15 && base != 31 && base != 63 {
 		return nil, errors.New("glivela: unsupported Xray render version")
 	}
-	if version >= 2 {
+	if base >= 2 {
 		plan.PublicSSH = nil // Retired field is read only for historical artifacts.
 	}
-	if len(plan.ClientLinks) != 0 && version&16 == 0 {
+	if len(plan.ClientLinks) != 0 && base&16 == 0 {
 		return nil, errors.New("glivela: private client links require the current runtime")
 	}
-	if version&32 == 0 && slices.ContainsFunc(plan.Grants, func(g RouteGrant) bool { return g.UDP }) {
+	if base&32 == 0 && slices.ContainsFunc(plan.Grants, func(g RouteGrant) bool { return g.UDP }) {
 		return nil, errors.New("glivela: UDP forwarding requires the current entry format")
 	}
 	projection, err := prepareXrayProjection(plan)
@@ -319,13 +321,13 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 	resolverCIDRs := []string{"1.1.1.1/32", "1.0.0.1/32"}
 	resolverStrategy := "UseIPv4"
 	resolverDoH := []string{"https+local://1.1.1.1/dns-query", "https+local://8.8.8.8/dns-query"}
-	if version&8 != 0 && plan.NativeEgress == EgressIPv6Only {
+	if base&8 != 0 && plan.NativeEgress == EgressIPv6Only {
 		resolverAddresses = []string{"2606:4700:4700::1111", "2606:4700:4700::1001"}
 		resolverCIDRs = []string{"2606:4700:4700::1111/128", "2606:4700:4700::1001/128"}
 		resolverStrategy = "UseIPv6"
 		resolverDoH = []string{"https+local://[2606:4700:4700::1111]/dns-query", "https+local://[2606:4700:4700::1001]/dns-query"}
 	}
-	outbounds := []any{nativeXrayOutbound(plan.NativeEgress, version&4 != 0), map[string]any{"protocol": "freedom", "tag": "resolver", "settings": map[string]any{"domainStrategy": resolverStrategy, "finalRules": []any{
+	outbounds := []any{nativeXrayOutbound(plan.NativeEgress, base&4 != 0), map[string]any{"protocol": "freedom", "tag": "resolver", "settings": map[string]any{"domainStrategy": resolverStrategy, "finalRules": []any{
 		map[string]any{"action": "allow", "ip": resolverCIDRs, "port": "53", "network": "tcp,udp"},
 		map[string]any{"action": "block", "ip": []string{"0.0.0.0/0", "::/0"}},
 	}}}}
@@ -336,7 +338,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 	}
 	// Apply the Vision destination policy only to managed REALITY inbounds.
 	// Keep API/resolver traffic and other protocols outside this scope.
-	if version&1 != 0 {
+	if base&1 != 0 {
 		for _, endpoint := range projection.realityEndpoints {
 			rules = append(rules, map[string]any{
 				"type": "field", "inboundTag": []string{endpoint.InboundTag},
@@ -344,7 +346,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 			})
 		}
 	}
-	if version < 2 && plan.PublicSSH != nil {
+	if base < 2 && plan.PublicSSH != nil {
 		addresses := slices.Clone(plan.PublicSSH.HostPublicAddresses)
 		slices.Sort(addresses)
 		rules = append(rules, map[string]any{"type": "field", "network": "tcp", "port": "22", "ip": addresses, "outboundTag": "blocked"})
@@ -380,7 +382,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 			fallback := ipv4.outbound(tag+"-ipv4", grant.UDP)
 			fallback["targetStrategy"] = "ForceIPv4"
 			outbounds = append(outbounds, outbound, fallback)
-			rules = append(rules, compositeXrayRules(grant, plan.PublicSSH, version < 2)...)
+			rules = append(rules, compositeXrayRules(grant, plan.PublicSSH, base < 2)...)
 			continue
 		}
 		outbounds = append(outbounds, peer.ServerOutbounds(tag, grant.UDP)...)
@@ -411,8 +413,12 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 		}
 		rule["inboundTag"] = tags
 	}
+	logConfig := map[string]any{"loglevel": "warning"}
+	if version&64 != 0 {
+		logConfig["access"] = "none"
+	}
 	config := map[string]any{
-		"log":       map[string]any{"loglevel": "warning"},
+		"log":       logConfig,
 		"inbounds":  inbounds,
 		"outbounds": outbounds,
 		"api":       map[string]any{"tag": "api", "services": []string{"HandlerService", "LoggerService", "StatsService"}},
@@ -424,7 +430,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 		"routing": map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
 		"dns":     map[string]any{"tag": "resolver", "queryStrategy": "UseIP", "servers": resolverAddresses},
 	}
-	if version < 2 && plan.PublicSSH != nil {
+	if base < 2 && plan.PublicSSH != nil {
 		// Resolve protected SSH targets before a user-scoped route can match.
 		config["routing"] = map[string]any{"domainStrategy": "IPOnDemand", "rules": rules}
 	}

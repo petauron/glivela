@@ -147,7 +147,9 @@ const legacyManagementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3
 // Render targets official Xray 26.10.31. SOCKS does not receive the core's
 // default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
 // remains mandatory for post-resolution targets and address-family limits.
-const RenderVersion uint8 = 15
+// Bit four disables Xray access logging while retaining warning/error logs;
+// versions 0..15 remain immutable snapshot readers.
+const RenderVersion uint8 = 31
 
 func (p Plan) Render() ([]byte, error) {
 	return p.RenderVersion(RenderVersion)
@@ -155,13 +157,17 @@ func (p Plan) Render() ([]byte, error) {
 
 // RenderVersion reads old signed artifacts without changing their hash.
 func (p Plan) RenderVersion(version uint8) ([]byte, error) {
-	if version&8 == 0 && (len(p.UDPOverTCPListeners) != 0 || slices.ContainsFunc(p.Sources, func(s Source) bool { return s.UDPOverTCP })) {
-		return nil, errors.New("landing: UDP-over-TCP requires the current landing format")
-	}
-	if version > RenderVersion || version < 7 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Interface != "" }) || p.HasClientEgress() && version < 6 || p.IPv6OnlyAddress != "" && version < 3 || version < 4 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
+	if version > RenderVersion {
 		return nil, errors.New("landing: unsupported render version")
 	}
-	if version >= 1 {
+	base := version &^ 16
+	if base&8 == 0 && (len(p.UDPOverTCPListeners) != 0 || slices.ContainsFunc(p.Sources, func(s Source) bool { return s.UDPOverTCP })) {
+		return nil, errors.New("landing: UDP-over-TCP requires the current landing format")
+	}
+	if base < 7 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Interface != "" }) || p.HasClientEgress() && base < 6 || p.IPv6OnlyAddress != "" && base < 3 || base < 4 && slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.Transport == glivela.IPv4RelaySS2022 }) {
+		return nil, errors.New("landing: unsupported render version")
+	}
+	if base >= 1 {
 		p.PublicSSH = nil
 	}
 	if err := p.Validate(); err != nil {
@@ -183,7 +189,7 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 	resolverIPs := []string{"1.1.1.1/32", "1.0.0.1/32"}
 	resolverNetwork := "tcp,udp"
 	resolverOutbound := map[string]any{"tag": "resolver", "protocol": "freedom", "settings": map[string]any{"domainStrategy": "AsIs"}}
-	if version >= 2 && egress.Is6() {
+	if base >= 2 && egress.Is6() {
 		// Use the existing fixed-source IPv6 TCP policy without depending on
 		// IPv4 or authorizing UDP. Literal addresses avoid bootstrap DNS.
 		dnsServers = []string{"tcp://[2606:4700:4700::1111]", "tcp://[2606:4700:4700::1001]"}
@@ -217,10 +223,10 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 	denyQUIC := func(tag, source string) {
 		rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{tag}, "source": []string{source}, "network": "udp", "port": "443", "outboundTag": "deny"})
 	}
-	if version == 0 {
+	if base == 0 {
 		rules = append(rules, managementPortRule(p.PublicSSH))
 	}
-	if version == 0 && p.PublicSSH != nil {
+	if base == 0 && p.PublicSSH != nil {
 		addresses := slices.Clone(p.PublicSSH.HostPublicAddresses)
 		slices.Sort(addresses)
 		rules = append(rules,
@@ -327,8 +333,12 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 			}
 		}
 	}
+	logConfig := map[string]any{"loglevel": "warning"}
+	if version&16 != 0 {
+		logConfig["access"] = "none"
+	}
 	value := map[string]any{
-		"log":      map[string]any{"loglevel": "warning"},
+		"log":      logConfig,
 		"dns":      map[string]any{"tag": "resolver", "servers": dnsServers, "queryStrategy": queryStrategy},
 		"inbounds": inbounds,
 		// A miss is blocked, including an unrecognized source or UDP grant.
