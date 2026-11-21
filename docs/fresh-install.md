@@ -38,7 +38,7 @@ REALITY target verification, authenticated private-peer checks, firewall source
 restrictions, runtime receipts and subscription health gates remain mandatory.
 
 A development binary override is not a signed release. Do not present an installed
-alpha package version as proof that locally overridden code has been published.
+package version as proof that locally overridden code has been published.
 Real acceptance requires a generated subscription and a client HTTPS request.
 
 The `owned` inventory state confirms ledger ownership only. Node runtime readiness
