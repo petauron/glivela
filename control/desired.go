@@ -41,11 +41,12 @@ func NewDesired(plan landing.Plan) (Desired, error) {
 	if len(plan.UDPOverTCPListeners) != 0 || slices.ContainsFunc(plan.Sources, func(s landing.Source) bool { return s.UDPOverTCP }) {
 		version = landing.RenderVersion
 	}
+	version |= 16
 	return newLandingDesiredVersion(plan, version)
 }
 
 func newLandingDesiredVersion(plan landing.Plan, version uint8) (Desired, error) {
-	if version >= 1 {
+	if version&^16 >= 1 {
 		plan.PublicSSH = nil
 	}
 	a, err := plan.ArtifactVersion(version)
@@ -66,7 +67,7 @@ func NewEntryDesired(plan glivela.XrayPlan, network EntryNetwork) (Desired, erro
 }
 
 func newEntryDesiredVersion(plan glivela.XrayPlan, network EntryNetwork, version uint8) (Desired, error) {
-	if version >= 2 {
+	if version&^64 >= 2 {
 		plan.PublicSSH = nil
 	}
 	if _, err := entryPlanIdentity(plan); err != nil {
@@ -95,12 +96,12 @@ func (d Desired) Validate() error {
 	var expected glivela.DesiredArtifact
 	var err error
 	if d.Landing != nil {
-		if d.EntryRenderVersion != 0 || d.LandingRenderVersion > landing.RenderVersion || d.LandingRenderVersion > 0 && d.Landing.PublicSSH != nil {
+		if d.EntryRenderVersion != 0 || d.LandingRenderVersion > landing.RenderVersion || d.LandingRenderVersion&^16 > 0 && d.Landing.PublicSSH != nil {
 			return errors.New("control: invalid landing render policy")
 		}
 		expected, err = d.Landing.ArtifactVersion(d.LandingRenderVersion)
 	} else {
-		if d.LandingRenderVersion != 0 || d.EntryRenderVersion >= 2 && d.Entry.PublicSSH != nil {
+		if d.LandingRenderVersion != 0 || d.EntryRenderVersion&^64 >= 2 && d.Entry.PublicSSH != nil {
 			return errors.New("control: invalid entry render policy")
 		}
 		if _, err := entryPlanIdentity(*d.Entry); err != nil {

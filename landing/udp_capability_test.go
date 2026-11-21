@@ -48,7 +48,7 @@ func TestUDPOverTCPAuthorization(t *testing.T) {
 			t.Fatal("old runtime accepted new policy")
 		}
 		p.Sources[0].UDPOverTCP = false
-		legacy, err := p.RenderVersion(7)
+		legacy, err := p.RenderVersion(7 | 16)
 		if err != nil {
 			t.Fatal(err)
 		}

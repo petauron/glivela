@@ -19,7 +19,7 @@ func TestIPv6OnlyLandingRetainsButNeverActivatesIPv4(t *testing.T) {
 		{ID: "old", Shared: true, Transport: glivela.IPv4ClientSS2022, Port: 24000, Key: key, Source: "1.1.1.1"},
 		{ID: "new", Shared: true, Transport: "ipv6-ss2022", Port: 24000, Key: key, Source: "2001:4860:4860::8888", Address: "2606:4700:4700::1111"},
 	}
-	old, err := p.RenderVersion(2)
+	old, err := p.RenderVersion(2 | 16)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,9 +7,7 @@
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "bump-minor-pre-major": true,
-      "prerelease": true,
-      "prerelease-type": "alpha",
-      "versioning": "prerelease",
+      "versioning": "default",
       "extra-files": [
         {
           "type": "json",

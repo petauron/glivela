@@ -19,7 +19,7 @@ func (s *Store) UpgradePublicEgress() error {
 	changed := false
 	for key, node := range next {
 		old := node.Desired
-		if old.Entry != nil && old.EntryRenderVersion >= 2 && old.Entry.PublicSSH == nil || old.Landing != nil && old.LandingRenderVersion >= 1 && old.Landing.PublicSSH == nil {
+		if old.Entry != nil && old.EntryRenderVersion&^64 >= 2 && old.Entry.PublicSSH == nil || old.Landing != nil && old.LandingRenderVersion&^16 >= 1 && old.Landing.PublicSSH == nil {
 			continue
 		}
 		if old.Validate() != nil || old.Revision == math.MaxUint64 || node.TransportTail != nil {
@@ -49,7 +49,11 @@ func (s *Store) UpgradePublicEgress() error {
 			desired.Landing.PublicSSH = nil
 			// This migration removes legacy SSH guards only. Activating a new
 			// DNS policy requires an explicit managed landing update.
-			desired, err = newLandingDesiredVersion(*desired.Landing, 1)
+			version := uint8(1)
+			if old.LandingRenderVersion&16 != 0 {
+				version |= 16
+			}
+			desired, err = newLandingDesiredVersion(*desired.Landing, version)
 		}
 		if err != nil || node.EntryQuota != nil && node.EntryQuota.validateDesired(desired) != nil {
 			return errors.New("control: egress upgrade projection rejected")

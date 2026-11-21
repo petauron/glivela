@@ -453,6 +453,9 @@ func runConfiguration(ctx context.Context, cfg configuration) error {
 	if err := store.UpgradePublicEgress(); err != nil {
 		return err
 	}
+	if err := store.UpgradeAccessLog(); err != nil {
+		return err
+	}
 	if err := store.ConfigureSubscriptionOrigin(cfg.PublicSubscriptionOrigin); err != nil {
 		return err
 	}

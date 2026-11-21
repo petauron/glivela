@@ -1,9 +1,9 @@
 # Glivela Agent Rules
 
-## Petauron team: alpha-stage MVP delivery
+## Petauron team: focused delivery
 
 - Prioritize a usable, end-to-end implementation of the approved requirement. Finish existing work and fix confirmed problems before proposing additional features, abstractions or refactors. One owner handles each feature end to end; do not split frontend/backend ownership or duplicate another chat's work.
-- Do not add tests, coverage targets, test matrices, testing frameworks or additional test environments during alpha unless the user explicitly requests them. Comprehensive test coverage is not an alpha delivery requirement. Focus on basic usability and the smallest verification necessary for the approved delivery. Do not proactively run local tests, builds, linters, type checks or browser QA; run them only when the user explicitly requests local verification. Repository-required CI gates may still run as part of an explicitly requested push, merge or release workflow.
+- Focus on basic usability and the smallest focused verification necessary for the approved delivery; do not add speculative test frameworks, broad test matrices or extra test environments unless requested. Do not proactively run local tests, builds, linters, type checks or browser QA; run them only when the user explicitly requests local verification. Repository-required CI gates may still run as part of an explicitly requested push, merge or release workflow.
 - Preserve existing required CI gates. For an existing failure, distinguish a product defect from a test-fixture defect and make the smallest relevant correction. Do not bypass gates, fabricate results or remove checks merely to report success. Passing a configuration check or a partial test is not proof of a usable deployment.
 - Before introducing any new project dependency, obtain explicit user approval. Explain its purpose and necessity, whether existing dependencies can satisfy the need, and its maintenance, security and size costs. This includes runtime, development and testing dependencies; do not add first and ask afterward.
 - Keep implementation, verification, CI, commit/push, merge, release and production deployment distinct. Respect the authorization for each stage, protect existing data and other chats' uncommitted work, and never infer production permission from a development or documentation request.
@@ -11,19 +11,19 @@
 
 ## GitHub releases and Actions storage
 
-- Use Release Please v5, pinned to a reviewed full commit SHA. Create or update
-  version PRs from the operator workstation with `python3 scripts/prepare-version-pr.py`
-  and the existing maintainer Git login. Do not create version PRs with the CI
-  `GITHUB_TOKEN`: GitHub holds their PR workflows for approval. Do not add an App,
-  PAT, CI credential or dependency for this operation. Actual CI and release
-  publication continue using the built-in `GITHUB_TOKEN` and minimal permissions;
-  never weaken branch protection to enable releases.
+- Use Release Please v5, pinned to a reviewed full commit SHA. Version PR
+  creation/updates use a short-lived, repository-scoped installation token from
+  the minimal-permission organization release GitHub App (`petauron-nova`:
+  `contents: write` and `pull-requests: write` via `RELEASE_APP_ID` and
+  `RELEASE_APP_PRIVATE_KEY`) so normal `pull_request` CI and CodeQL checks run
+  automatically; do not add a personal PAT. Actual CI and release publication
+  continue using the built-in `GITHUB_TOKEN` and minimal permissions; never
+  weaken branch protection to enable releases.
 - Release through the generated version PR and the repository's Release Please
   config/manifest. Use Conventional Commits, including the final squash title;
   do not hide a releasable fix under a `ci:` or `chore:` title. Do not manually
   bump versions, move tags, or add a second tag-triggered release path.
 - Required checks must represent real checks on the exact version PR head SHA.
-  Maintainer-created version PRs must trigger the existing `pull_request` checks.
   A `workflow_dispatch` run cannot substitute for required PR workflow checks.
   Do not automate approval, fabricate checks or bypass protection; metadata
   validation is not a substitute for CI or CodeQL.
@@ -83,8 +83,9 @@
 
 ## Petauron 团队：任务工作区与失效引用收尾（MVP）
 
-- 任务负责人在已授权工作完成或交接前，负责核对本任务的工作区、临时文件和相关失效远程跟踪引用，清理确认安全且不再需要的部分，记录未清理项及原因。开发、发布、部署、验收尚未完成，或交接方及其他会话仍需使用时，保留相关工作区；不能仅凭 PR 合并或目录老旧删除。
-- 清理前核对仓库和远端身份、HEAD、分支与提交、工作区登记和锁、会话及进程占用、服务和定时任务入口、软链接及跨工作区依赖，并检查已跟踪、未跟踪和忽略内容。存在未提交内容、独有资料或用途不明时保留原位；忽略的缓存和依赖只有确认可重建、不含需保留内容且没有外部引用时才可清理。
-- 仅对已确认安全的本任务关联工作区使用 Git 的 `worktree remove`，不加 `--force`；Codex 受管工作区使用其归档工具前，先单独保全需要的忽略文件。独立检出须先保全其独有 Git 数据。保留本地分支、标签、提交、未提交内容及正在使用的工作区，不直接删除共享 Git 数据。
-- 失效引用仅处理本任务相关的本地远程跟踪引用：先核对真实远端和 refspec，并检查引用及其 reflog 中提交的可达性；将仅靠待删引用或日志可达的提交先保全，再按核实的原值删除并读回。远端不可达或归属不明时保留；不删除远程分支、本地分支或标签，不全局自动 `prune` 或运行 GC。
-- 收尾后核对相关分支、提交、工作区和未提交状态，简要说明已清理内容及保留原因。本规则不自动授权批量清理历史工作区、修改生产、发布或创建定时任务。
+- 开发完成或交接时，按以下三步清理本任务不再需要的工作区、分支和失效远程跟踪引用；发布与验收继续按原任务跟踪，无需为等待后续阶段保留已无用途的工作区。
+- 工作区：确认没有待保留的未提交内容或其他任务使用后，使用 `git worktree remove` 移除 worktree；Codex 受管工作区使用其归档工具。独立检出先确认没有需保留的独有提交、stash、忽略文件及关联工作区，再删除。可重建的私有依赖和缓存可一起清理，不删除其他工作区引用的共享源。
+- 任务分支：确认 PR 已合并到目标分支、本地分支没有超出 PR 合并时最终 head 的提交，且没有其他工作区或任务使用后，删除本地任务分支。Squash 合并以 PR 最终 head 为准；`git branch -d` 不适用时，核实上述条件后可用 `git branch -D`。已合并的远端任务分支按仓库自动删除设置清理；需手动删除时核对当前远端提交、使用情况及保护规则。
+- 失效远程跟踪引用：核对远端和 refspec，先用 `git remote prune origin --dry-run` 预览；全部确认安全时执行 prune，混有不明或需保留项时仅定向清理已确认项，避免特殊 refspec 或 prune-tags 误删标签。普通已完成任务不逐条备份 reflog，也不为其新建 `refs/archive`。
+- 未提交内容、独有资料、仍在使用的工作区、共享 Git 数据和受保护分支继续保留；只在有异常或依赖线索时进一步核查。需要保全独有历史时，可保留相应引用或使用可恢复的 Git 备份；仅导出引用文本不能替代备份。
+- 存量 `refs/archive` 和 `refs/codex` 快照暂不清理，发布标签保留。本规则不自动授权批量整理历史工作区、修改生产、发布或创建定时任务。
