@@ -13,7 +13,7 @@ func TestUDPServerRouteAndSubscriptions(t *testing.T) {
 	for i := range p.Peers {
 		p.Peers[i].Transport = PrivateTransport{Protocol: "ss2022", Key: "MDEyMzQ1Njc4OWFiY2RlZg=="}
 	}
-	before, err := renderXrayConfiguration(p, 31)
+	before, err := renderXrayConfiguration(p, 31 | 64)
 	if err != nil {
 		t.Fatal(err)
 	}
