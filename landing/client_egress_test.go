@@ -108,7 +108,7 @@ func TestSingleLandingBindsEachClientExitAndKeepsRelay(t *testing.T) {
 	for i := range p.ClientListeners {
 		p.ClientListeners[i].EgressIP = ""
 	}
-	old, err := p.RenderVersion(4)
+	old, err := p.RenderVersion(4 | 16)
 	if err != nil {
 		t.Fatal(err)
 	}

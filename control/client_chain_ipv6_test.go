@@ -85,7 +85,7 @@ func TestIPv6ClientChainPreservesOwnedBusinessAndBindsIdentities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if desired.LandingRenderVersion != 3 {
+	if desired.LandingRenderVersion != 3|16 {
 		t.Fatal("explicit IPv6 mode lacks its version gate")
 	}
 	node := s.nodes[landingCert]
