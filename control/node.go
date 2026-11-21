@@ -21,6 +21,10 @@ type ExchangeClient interface {
 	Exchange(context.Context, *Observation) (Desired, error)
 }
 
+type compactExchangeClient interface {
+	exchangeCompact(context.Context, *Observation) (Desired, bool, error)
+}
+
 type NodeRunner struct {
 	Client  ExchangeClient
 	Runtime Runtime
@@ -47,9 +51,21 @@ func (n NodeRunner) Step(ctx context.Context) error {
 	if err == nil {
 		report = &current
 	}
-	desired, err := n.Client.Exchange(ctx, report)
-	if err != nil {
-		return err
+	var desired Desired
+	if compact, ok := n.Client.(compactExchangeClient); ok && report != nil && report.RuntimeReady {
+		var unchanged bool
+		desired, unchanged, err = compact.exchangeCompact(ctx, report)
+		if err != nil {
+			return err
+		}
+		if unchanged {
+			return nil
+		}
+	} else {
+		desired, err = n.Client.Exchange(ctx, report)
+		if err != nil {
+			return err
+		}
 	} // An offline controller never stops the runtime.
 	if desired.Validate() != nil {
 		return errors.New("control: invalid desired state")
@@ -94,6 +110,10 @@ func (n NodeRunner) reportApplied(ctx context.Context, desired Desired) error {
 	}
 	// Report independently observed state. If the control connection fails,
 	// the next poll reconciles it rather than applying the revision again.
+	if compact, ok := n.Client.(compactExchangeClient); ok {
+		_, _, err = compact.exchangeCompact(ctx, &actual)
+		return err
+	}
 	_, err = n.Client.Exchange(ctx, &actual)
 	return err
 }
@@ -112,6 +132,8 @@ func (n NodeRunner) Run(ctx context.Context, interval time.Duration, result func
 	if interval < time.Second || interval > time.Minute {
 		return errors.New("control: invalid poll interval")
 	}
+	maxDelay := min(max(interval*4, 15*time.Second), 30*time.Second)
+	delay := interval
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -122,7 +144,12 @@ func (n NodeRunner) Run(ctx context.Context, interval time.Duration, result func
 		if result != nil {
 			result(err)
 		}
-		timer := time.NewTimer(interval)
+		if err == nil {
+			delay = interval
+		} else {
+			delay = min(delay*2, maxDelay)
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -130,6 +157,7 @@ func (n NodeRunner) Run(ctx context.Context, interval time.Duration, result func
 		case <-timer.C:
 		case <-n.Changed():
 			timer.Stop()
+			delay = interval
 		}
 	}
 }
