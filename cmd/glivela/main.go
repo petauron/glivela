@@ -510,11 +510,20 @@ func runEntryReconcilers(parent context.Context, node control.NodeRunner, routes
 			finished <- node.Run(ctx, 2*time.Second, report)
 			return
 		}
+		const baseInterval = 2 * time.Second
+		const maxFailureInterval = 15 * time.Second
+		delay := baseInterval
 		for {
 			step, stop := context.WithTimeout(ctx, node.StepTimeout())
-			report(maintenance[0].step(step, node))
+			err := maintenance[0].step(step, node)
 			stop()
-			timer := time.NewTimer(2 * time.Second)
+			report(err)
+			if err == nil {
+				delay = baseInterval
+			} else {
+				delay = min(delay*2, maxFailureInterval)
+			}
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -523,6 +532,7 @@ func runEntryReconcilers(parent context.Context, node control.NodeRunner, routes
 			case <-timer.C:
 			case <-node.Changed():
 				timer.Stop()
+				delay = baseInterval
 			}
 		}
 	}()

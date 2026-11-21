@@ -1,8 +1,10 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -14,11 +16,13 @@ import (
 	"net/url"
 	"time"
 
+	glivela "github.com/petauron/glivela"
 	pb "github.com/petauron/glivela/internal/controlpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 )
 
 const maxMessage = 8 << 20
@@ -53,8 +57,16 @@ type Repository interface {
 	Exchange(context.Context, string, *Observation) (Desired, error)
 }
 
+const compactExchangeMetadataKey = "glivela-exchange-compact"
+
 type exchange struct {
 	Receipt *Observation `json:"receipt,omitempty"`
+}
+
+type compactExchangeReply struct {
+	Unchanged    bool   `json:"unchanged"`
+	Revision     uint64 `json:"revision"`
+	ConfigSHA256 string `json:"configSha256"`
 }
 
 // Handler has no admin endpoints. Enrollment and desired state updates are
@@ -145,6 +157,30 @@ func (c *Client) Exchange(ctx context.Context, receipt *Observation) (Desired, e
 		return Desired{}, errors.New("control: exchange unavailable")
 	}
 	return desired, nil
+}
+
+func (c *Client) exchangeCompact(ctx context.Context, receipt *Observation) (Desired, bool, error) {
+	if receipt == nil || !receipt.RuntimeReady {
+		desired, err := c.Exchange(ctx, receipt)
+		return desired, false, err
+	}
+	callCtx := metadata.AppendToOutgoingContext(ctx, compactExchangeMetadataKey, "1")
+	raw, err := c.nodeCallRaw(callCtx, pb.NewNodeOperationsClient(c.grpc).Exchange, exchange{Receipt: receipt}, maxMessage, maxMessage)
+	if err != nil {
+		return Desired{}, false, errors.New("control: exchange unavailable")
+	}
+	var compact compactExchangeReply
+	if decode(bytes.NewReader(raw), &compact) == nil && compact.Unchanged {
+		if compact.Revision != receipt.Revision || !glivela.ValidIdentity(compact.ConfigSHA256) || subtle.ConstantTimeCompare([]byte(compact.ConfigSHA256), []byte(receipt.ConfigSHA256)) != 1 {
+			return Desired{}, false, errors.New("control: exchange unavailable")
+		}
+		return Desired{}, true, nil
+	}
+	var desired Desired
+	if decode(bytes.NewReader(raw), &desired) != nil || desired.Validate() != nil {
+		return Desired{}, false, errors.New("control: exchange unavailable")
+	}
+	return desired, false, nil
 }
 
 func decode(reader io.Reader, value any) error {

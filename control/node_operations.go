@@ -8,14 +8,18 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
+	glivela "github.com/petauron/glivela"
 	pb "github.com/petauron/glivela/internal/controlpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding/gzip"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
@@ -151,6 +155,18 @@ func nodeRefused(err error) error {
 	}
 	return status.Error(codes.FailedPrecondition, "node operation not confirmed")
 }
+func wantsCompactExchange(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return false
+	}
+	for _, value := range md.Get(compactExchangeMetadataKey) {
+		if value == "1" {
+			return true
+		}
+	}
+	return false
+}
 func (s *nodeOperationsServer) Exchange(ctx context.Context, in *pb.NodeDocument) (*pb.NodeDocument, error) {
 	cert, _, err := s.peer(ctx)
 	if err != nil {
@@ -163,6 +179,13 @@ func (s *nodeOperationsServer) Exchange(ctx context.Context, in *pb.NodeDocument
 	desired, err := s.store.Exchange(ctx, cert, request.Receipt)
 	if err != nil || desired.Validate() != nil {
 		return nil, status.Error(codes.FailedPrecondition, "desired state unavailable")
+	}
+	if wantsCompactExchange(ctx) && request.Receipt != nil && glivela.VerifyAppliedReceipt(desired.DesiredArtifact, request.Receipt.AppliedReceipt) == nil {
+		return nodeReply(compactExchangeReply{
+			Unchanged:    true,
+			Revision:     desired.Revision,
+			ConfigSHA256: desired.ConfigSHA256,
+		})
 	}
 	return nodeReply(desired)
 }
@@ -373,16 +396,28 @@ func (s *nodeOperationsServer) Watch(in *pb.NodeWatchRequest, stream grpc.Server
 
 type nodeUnary func(context.Context, *pb.NodeDocument, ...grpc.CallOption) (*pb.NodeDocument, error)
 
-func (c *Client) nodeCall(ctx context.Context, method nodeUnary, request, response any, limit, responseLimit int) error {
+func (c *Client) nodeCallRaw(ctx context.Context, method nodeUnary, request any, limit, responseLimit int) ([]byte, error) {
 	raw, err := json.Marshal(request)
 	if err != nil || len(raw) > limit {
-		return errors.New("control: invalid node request")
+		return nil, errors.New("control: invalid node request")
 	}
-	reply, err := method(ctx, &pb.NodeDocument{Json: raw})
+	doc := &pb.NodeDocument{Json: raw}
+	reply, err := method(ctx, doc, grpc.UseCompressor(gzip.Name))
+	if status.Code(err) == codes.Unimplemented && strings.Contains(status.Convert(err).Message(), "Decompressor is not installed") {
+		reply, err = method(ctx, doc)
+	}
 	if err != nil || reply == nil || len(reply.Json) > responseLimit {
-		return errors.New("control: node operation unavailable")
+		return nil, errors.New("control: node operation unavailable")
 	}
-	if decode(bytes.NewReader(reply.Json), response) != nil {
+	return reply.Json, nil
+}
+
+func (c *Client) nodeCall(ctx context.Context, method nodeUnary, request, response any, limit, responseLimit int) error {
+	raw, err := c.nodeCallRaw(ctx, method, request, limit, responseLimit)
+	if err != nil {
+		return err
+	}
+	if decode(bytes.NewReader(raw), response) != nil {
 		return errors.New("control: invalid node response")
 	}
 	return nil
