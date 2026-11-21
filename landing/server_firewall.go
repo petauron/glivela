@@ -135,7 +135,7 @@ func (policy ServerFirewall) validateIdentity() error {
 	return nil
 }
 
-func (policy ServerFirewall) identity() (string, string) {
+func (policy ServerFirewall) digest() string {
 	policy.Sources = slices.Clone(policy.Sources)
 	slices.Sort(policy.Sources)
 	policy.TCPOnlySources = slices.Clone(policy.TCPOnlySources)
@@ -144,17 +144,29 @@ func (policy ServerFirewall) identity() (string, string) {
 	slices.Sort(policy.UDPEgressIPs)
 	data, _ := json.Marshal(policy)
 	digest := sha256.Sum256(data)
-	return "glivela_landing_server_v2_" + hex.EncodeToString(digest[:8]), "glivela-landing-server-v2:" + hex.EncodeToString(digest[:])
+	return hex.EncodeToString(digest[:])
+}
+
+func (policy ServerFirewall) identity() (string, string) {
+	sum := policy.digest()
+	if len(policy.UDPEgressIPs) != 0 {
+		return "glivela_landing_server_v3_" + sum[:16], "glivela-landing-server-v3:" + sum
+	}
+	return "glivela_landing_server_v2_" + sum[:16], "glivela-landing-server-v2:" + sum
 }
 
 func (policy ServerFirewall) objects() []map[string]nftObject {
 	table, marker := policy.identity()
-	return policy.renderObjects(table, marker, false, false)
+	return policy.renderObjectsWithPolicy(table, marker, false, false, len(policy.UDPEgressIPs) != 0)
 }
 
 // legacy is used only by the one-time Dante removal verifier. It never
 // installs or selects an old runtime policy.
 func (policy ServerFirewall) renderObjects(table, marker string, legacy, management bool) []map[string]nftObject {
+	return policy.renderObjectsWithPolicy(table, marker, legacy, management, false)
+}
+
+func (policy ServerFirewall) renderObjectsWithPolicy(table, marker string, legacy, management, blockUDP443 bool) []map[string]nftObject {
 	objects := []map[string]nftObject{
 		{"table": {"family": "inet", "name": table, "comment": marker}},
 		{"chain": {"family": "inet", "table": table, "name": "input", "type": "filter", "hook": "input", "prio": -10, "policy": "accept"}},
@@ -302,6 +314,11 @@ func (policy ServerFirewall) renderObjects(table, marker string, legacy, managem
 			rule("destinations", match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": prefix.Addr().String(), "len": prefix.Bits()}}), nftObject{"drop": nil})
 		}
 	}
+	if blockUDP443 {
+		// XUDP full-cone associations can reuse an already-open UDP socket across
+		// destination ports after Xray's first-packet routing check.
+		rule("destinations", match(payload("udp", "dport"), 443), nftObject{"drop": nil})
+	}
 	for _, ip := range addresses {
 		if strings.Contains(ip, ":") {
 			rule("destinations", match(payload("ip6", "saddr"), ip), match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": "2000::", "len": 3}}), match(meta("l4proto"), "tcp"), nftObject{"return": nil})
@@ -440,10 +457,15 @@ func installOwnedFirewall(ctx context.Context, run func(context.Context, []byte,
 	return nil
 }
 
-// removeLegacy accepts only the complete former UID-scoped policy. It cannot install it.
+// removeLegacy accepts only the complete former UID-scoped policies. It cannot install them.
 func (policy ServerFirewall) removeLegacy(ctx context.Context, run func(context.Context, []byte, ...string) ([]byte, error)) error {
-	table, marker := policy.identity()
-	table = strings.Replace(table, "_v2_", "_", 1)
-	marker = strings.Replace(marker, "-v2:", "-v1:", 1)
+	sum := policy.digest()
+	if len(policy.UDPEgressIPs) != 0 {
+		table, marker := "glivela_landing_server_v2_"+sum[:16], "glivela-landing-server-v2:"+sum
+		if err := removeOwnedFirewall(ctx, run, table, policy.renderObjects(table, marker, false, false)); err != nil {
+			return err
+		}
+	}
+	table, marker := "glivela_landing_server_"+sum[:16], "glivela-landing-server-v1:"+sum
 	return removeOwnedFirewall(ctx, run, table, policy.renderObjects(table, marker, false, true))
 }
