@@ -152,15 +152,8 @@ jobs:
           sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelEntryGateLifecycle$' -test.v -test.timeout 45s
           go test -c -o "$RUNNER_TEMP/glivela-entry-control.test" ./control
           sudo env GLIVELA_ENTRY_RUNTIME_KERNEL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-entry-control.test" -test.run '^TestKernelEntryDriverBlockedPeerAndNodeResume$' -test.v -test.timeout 45s
-      - name: Run complete tests with version-based race policy
-        run: |
-          version=$(jq -er '.["."] | select(type == "string")' .release-please-manifest.json)
-          set --
-          case "$version" in
-            *-alpha|*-alpha.*) echo "Alpha CI: full tests, race disabled" ;;
-            *) set -- -race ;;
-          esac
-          go test "$@" ./... -count=1
+      - name: Run complete tests with race detection
+        run: go test -race ./... -count=1
   ui:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

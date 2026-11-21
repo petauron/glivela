@@ -29,7 +29,7 @@ in force. This workflow change does not authorize an application upgrade.
 
 ## First publication from a clean repository
 
-The tracked manifest retains the existing prerelease baseline. `bootstrap-sha`
+The tracked manifest uses standard pre-1.0 semantic versioning (`0.x`, graduated from the earlier `0.1.0-alpha.*` prerelease baseline). `bootstrap-sha`
 points only to this repository's clean root, so Release Please calculates its
 next version from newly reviewed releasable commits. Do not import historical
 refs or recreate an earlier version: the existing OCI namespace and tags remain
