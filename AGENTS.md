@@ -11,19 +11,19 @@
 
 ## GitHub releases and Actions storage
 
-- Use Release Please v5, pinned to a reviewed full commit SHA. Create or update
-  version PRs from the operator workstation with `python3 scripts/prepare-version-pr.py`
-  and the existing maintainer Git login. Do not create version PRs with the CI
-  `GITHUB_TOKEN`: GitHub holds their PR workflows for approval. Do not add an App,
-  PAT, CI credential or dependency for this operation. Actual CI and release
-  publication continue using the built-in `GITHUB_TOKEN` and minimal permissions;
-  never weaken branch protection to enable releases.
+- Use Release Please v5, pinned to a reviewed full commit SHA. Version PR
+  creation/updates use a short-lived, repository-scoped installation token from
+  the minimal-permission organization release GitHub App (`petauron-nova`:
+  `contents: write` and `pull-requests: write` via `RELEASE_APP_ID` and
+  `RELEASE_APP_PRIVATE_KEY`) so normal `pull_request` CI and CodeQL checks run
+  automatically; do not add a personal PAT. Actual CI and release publication
+  continue using the built-in `GITHUB_TOKEN` and minimal permissions; never
+  weaken branch protection to enable releases.
 - Release through the generated version PR and the repository's Release Please
   config/manifest. Use Conventional Commits, including the final squash title;
   do not hide a releasable fix under a `ci:` or `chore:` title. Do not manually
   bump versions, move tags, or add a second tag-triggered release path.
 - Required checks must represent real checks on the exact version PR head SHA.
-  Maintainer-created version PRs must trigger the existing `pull_request` checks.
   A `workflow_dispatch` run cannot substitute for required PR workflow checks.
   Do not automate approval, fabricate checks or bypass protection; metadata
   validation is not a substitute for CI or CodeQL.

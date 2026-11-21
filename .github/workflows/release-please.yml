@@ -135,3 +135,38 @@ jobs:
           test "$RELEASE_SHA" = "$GITHUB_SHA"
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  release-pr:
+    name: Prepare next release pull request
+    needs: [prepare, publish]
+    if: always() && needs.prepare.result == 'success' && (needs.publish.result == 'success' || (needs.prepare.outputs.release_created != 'true' && needs.publish.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Require this run to still match protected main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$current" = "$GITHUB_SHA" ]; then
+            echo "matches=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Mint short-lived release app token
+        if: steps.current.outputs.matches == 'true'
+        id: release_app_token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Maintain version PR without publishing
+        if: steps.current.outputs.matches == 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        with:
+          token: ${{ steps.release_app_token.outputs.token }}
+          target-branch: main
+          skip-github-release: true
