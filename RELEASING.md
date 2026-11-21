@@ -7,43 +7,20 @@ Use the existing Release Please workflow and generated version PR. Keep
 fields aligned. Do not manually move tags, overwrite published assets or bypass
 required checks.
 
-## Maintainer-owned version PRs
+## Automated version PRs
 
-Create or update the version PR from the operator workstation, using its existing
-maintainer Git login:
+The `release-pr` job in `.github/workflows/release-please.yml` mints a
+short-lived, repository-scoped installation token from the minimal-permission
+organization GitHub App (`petauron-nova`: `contents: write` and
+`pull-requests: write`, configured via organization variable `RELEASE_APP_ID`
+and organization secret `RELEASE_APP_PRIVATE_KEY`). Because the version PR is
+created and updated by `petauron-nova[bot]` rather than `GITHUB_TOKEN`, GitHub
+automatically triggers the existing `pull_request` CI and CodeQL checks without
+requiring manual workflow approval or local version-PR scripts.
 
-```sh
-python3 scripts/prepare-version-pr.py
-```
-
-The helper reuses the exact bundled Release Please v5 Action already pinned in
-this repository. It downloads that bundle into a temporary directory, verifies
-its pinned Git blob digest, and removes the temporary files afterward. It needs
-existing Python 3, Node.js 24 or newer, and the existing Git credential helper;
-it uses Node native fetch through the Action's supported entry point, installs no
-packages and creates no App, PAT, login or CI secret. Credentials
-are passed only in the child process environment and are not written to disk or
-printed. Run it on a trusted workstation, never inside an Actions job.
-
-The helper authenticates the current maintainer, verifies repository write access,
-and uses the protected remote `main` config and manifest. It only creates or
-updates the generated version PR; it does not create tags or releases, merge PRs,
-publish the catalog, or deploy applications. Do not manually bump versions. Run
-this step once the authorized source changes are merged, before merging the
-version PR. Repeating it updates the same pending version PR when needed.
-
-The maintainer's normal PR creation or branch update triggers the existing
-`pull_request` CI. Wait for all required checks on the actual version PR head and
-merge through the existing branch rules. If an old bot-owned PR has unchanged
-content, a no-op run may not emit an event: inspect its state rather than treating
-a manually dispatched run as an approved PR check. Do not close/reopen PRs or
+Wait for all required checks on the actual version PR head and merge through
+the existing branch rules. Do not manually bump versions, close/reopen PRs, or
 manufacture status checks to bypass approval.
-
-The Actions workflow no longer creates or updates version PRs with `GITHUB_TOKEN`
-and no longer dispatches duplicate version-PR CI. This avoids the recurring
-approval required for token-created PRs. A `workflow_dispatch` run cannot replace
-required PR workflow checks. See [GitHub token behavior](https://docs.github.com/en/actions/concepts/security/github_token)
-and [required status checks](https://docs.github.com/en/enterprise-cloud%40latest/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks).
 
 After the version PR is merged, actual CI and draft-release publication retain
 the built-in `GITHUB_TOKEN`, reviewed Action SHA and minimal permissions. Existing
