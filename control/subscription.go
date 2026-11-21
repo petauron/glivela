@@ -252,6 +252,9 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 			continue
 		}
 		published := glivela.PublishedRoute{Grant: grant, Protocol: glivela.VLESSReality, EntryName: names[grant.Base.ID], BaseLink: links[grant.Base.ID], RouteLink: links[grant.Route.ID], BaseProtocolIdentity: base.Credential.Identity, RouteProtocolIdentity: route.Credential.Identity}
+		if hiddenNative[grant.Base.ID] {
+			published.Grant.HideNative = true
+		}
 		published.UDP = s.routeUDPApplied(entry, grant)
 		if grant.ClientChainID != "" {
 			resource, ok := m.ServerTransports[grant.ClientChainID]
