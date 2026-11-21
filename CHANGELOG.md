@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.0](https://github.com/petauron/glivela/compare/v0.1.0-alpha.165...v0.1.0) (2026-11-21)
+
+
+### Features
+
+* **ui:** expose hideNative toggle for server routes ([#210](https://github.com/petauron/glivela/issues/210)) ([ea9d9d5](https://github.com/petauron/glivela/commit/ea9d9d51f0ab4a1e723e75563af0e7e30e617a61))
+
+
+### Bug Fixes
+
+* **landing:** block UDP 443 in kernel firewall for XUDP egress ([#213](https://github.com/petauron/glivela/issues/213)) ([351794d](https://github.com/petauron/glivela/commit/351794d345edc0e4754e231218551f6e707e9ad1))
+* **xray:** disable Xray access logging via immutable render versions and migration ([#212](https://github.com/petauron/glivela/issues/212)) ([8fe9840](https://github.com/petauron/glivela/commit/8fe9840265e681cb019377e1586f776e080b639e))
+
+
+### Miscellaneous Chores
+
+* **release:** graduate Glivela from alpha to 0.1.0 ([#219](https://github.com/petauron/glivela/issues/219)) ([9b76b5d](https://github.com/petauron/glivela/commit/9b76b5ddbc07beb3c58440a2c0860cadd1ecfa7e))
+
 ## [0.1.0-alpha.165](https://github.com/petauron/glivela/compare/v0.1.0-alpha.164...v0.1.0-alpha.165) (2026-11-21)
 
 
