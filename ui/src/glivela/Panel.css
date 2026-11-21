@@ -92,6 +92,7 @@ tr[data-selected="true"] .gl-node-symbol{color:var(--gl-accent);}
 .gl-inspector section>button[aria-label="查看网络优化详情"]{background:transparent;border:0;color:var(--gl-muted);border-radius:0;display:flex;flex-direction:column;gap:10px;width:100%;padding:0 0 16px;align-items:stretch;}
 .gl-inspector section>button[aria-label="查看网络优化详情"]>span{display:flex;align-items:center;justify-content:flex-start;font-size:13px;}
 .gl-inspector .gl-wide{width:100%;}
+.gl-inspector .gl-wide+.gl-wide{margin-top:8px;}
 .gl-inspector-bottom{margin-top:auto;padding-top:32px;}
 .gl-context-details summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:center;font-size:13px;}
 .gl-context-details summary:before{content:"";display:inline-block;width:6px;height:6px;border-right:1px solid var(--gl-muted);border-bottom:1px solid var(--gl-muted);transform:rotate(-45deg);margin-right:4px;}
@@ -206,7 +207,7 @@ tr[data-selected="true"] .gl-node-symbol{color:var(--gl-accent);}
 
 .gl-workspace [data-slot="field-label"]:has(>input[type="checkbox"]),.gl-panel-sheet [data-slot="field-label"]:has(>input[type="checkbox"]){flex-direction:row;align-items:center;gap:10px;}
 .gl-workspace [data-slot="field-label"]>input[type="checkbox"],.gl-panel-sheet [data-slot="field-label"]>input[type="checkbox"]{margin:0;width:15px;height:15px;}
-.gl-workspace .gl-toggle-label>.gl-toggle{width:35px!important;height:21px!important;}
+.gl-workspace .gl-toggle-label>.gl-toggle,.gl-panel-sheet .gl-toggle-label>.gl-toggle{width:35px!important;height:21px!important;}
 
 .gl-table-scroll:has(>.gl-routes){flex:0 1 auto;}
 .gl-routes .gl-icon-button{width:30px;height:30px;border:1px solid var(--gl-line);background:var(--gl-control);}
