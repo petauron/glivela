@@ -132,8 +132,203 @@ func (s *Store) loadSpeedState() error {
 func speedRole(role string) bool {
 	return role == "receiver" || role == "client" || role == "cleanup" || role == "client-cleanup"
 }
+
+const (
+	speedWatchWait        = 10 * time.Second
+	speedWatchWriteMargin = 15 * time.Second
+)
+
+type speedWatchNode struct {
+	certificate string
+	id          string
+}
+type speedWatchSnapshot struct {
+	initialized bool
+	fault       bool
+	revision    uint64
+	tests       []SpeedView
+	nodes       []speedWatchNode
+	hub         *speedHub
+	nextExpiry  time.Time
+	changed     chan struct{}
+}
+
+func cloneTimePtr(v *time.Time) *time.Time {
+	if v == nil {
+		return nil
+	}
+	copyValue := *v
+	return &copyValue
+}
+func cloneUint64Ptr(v *uint64) *uint64 {
+	if v == nil {
+		return nil
+	}
+	copyValue := *v
+	return &copyValue
+}
+func cloneSpeedSample(v *SpeedSample) *SpeedSample {
+	if v == nil {
+		return nil
+	}
+	copyValue := *v
+	copyValue.Retransmits = cloneUint64Ptr(v.Retransmits)
+	return &copyValue
+}
+func cloneSpeedMeasurement(v *SpeedMeasurement) *SpeedMeasurement {
+	if v == nil {
+		return nil
+	}
+	copyValue := *v
+	copyValue.Upload = cloneSpeedSample(v.Upload)
+	copyValue.Download = cloneSpeedSample(v.Download)
+	return &copyValue
+}
+func cloneSpeedProgress(in []SpeedProgress) []SpeedProgress {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]SpeedProgress, len(in))
+	for i, p := range in {
+		out[i] = SpeedProgress{
+			Role:        p.Role,
+			ReceivedAt:  cloneTimePtr(p.ReceivedAt),
+			RunningAt:   cloneTimePtr(p.RunningAt),
+			FinishedAt:  cloneTimePtr(p.FinishedAt),
+			ConfirmedAt: cloneTimePtr(p.ConfirmedAt),
+		}
+	}
+	return out
+}
+func cloneSpeedView(v SpeedView) SpeedView {
+	if v.Modes != nil {
+		v.Modes = append([]string{}, v.Modes...)
+	}
+	v.Progress = cloneSpeedProgress(v.Progress)
+	v.FinishedAt = cloneTimePtr(v.FinishedAt)
+	v.Direct = cloneSpeedMeasurement(v.Direct)
+	v.SS2022 = cloneSpeedMeasurement(v.SS2022)
+	v.EntryWireBytes = cloneUint64Ptr(v.EntryWireBytes)
+	v.LandingWireBytes = cloneUint64Ptr(v.LandingWireBytes)
+	if v.Policy != nil {
+		copyValue := *v.Policy
+		v.Policy = &copyValue
+	}
+	if len(v.Points) > 0 {
+		v.Points = append([]SpeedPoint(nil), v.Points...)
+	} else {
+		v.Points = nil
+	}
+	return v
+}
+func cloneSpeedViews(in []SpeedView) []SpeedView {
+	out := make([]SpeedView, len(in))
+	for i, v := range in {
+		out[i] = cloneSpeedView(v)
+	}
+	return out
+}
+func (s *Store) speedWatchNodesLocked() []speedWatchNode {
+	out := make([]speedWatchNode, 0, len(s.nodes))
+	for certificate, node := range s.nodes {
+		out = append(out, speedWatchNode{certificate: certificate, id: node.ID})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].id != out[j].id {
+			return out[i].id < out[j].id
+		}
+		return out[i].certificate < out[j].certificate
+	})
+	return out
+}
+func speedChannelsFromNodes(nodes []speedWatchNode, hub *speedHub) []SpeedChannel {
+	out := make([]SpeedChannel, 0, len(nodes))
+	for _, node := range nodes {
+		out = append(out, SpeedChannel{ID: node.id, Connected: hub != nil && hub.online(node.certificate)})
+	}
+	return out
+}
+func (s *Store) speedNextExpiryLocked() time.Time {
+	var next time.Time
+	for _, r := range s.speedJobs {
+		if r.Phase == "done" || r.Phase == "cleanup" || r.Phase == "client-cleanup" {
+			continue
+		}
+		expiry := r.View.StartedAt.Add(speedLease)
+		if next.IsZero() || expiry.Before(next) {
+			next = expiry
+		}
+	}
+	return next
+}
+func (s *Store) publishSpeedStateLocked() {
+	tests := cloneSpeedViews(s.speedViewsLocked())
+	nodes := s.speedWatchNodesLocked()
+	nextExpiry := s.speedNextExpiryLocked()
+	fault := s.speedFault
+	revision := s.speedRevision
+	hub := s.speedHub
+
+	s.speedViewMu.Lock()
+	wake := s.speedView.initialized && (s.speedView.revision != revision || s.speedView.fault != fault)
+	if s.speedView.changed == nil {
+		s.speedView.changed = make(chan struct{})
+	}
+	s.speedView.initialized = true
+	s.speedView.fault = fault
+	s.speedView.revision = revision
+	s.speedView.tests = tests
+	s.speedView.nodes = nodes
+	s.speedView.hub = hub
+	s.speedView.nextExpiry = nextExpiry
+	if wake {
+		close(s.speedView.changed)
+		s.speedView.changed = make(chan struct{})
+	}
+	s.speedViewMu.Unlock()
+}
+func (s *Store) publishSpeedNodesLocked() {
+	s.speedViewMu.Lock()
+	if !s.speedView.initialized {
+		s.speedViewMu.Unlock()
+		s.publishSpeedStateLocked()
+		return
+	}
+	same := s.speedView.hub == s.speedHub && len(s.speedView.nodes) == len(s.nodes)
+	if same {
+		for _, node := range s.speedView.nodes {
+			current, ok := s.nodes[node.certificate]
+			if !ok || current.ID != node.id {
+				same = false
+				break
+			}
+		}
+	}
+	if same {
+		s.speedViewMu.Unlock()
+		return
+	}
+	s.speedViewMu.Unlock()
+
+	nodes := s.speedWatchNodesLocked()
+	hub := s.speedHub
+	s.speedViewMu.Lock()
+	s.speedView.nodes = nodes
+	s.speedView.hub = hub
+	s.speedViewMu.Unlock()
+}
+func (s *Store) watchSpeedWait() time.Duration {
+	s.speedViewMu.Lock()
+	wait := s.speedWatchTimeout
+	s.speedViewMu.Unlock()
+	if wait > 0 {
+		return wait
+	}
+	return speedWatchWait
+}
 func (s *Store) saveSpeedLocked() error {
 	if s.speedFault {
+		s.publishSpeedStateLocked()
 		return errors.New("speed_state_unavailable")
 	}
 	s.speedRevision++
@@ -143,12 +338,10 @@ func (s *Store) saveSpeedLocked() error {
 	}
 	if err := writeControlState(s.speedStatePath(), speedState{1, s.speedRevision, jobs}); err != nil {
 		s.speedFault = true
+		s.publishSpeedStateLocked()
 		return errors.New("speed_state_unavailable")
 	}
-	if s.speedChanged != nil {
-		close(s.speedChanged)
-	}
-	s.speedChanged = make(chan struct{})
+	s.publishSpeedStateLocked()
 	s.wakeSpeedParticipantsLocked("")
 	return nil
 }
@@ -165,15 +358,6 @@ type SpeedChannel struct {
 	Connected bool   `json:"connected"`
 }
 
-func (s *Store) speedChannelsLocked() []SpeedChannel {
-	out := make([]SpeedChannel, 0, len(s.nodes))
-	for certificate, node := range s.nodes {
-		out = append(out, SpeedChannel{node.ID, s.speedHub != nil && s.speedHub.online(certificate)})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
 type SpeedList struct {
 	Channels []SpeedChannel `json:"channels"`
 	Revision uint64         `json:"revision,string"`
@@ -183,45 +367,104 @@ type SpeedList struct {
 
 // Event-driven HTTP wait fits the existing authenticated facade. New task
 // revisions wake it immediately; there is no browser fixed-interval poll.
+// Reads use the detached speed snapshot so unrelated Store.mu disk/backup work
+// cannot starve long-poll responses past HTTP server or proxy header deadlines.
 func (s *Store) WatchSpeeds(ctx context.Context, after *uint64) (SpeedList, error) {
-	timer := time.NewTimer(15 * time.Second)
-	defer timer.Stop()
+	var timer *time.Timer
+	var timerC <-chan time.Time
+	if after != nil {
+		timer = time.NewTimer(s.watchSpeedWait())
+		defer timer.Stop()
+		timerC = timer.C
+	}
 	for {
-		s.mu.Lock()
-		if s.speedFault {
+		if err := ctx.Err(); err != nil {
+			return SpeedList{}, err
+		}
+		s.speedViewMu.Lock()
+		initialized := s.speedView.initialized
+		fault := s.speedView.fault
+		revision := s.speedView.revision
+		nextExpiry := s.speedView.nextExpiry
+		if !initialized {
+			s.speedViewMu.Unlock()
+			s.mu.Lock()
+			s.expireSpeedsAtLocked(time.Now())
+			s.publishSpeedStateLocked()
 			s.mu.Unlock()
+			continue
+		}
+		if fault {
+			s.speedViewMu.Unlock()
 			return SpeedList{}, errors.New("speed_state_unavailable")
 		}
-		s.expireSpeedsLocked()
-		if s.speedFault {
+		now := time.Now()
+		if !nextExpiry.IsZero() && !now.Before(nextExpiry) {
+			s.speedViewMu.Unlock()
+			s.mu.Lock()
+			s.expireSpeedsAtLocked(now)
+			s.publishSpeedStateLocked()
 			s.mu.Unlock()
-			return SpeedList{}, errors.New("speed_state_unavailable")
+			continue
 		}
-		revision := s.speedRevision
-		if s.speedChanged == nil {
-			s.speedChanged = make(chan struct{})
-		}
-		changed := s.speedChanged
 		if after == nil || *after != revision {
-			v := s.speedViewsLocked()
-			channels := s.speedChannelsLocked()
-			s.mu.Unlock()
-			return SpeedList{Revision: revision, Tests: v, Channels: channels, Policy: currentSpeedPolicy()}, nil
+			tests := cloneSpeedViews(s.speedView.tests)
+			nodes := s.speedView.nodes
+			hub := s.speedView.hub
+			s.speedViewMu.Unlock()
+			return SpeedList{
+				Revision: revision,
+				Tests:    tests,
+				Channels: speedChannelsFromNodes(nodes, hub),
+				Policy:   currentSpeedPolicy(),
+			}, nil
 		}
-		s.mu.Unlock()
+		if s.speedView.changed == nil {
+			s.speedView.changed = make(chan struct{})
+		}
+		changed := s.speedView.changed
+		s.speedViewMu.Unlock()
+
+		var expireTimer *time.Timer
+		var expireC <-chan time.Time
+		if !nextExpiry.IsZero() {
+			if delay := time.Until(nextExpiry); delay <= 0 {
+				continue
+			} else {
+				expireTimer = time.NewTimer(delay)
+				expireC = expireTimer.C
+			}
+		}
 		select {
 		case <-ctx.Done():
+			if expireTimer != nil {
+				expireTimer.Stop()
+			}
 			return SpeedList{}, ctx.Err()
 		case <-changed:
-		case <-timer.C:
+			if expireTimer != nil {
+				expireTimer.Stop()
+			}
+		case <-timerC:
+			if expireTimer != nil {
+				expireTimer.Stop()
+			}
 			after = nil
+			timerC = nil
+		case <-expireC:
 		}
 	}
 }
 func (s *Store) expireSpeedsLocked() {
+	s.expireSpeedsAtLocked(time.Now())
+}
+func (s *Store) expireSpeedsAtLocked(now time.Time) {
+	if s.speedFault {
+		return
+	}
 	changed := false
 	for _, r := range s.speedJobs {
-		if r.Phase != "done" && r.Phase != "cleanup" && r.Phase != "client-cleanup" && time.Since(r.View.StartedAt) > speedLease {
+		if r.Phase != "done" && r.Phase != "cleanup" && r.Phase != "client-cleanup" && !now.Before(r.View.StartedAt.Add(speedLease)) {
 			r.View.State = "failed"
 			r.View.Error = "lease_expired_cleanup_unconfirmed"
 			r.Phase = "client-cleanup"

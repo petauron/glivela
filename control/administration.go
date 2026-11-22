@@ -324,6 +324,11 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				http.Error(w, "invalid speed request", 400)
 				return
 			}
+			controller := http.NewResponseController(w)
+			if err := controller.SetWriteDeadline(time.Now().Add(store.watchSpeedWait() + speedWatchWriteMargin)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				http.Error(w, "speed wait deadlines unavailable", 503)
+				return
+			}
 			if request.Start != nil {
 				if _, err := store.StartSpeed(*request.Start, CertificateID(r.TLS.PeerCertificates[0])); err != nil {
 					http.Error(w, err.Error(), 409)
@@ -332,6 +337,9 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			}
 			result, err := store.WatchSpeeds(r.Context(), request.After)
 			if err != nil {
+				if r.Context().Err() != nil {
+					return
+				}
 				http.Error(w, "speed state unavailable", 503)
 				return
 			}
