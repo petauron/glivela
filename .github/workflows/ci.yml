@@ -10,12 +10,98 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      go: ${{ steps.scope.outputs.go }}
+      ui: ${{ steps.scope.outputs.ui }}
+      native: ${{ steps.scope.outputs.native }}
+      selection: ${{ steps.scope.outputs.selection }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Determine CI scope
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -eu
+          classify_files() {
+            files="$1"
+            [ -n "$files" ] || { go=true; ui=true; native=true; selection=true; return; }
+            go=false
+            ui=false
+            native=false
+            selection=false
+            old_ifs=$IFS
+            nl=$(printf '\nx'); nl=${nl%x}; IFS=$nl
+            for path in $files; do
+              [ -n "$path" ] || continue
+              case "$path" in
+                LICENSE*|NOTICE*|*THIRD_PARTY*|*LICENSES*)
+                  go=true; ui=true; native=true; selection=true ;;
+                *.md|docs/*|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE.md)
+                  ;;
+                ui/*)
+                  ui=true; native=true ;;
+                *)
+                  go=true; ui=true; native=true; selection=true ;;
+              esac
+            done
+            IFS=$old_ifs
+          }
+          go=true; ui=true; native=true; selection=true
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
+            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+            classify_files "$changed"
+          elif [ "$EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ] && [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            changed=$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")
+            must_run_main=false
+            old_ifs=$IFS
+            nl=$(printf '\nx'); nl=${nl%x}; IFS=$nl
+            for path in $changed; do
+              case "$path" in
+                .release-please-manifest.json) must_run_main=true ;;
+              esac
+            done
+            IFS=$old_ifs
+            if [ "$must_run_main" = "false" ]; then
+              classify_files "$changed"
+              if [ "$go" = "true" ] || [ "$ui" = "true" ] || [ "$native" = "true" ] || [ "$selection" = "true" ]; then
+                main_tree=$(git rev-parse "${GITHUB_SHA}^{tree}")
+                pr_head=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.merged_at != null and .merge_commit_sha == "'"$GITHUB_SHA"'" and .base.ref == "main" and .head.repo.full_name == "'"$GITHUB_REPOSITORY"'")] | if length == 1 then .[0].head.sha else empty end' 2>/dev/null || true)
+                if [ -n "$pr_head" ]; then
+                  pr_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$pr_head" --jq '.tree.sha // empty' 2>/dev/null || true)
+                  pr_ci=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$pr_head&per_page=100" --jq '.workflow_runs | sort_by(.run_number) | last | if . != null and .head_sha == "'"$pr_head"'" and .head_repository.full_name == "'"$GITHUB_REPOSITORY"'" and .status == "completed" and .conclusion == "success" then "ok" else empty end' 2>/dev/null || true)
+                  if [ "$pr_tree" = "$main_tree" ] && [ "$pr_ci" = "ok" ]; then
+                    go=false; ui=false; native=false; selection=false
+                  fi
+                fi
+              fi
+            fi
+          fi
+          printf 'go=%s\nui=%s\nnative=%s\nselection=%s\n' "$go" "$ui" "$native" "$selection" >> "$GITHUB_OUTPUT"
+
   native-package:
     name: Native runtime distribution
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -98,6 +184,8 @@ jobs:
           sudo env GLIVELA_TEST_XRAY="$RUNNER_TEMP/native-runtime/xray" GLIVELA_TEST_TRANSPORT_FENCE=1 unshare --net sh -c 'ip link set lo up; exec "$1" -test.run "^TestSS2022ProbeWithOfficialCore$" -test.v -test.timeout 45s' sh "$RUNNER_TEMP/glivela-entry-auth.test"
   selection-runtime:
     name: Reviewed target-selection runtime
+    needs: changes
+    if: needs.changes.outputs.selection == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -117,6 +205,8 @@ jobs:
           docker pull "$GLIVELA_XRAY_IMAGE"
           go test -run '^TestCompositeOfficialCoreConfiguration$' -count=1 .
   verify:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -155,6 +245,8 @@ jobs:
       - name: Run complete tests with race detection
         run: go test -race ./... -count=1
   ui:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -187,3 +279,37 @@ jobs:
           test "$(wc -c < "$bundle.css")" -le 4194304
           ! grep -Fq 'process.env.NODE_ENV' "$bundle.js"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+  gate:
+    name: CI / gate
+    needs: [changes, native-package, selection-runtime, verify, ui]
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every applicable CI job
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          NATIVE_ENABLED: ${{ needs.changes.outputs.native }}
+          NATIVE_RESULT: ${{ needs.native-package.result }}
+          SELECTION_ENABLED: ${{ needs.changes.outputs.selection }}
+          SELECTION_RESULT: ${{ needs.selection-runtime.result }}
+          VERIFY_ENABLED: ${{ needs.changes.outputs.go }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          UI_ENABLED: ${{ needs.changes.outputs.ui }}
+          UI_RESULT: ${{ needs.ui.result }}
+        run: |
+          set -eu
+          test "$CHANGES_RESULT" = success
+          check_job() {
+            enabled="$1"
+            result="$2"
+            if [ "$enabled" = "true" ]; then
+              test "$result" = success
+            else
+              test "$result" = skipped
+            fi
+          }
+          check_job "$NATIVE_ENABLED" "$NATIVE_RESULT"
+          check_job "$SELECTION_ENABLED" "$SELECTION_RESULT"
+          check_job "$VERIFY_ENABLED" "$VERIFY_RESULT"
+          check_job "$UI_ENABLED" "$UI_RESULT"
