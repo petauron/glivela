@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/petauron/glivela/compare/v0.1.0...v0.1.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **control:** decouple speed watch snapshots and bound write deadlines ([#223](https://github.com/petauron/glivela/issues/223)) ([d435a17](https://github.com/petauron/glivela/commit/d435a17f56e51a3a86df492da6efe0ac073a0828)), closes [#14](https://github.com/petauron/glivela/issues/14)
+
 ## [0.1.0](https://github.com/petauron/glivela/compare/v0.1.0-alpha.165...v0.1.0) (2026-11-21)
 
 
