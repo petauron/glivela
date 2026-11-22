@@ -59,8 +59,10 @@ type Store struct {
 	nodeEvents           *nodeEventHub
 	speedHub             *speedHub
 	speedRevision        uint64
-	speedChanged         chan struct{}
 	speedFault           bool
+	speedViewMu          sync.Mutex
+	speedView            speedWatchSnapshot
+	speedWatchTimeout    time.Duration
 	subscriptionNames    map[string]string
 	subscriptionLandings map[string]SubscriptionLanding
 	hostBindings         map[string]string
@@ -77,7 +79,7 @@ func OpenStore(path string) (*Store, error) {
 			return nil, errors.New("control: unsafe state directory")
 		}
 	}
-	s := &Store{path: path, nodes: map[string]Node{}, speedHub: newSpeedHub(), nodeEvents: newNodeEventHub(), speedChanged: make(chan struct{})}
+	s := &Store{path: path, nodes: map[string]Node{}, speedHub: newSpeedHub(), nodeEvents: newNodeEventHub()}
 	if err := s.loadHostBindings(); err != nil {
 		return nil, err
 	}
@@ -92,6 +94,7 @@ func OpenStore(path string) (*Store, error) {
 		if len(s.speedJobs) != 0 {
 			return nil, errors.New("control: speed state without enrolled nodes")
 		}
+		s.publishSpeedStateLocked()
 		return s, nil
 	}
 	if err != nil {
@@ -160,6 +163,7 @@ func OpenStore(path string) (*Store, error) {
 	if err := s.loadSpeedState(); err != nil {
 		return nil, err
 	}
+	s.publishSpeedStateLocked()
 	return s, nil
 }
 
@@ -491,6 +495,7 @@ func (s *Store) commit(nodes map[string]Node) error {
 	}
 	s.wakeSpeedNodeChangesLocked(nodes)
 	s.nodes = nodes
+	s.publishSpeedNodesLocked()
 	directory, err := os.Open(filepath.Dir(s.path))
 	if err != nil {
 		return err

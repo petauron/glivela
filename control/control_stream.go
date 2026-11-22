@@ -217,6 +217,7 @@ func (s *nodeControlServer) Connect(stream grpc.BidiStreamingServer[pb.NodeFrame
 	enrolled = enrolled && !s.store.entryRetiredLocked(node.ID)
 	if s.store.speedHub == nil {
 		s.store.speedHub = newSpeedHub()
+		s.store.publishSpeedNodesLocked()
 	}
 	hub := s.store.speedHub
 	if enrolled {
