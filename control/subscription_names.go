@@ -73,6 +73,8 @@ func loadSubscriptionPresentation(directory string, m glivela.ImportMaterial) (s
 	for _, endpoint := range m.Endpoints {
 		known[endpoint.Reality.EntryID] = true
 	}
+	// Retired client-chain display names remain read-only evidence, never
+	// executable endpoints, so existing subscription-names.json files still load.
 	for _, chain := range m.ClientChains {
 		if chain.Transport != "ipv6-ss2022" {
 			continue

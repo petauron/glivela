@@ -1,18 +1,21 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
-	glivela "github.com/petauron/glivela"
-	"github.com/petauron/glivela/landing"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
-// One path with an existing direct peer covers the isolation needed by migration.
+// One path with an existing direct peer covers the isolation needed by three-hop routes.
 func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 	s, entryCert, targetCert, grant := managedServerLandingFixture(t)
 	revision := func() uint64 { return s.business.material.Plan.Accounts[0].Account.DesiredRevision }
@@ -29,52 +32,77 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 	if err = s.Put(Node{ID: "relay-example", CertificateID: relayCert, Desired: rd}); err != nil {
 		t.Fatal(err)
 	}
-	exit := "8.8.8.8"
-	change := ClientChainChange{ID: "three-hop", AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, Name: "Example via relay", Enabled: true, Transport: "ipv6-ss2022", SourceIPv6: rp.EgressIP, ServerIPv6: "2606:4700:4700::1111", RelayID: "relay-example", RelaySourceIPv6: "2001:4860:4860::8888", RelayServerIPv6: rp.EgressIP, EgressIP: &exit, ExpectedRevision: revision()}
-	if _, err = s.ChangeClientChain(context.Background(), change); err != nil {
-		t.Fatal("create retained chain", err)
-	}
-	c, err := s.business.material.EffectiveClientChain(s.business.material.ClientChains[0])
-	if err != nil {
-		t.Fatal(err)
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 16))
+	relayKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{8}, 16))
+	chainID, port, serverIPv6, exit := "three-hop", 24001, "2606:4700:4700::1111", "8.8.8.8"
+	relay := &glivela.ClientChainRelay{
+		NodeID:        "relay-example",
+		CertificateID: relayCert,
+		Port:          port,
+		Key:           relayKey,
+		SourceIPv6:    "2001:4860:4860::8888",
+		ServerIPv6:    rp.EgressIP,
 	}
 	entry := s.nodes[entryCert]
 	plan := *entry.Desired.clone().Entry
 	network := entry.Desired.EntryNetwork.clone()
 	direct := plan.Peers[0]
 	path := direct
-	path.ClientChainID = c.ID
-	path.Relay = c.Relay
-	path.Port = c.Port
-	path.Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: c.Key, PublicAddress: c.ServerIPv6, Port: c.Port, ClientListenerID: c.ID}
+	path.ClientChainID = chainID
+	path.Relay = relay
+	path.Port = port
+	path.Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: key, PublicAddress: serverIPv6, Port: port, ClientListenerID: chainID}
 	plan.Peers = append(plan.Peers, path)
 	plan.Revision++
 	relayIdentity := landing.PeerIdentity{ID: "relay-mesh", PublicKey: "nodekey:relay", Address: rp.Address}
 	npeer := network.Peers[0]
-	npeer.ClientChainID = c.ID
+	npeer.ClientChainID = chainID
 	npeer.RelayIdentity = &relayIdentity
 	network.Peers = append(network.Peers, npeer)
 	entry.Desired, err = NewEntryDesired(plan, network)
 	if err != nil {
 		t.Fatal("independent path", err)
 	}
-	ownServerFixtureTransports(t, s, entry)
-	if err = s.Put(entry); err != nil {
-		t.Fatal("enroll path", err)
+	relayListener := glivela.TransportListener{ID: chainID, Port: port, Key: relayKey, Source: relay.SourceIPv6, Transport: "ipv6-ss2022", Address: relay.ServerIPv6}
+	resource := glivela.ServerTransport{
+		ID:                   chainID,
+		Name:                 "Example via relay",
+		AccountID:            grant.AccountID,
+		EntryID:              grant.EntryID,
+		EgressID:             grant.EgressID,
+		EntryCertificateID:   entryCert,
+		LandingCertificateID: targetCert,
+		Peer:                 path,
+		ExpectedExit:         npeer.ExpectedExit,
+		Listener:             glivela.TransportListener{ID: chainID, Port: port, Key: key, Source: rp.EgressIP, Transport: "ipv6-ss2022", Address: serverIPv6, EgressIP: exit},
+		RelayListener:        &relayListener,
 	}
-	for cert, identity := range map[string]landing.PeerIdentity{relayCert: relayIdentity, targetCert: network.Peers[0].Identity} {
-		n := s.nodes[cert]
-		if _, err = s.Exchange(context.Background(), cert, &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: n.Desired.Revision, ConfigSHA256: n.Desired.ConfigSHA256, RuntimeReady: true}, ManagementIdentity: &identity}); err != nil {
-			t.Fatal(err)
+	enrollFixtureServerTransport(t, s, entry, resource)
+	reportLandings := func() {
+		t.Helper()
+		for cert, identity := range map[string]landing.PeerIdentity{relayCert: relayIdentity, targetCert: network.Peers[0].Identity} {
+			n := s.nodes[cert]
+			if _, err = s.Exchange(context.Background(), cert, &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: n.Desired.Revision, ConfigSHA256: n.Desired.ConfigSHA256, RuntimeReady: true}, ManagementIdentity: &identity}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
+	reportLandings()
+	grant.ClientChainID = chainID
+	grant.ExpectedRevision = revision()
+	if _, err = s.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatal("grant three-hop", err)
+	}
+	reportLandings()
 	entry = s.nodes[entryCert]
 	target := s.nodes[targetCert]
+	beforeRelay := s.nodes[relayCert].Desired
+	beforeTarget := s.nodes[targetCert].Desired
 	if _, ok := s.boundServerTransport(entry, target, path); !ok {
 		t.Fatal("bound three-hop rejected")
 	}
-	request := landingAcceptanceRequest{SnapshotID: entry.ID, PeerID: c.ID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256}
-	if proof, err := s.publicPeerAcceptance(entryCert, request); err != nil || proof.ClientChainID != c.ID || proof.LandingID != target.ID {
+	request := landingAcceptanceRequest{SnapshotID: entry.ID, PeerID: chainID, Revision: entry.Desired.Revision, ConfigSHA256: entry.Desired.ConfigSHA256}
+	if proof, err := s.publicPeerAcceptance(entryCert, request); err != nil || proof.ClientChainID != chainID || proof.LandingID != target.ID {
 		t.Fatal("live three-node identity proof", err)
 	}
 	for _, fault := range []string{"key", "source", "certificate", "direction"} {
@@ -89,7 +117,7 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 		case "certificate":
 			r.CertificateID = targetCert
 		case "direction":
-			r.ServerIPv6 = c.ServerIPv6
+			r.ServerIPv6 = serverIPv6
 		}
 		if _, ok := s.boundServerTransport(entry, target, bad); ok {
 			t.Fatal("accepted bad relay", fault)
@@ -103,27 +131,10 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 		t.Fatal("accepted stale relay")
 	}
 	s.nodes[relayCert] = saved
-	grant.ClientChainID = c.ID
-	grant.ExpectedRevision = revision()
-	beforeRelay := s.nodes[relayCert].Desired
-	beforeTarget := s.nodes[targetCert].Desired
-	if _, err = s.ChangeRoute(context.Background(), grant); err != nil {
-		t.Fatal("grant three-hop", err)
+	r := getSubscription(t, s, "/sub/example-token?format=mihomo", "Mihomo")
+	if r.Code != 200 || !strings.Contains(r.Body.String(), resource.Name) || strings.Contains(r.Body.String(), "dialer-proxy:") {
+		t.Fatal("server subscription missing or contained dialer-proxy", r.Code)
 	}
-	check := func() {
-		t.Helper()
-		r := getSubscription(t, s, "/sub/example-token?format=mihomo", "Mihomo")
-		if r.Code != 200 || !strings.Contains(r.Body.String(), c.Name) {
-			t.Fatal("server subscription missing", r.Code)
-		}
-	}
-	check()
-	change.Enabled = false
-	change.ExpectedRevision = revision()
-	if _, err = s.ChangeClientChain(context.Background(), change); err != nil {
-		t.Fatal("withdraw old publication", err)
-	}
-	check()
 	observation := healthyEntryObservation(s.nodes[entryCert].Desired, time.Now())
 	for id, peer := range observation.EntryHealth.Peers {
 		peer.Status.LinkState = "authenticated"
@@ -132,14 +143,11 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 	if _, err = s.Exchange(context.Background(), entryCert, &observation); err != nil {
 		t.Fatal("path health", err)
 	}
-	if !s.subscriptionPeerReady(s.nodes[entryCert], target.ID, time.Now(), c.ID) {
+	if !s.subscriptionPeerReady(s.nodes[entryCert], target.ID, time.Now(), chainID) {
 		t.Fatal("path-specific healthy receipt missing")
 	}
-	if r := getSubscription(t, s, "/sub/example-token?format=mihomo", "Mihomo"); strings.Contains(r.Body.String(), "dialer-proxy:") {
-		t.Fatal("old client dependency retained in subscription")
-	}
 	if !reflect.DeepEqual(beforeRelay, s.nodes[relayCert].Desired) || !reflect.DeepEqual(beforeTarget, s.nodes[targetCert].Desired) {
-		t.Fatal("withdrawing client changed listeners")
+		t.Fatal("reporting health unexpectedly changed listeners")
 	}
 	if !reflect.DeepEqual(direct, s.nodes[entryCert].Desired.Entry.Peers[0]) {
 		t.Fatal("direct peer changed")
@@ -164,7 +172,7 @@ func TestThreeHopServerPreservesDirectPeerAndIssuedListeners(t *testing.T) {
 	if _, err = s.ChangeRoute(context.Background(), grant); err != nil {
 		t.Fatal("enable three-hop UDP", err)
 	}
-	if !slices.Contains(s.nodes[targetCert].Desired.Landing.UDPOverTCPListeners, c.ID) || !reflect.DeepEqual(beforeRelay, s.nodes[relayCert].Desired) {
+	if !slices.Contains(s.nodes[targetCert].Desired.Landing.UDPOverTCPListeners, chainID) || !reflect.DeepEqual(beforeRelay, s.nodes[relayCert].Desired) {
 		t.Fatal("final UDP authorization missing or relay changed")
 	}
 	if err = json.Unmarshal(s.nodes[entryCert].Desired.Config, &cfg); err != nil {

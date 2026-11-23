@@ -143,16 +143,11 @@ tr[data-selected="true"] .gl-node-symbol{color:var(--gl-accent);}
 .gl-routes tr:not(.gl-route-group){height:64px;}
 .gl-routes td{height:64px;padding-block:6px;font-size:13px;}
 .gl-routes th,.gl-routes td{padding-inline:8px;}
-.gl-route-kind{font-size:13px;font-weight:500;white-space:nowrap;}
-.gl-route-kind[data-mode="server"]{color:color-mix(in srgb,var(--quality-good,#438be5) 55%,var(--gl-muted));}
-.gl-route-kind[data-mode="client"]{color:color-mix(in srgb,var(--quality-fair,#a96718) 55%,var(--gl-muted));}
 .gl-routes .gl-status{font-size:13px;white-space:nowrap;}
 .gl-routes [title]>time{font-size:10px;line-height:14px;}
 .gl-route-definitions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 16px;margin-top:26px;}
 .gl-route-definitions h3{font-size:13px;color:var(--gl-muted);font-weight:400;margin-bottom:9px;}
 .gl-route-definitions p{font-size:15px;line-height:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.gl-route-definitions .gl-route-combination-name{grid-column:1 / -1;}
-.gl-route-definitions .gl-route-combination-name p{white-space:normal;overflow-wrap:anywhere;}
 .gl-route-delete-button{margin-top:8px;}
 .gl-inspector .gl-route-delete-hint,.gl-inspector .gl-route-delete-confirm p{margin:8px 0 0;font-size:12px;line-height:19px;color:var(--gl-muted);}
 .gl-route-delete-confirm{margin-top:10px;padding:12px;border:1px solid var(--gl-line);border-radius:var(--radius);}
@@ -360,7 +355,6 @@ tr[data-selected="true"] .gl-node-symbol{color:var(--gl-accent);}
 .gl-route-split:has(>.gl-inspector){padding-right:0;}
 .gl-route-split>.gl-inspector{box-shadow:-10px 0 24px #0002;}
 @container glivela-panel (min-width:961px){.gl-page:has(>.gl-tab-body:not([hidden]) .gl-route-split>.gl-inspector)>.gl-page-header{padding-right:24px;}}
-.gl-route-mode{min-height:34px;padding:4px 10px;border:1px solid var(--gl-line);border-radius:7px;background:var(--gl-control);color:var(--gl-text);font-size:13px;}
 .gl-routes .gl-route-group th{height:auto;padding:7px 8px;background:var(--gl-panel);color:var(--gl-text);font-size:13px;font-weight:600;}
 .gl-routes .gl-route-group span{margin-left:8px;color:var(--gl-muted);font-weight:400;}
 .gl-routes .gl-route-group:hover{background:transparent;}
@@ -370,7 +364,7 @@ tr[data-selected="true"] .gl-node-symbol{color:var(--gl-accent);}
 .gl-inspector .gl-route-latency-detail p{margin:0 0 7px;color:var(--gl-text);font-size:13px;}
 .gl-speed-summary{font-size:13px;line-height:19px;}
 .gl-speed-summary strong{white-space:nowrap;}
-@container glivela-panel (max-width:960px){.gl-latency-summary{width:min(100%,260px);}.gl-route-mode{width:100%;min-height:40px;}}
+@container glivela-panel (max-width:960px){.gl-latency-summary{width:min(100%,260px);}}
 
 .gl-speed-phases{margin-top:10px;}
 

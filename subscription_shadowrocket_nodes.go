@@ -1,7 +1,6 @@
 package glivela
 
 import (
-	"encoding/base64"
 	"errors"
 	"net"
 	"net/url"
@@ -23,7 +22,6 @@ func RenderShadowrocketNodes(body []byte) ([]byte, error) {
 			Port       int    `yaml:"port"`
 			UUID       string `yaml:"uuid"`
 			Password   string `yaml:"password"`
-			Cipher     string `yaml:"cipher"`
 			ServerName string `yaml:"servername"`
 			SNI        string `yaml:"sni"`
 			Flow       string `yaml:"flow"`
@@ -52,7 +50,7 @@ func RenderShadowrocketNodes(body []byte) ([]byte, error) {
 	}
 	var out strings.Builder
 	for _, p := range document.Proxies {
-		if p.Server == "" || !validPort(p.Port) || p.Dialer != "" && !names[p.Dialer] {
+		if p.Server == "" || !validPort(p.Port) || p.Dialer != "" {
 			return nil, errors.New("subscription: invalid node reference")
 		}
 		u := url.URL{Scheme: p.Type, Host: net.JoinHostPort(p.Server, strconv.Itoa(p.Port)), Fragment: p.Name}
@@ -61,9 +59,6 @@ func RenderShadowrocketNodes(body []byte) ([]byte, error) {
 			q.Set("udp", "1")
 		} else {
 			q.Set("udp", "0")
-		}
-		if p.Dialer != "" {
-			q.Set("chain", p.Dialer)
 		}
 		switch p.Type {
 		case "vless":
@@ -82,11 +77,6 @@ func RenderShadowrocketNodes(body []byte) ([]byte, error) {
 			if p.Reality.SpiderX != "" {
 				q.Set("spx", p.Reality.SpiderX)
 			}
-		case "ss":
-			if p.Cipher == "" || p.Password == "" {
-				return nil, errors.New("subscription: invalid Shadowsocks node")
-			}
-			u.User = url.User(base64.RawURLEncoding.EncodeToString([]byte(p.Cipher + ":" + p.Password)))
 		case "hysteria2":
 			if p.Password == "" || p.SNI == "" {
 				return nil, errors.New("subscription: invalid Hysteria node")

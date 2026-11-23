@@ -77,55 +77,9 @@ change production proxy grants or relax the exact peer-source/time-limit checks.
 It applies only to the existing temporary speed-test exception and its recovery.
 Retain the configured table and this file while recovery resources still exist.
 
-## Shared client landing cutover
+## Retired client-side chains
 
-Upgrade the controller and one selected landing through the existing signed
-catalog before applying shared listeners. Back up only the required private
-configuration/state and current source rules; reuse a verified pre-change recovery
-point on retries. Preserve server forwarding on 1080, DNS, exits and all account
-and node identities. Keep subscriptions on their original origin/token.
-
-The authenticated `client-chains` operation accepts `shareLanding:true`,
-`accountId`, `egressId`, and current decimal-string `expectedRevision`. It selects
-one independent client-only SS2022 AES-128-GCM key per single-account landing on
-TCP 24000. Existing IPv4 and explicitly authorized IPv6 sources retain their exact
-addresses. Keys are not shared with server forwarding, management or another
-landing/account. UDP remains disabled.
-
-Preserve the old precise rules until acceptance. Add only the existing authorized
-sources on TCP 24000 in the host/provider policies. Apply the transaction, wait
-for its matching fresh landing receipt, refresh the real subscription and verify
-each enabled chain through its original VLESS dependency and original exit before
-continuing. Retained names/references and monotonic entry-side accounting must
-match. Remove superseded client-port rules only after that landing passes.
-
-On failure, stop the batch. `restoreLanding:true` with the same landing/account
-and current revision restores the retained original per-chain configuration
-through a forward revision. Never restore an older ledger, loosen source checks,
-change the exit or fabricate health to continue.
-
-## Three-hop Mihomo client chains
-
-The client-chain form can select an optional intermediate landing for an IPv6
-SS2022 final hop. Enroll distinct entry, relay and final landing identities first.
-The first hop can use an exact public IPv6 or IPv4 source and listener; the relay
-uses a fixed, explicitly verified IPv6 source for the final hop. An IPv4 relay
-listener needs landing render version 4 and an upgraded relay runtime. It is an
-independent exact-source client listener: it does not add a server-forwarding
-source grant. The entry source and the relay's IPv6 source are authorized
-separately on their respective listeners. Each new chain
-has an independent relay credential; existing two-hop and server-forwarding
-routes are unchanged. TCP only is supported.
-
-The Mihomo subscription makes the final SS2022 proxy dial via the relay SS2022
-proxy, which dials through the original VLESS/REALITY entry. Only the final
-chain is placed in the selector. A suspended or mismatched relay suppresses the
-chain rather than substituting a direct path. Refresh the subscription and
-verify a real client request and exit; node receipts alone are not acceptance.
-Disabling a chain withdraws both listeners, and deletion waits for both nodes'
-fresh applied receipts. Do not roll an older controller back onto an encrypted
-ledger containing relay records; use a verified recovery point or a forward fix
-without discarding later accounting.
+Client-side chains (`POST /v1/admin/client-chains`, shared client landings, and `dialer-proxy` Mihomo subscriptions) have been retired. Existing server-owned transports (`ServerTransports`) independently project their two-hop, three-hop, and private-LAN listeners without reading client-chain records. Historical tombstones in encrypted ledgers and `subscription-names.json` remain read-only compatible on reload.
 
 ## IPv6-only entry DNS
 

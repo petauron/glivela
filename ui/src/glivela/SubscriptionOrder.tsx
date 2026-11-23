@@ -7,7 +7,7 @@ import { useControlRequest } from "./ControlAccess";
 type Item = { id: string; name: string; kind: string; protocol: string };
 type OrderView = { revision: string; inventory: string; available: boolean; items: Item[] };
 type Props = { accountId: string; active: boolean; disabled: boolean; onDirtyChange: (dirty: boolean) => void; save: (operation: string, body: unknown) => Promise<boolean> };
-const kindLabel: Record<string, string> = { native: "直连", route: "服务端转发", chain: "客户端链式" };
+const kindLabel: Record<string, string> = { native: "直连", route: "服务端转发" };
 const sameOrder = (left: Item[], right: Item[]) => left.length === right.length && left.every((item, index) => item.id === right[index].id);
 
 export function SubscriptionOrderEditor({ accountId, active, disabled, onDirtyChange, save }: Props) {

@@ -2,8 +2,7 @@
 
 Server routes can opt into UDP in their route details. This requires an enrolled
 SS2022 transport and compatible controller, entry and landing programs. Existing
-routes remain TCP-only until the operator enables UDP; client-side chains retain
-their existing TCP-only policy.
+routes remain TCP-only until the operator enables UDP.
 
 Datagrams use Xray XUDP inside the existing SS2022 TCP connection. TCP streams
 are not multiplexed. The public listener, issued key, exact source authorization,

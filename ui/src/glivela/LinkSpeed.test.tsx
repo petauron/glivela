@@ -33,6 +33,7 @@ it("updates only UDP policy with the existing route identity and account revisio
  const latency={values:new Map(),now:Date.now(),busy:false,error:"",refresh:vi.fn(async()=>{})};
  const render=(udp:boolean)=>root.render(<RouteWorkspace inventory={{...inventory,routes:[{...inventory.routes[0],udp}]}} names={names} disabled={false} save={save} latency={latency} loadSpeeds={vi.fn(async()=>initial)} active={false}/>);
  await act(async()=>render(false));
+ expect(container.querySelector('[aria-label="筛选线路模式"]')).toBeNull();
  await act(async()=>{container.querySelector<HTMLButtonElement>(".gl-route-name")!.click();});
  const click=async(text:string)=>act(async()=>{[...container.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent===text)!.click();});
  await click("启用 UDP");

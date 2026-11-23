@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -428,27 +429,31 @@ func TestOwnedRouteToClientManagedLanding(t *testing.T) {
 		return 0
 	}
 	exit := "8.8.8.8"
-	client := ClientChainChange{ID: "existing-client-chain", AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, Name: "Example chain", Enabled: true, Transport: "ipv6-ss2022", SourceIPv6: "2001:4860:4860::8888", ServerIPv6: "2606:4700:4700::1111", EgressIP: &exit, ExpectedRevision: revision()}
-	if _, err := s.ChangeClientChain(context.Background(), client); err != nil {
-		t.Fatal(err)
-	}
-	c, err := s.business.material.EffectiveClientChain(s.business.material.ClientChains[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 16))
+	listenerID, port, sourceIPv6, serverIPv6 := "existing-server-transport", 24001, "2001:4860:4860::8888", "2606:4700:4700::1111"
 	entry := s.nodes[entryCert]
 	plan := *entry.Desired.clone().Entry
 	plan.Revision++
-	plan.Peers[0].Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: c.Key, PublicAddress: c.ServerIPv6, Port: c.Port, ClientListenerID: c.ID}
-	plan.Peers[0].Port = c.Port
+	plan.Peers[0].Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: key, PublicAddress: serverIPv6, Port: port, ClientListenerID: listenerID}
+	plan.Peers[0].Port = port
+	var err error
 	entry.Desired, err = NewEntryDesired(plan, *entry.Desired.EntryNetwork)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ownServerFixtureTransports(t, s, entry)
-	if err = s.Put(entry); err != nil {
-		t.Fatal(err)
+	resource := glivela.ServerTransport{
+		ID:                   listenerID,
+		Name:                 "Example server transport",
+		AccountID:            change.AccountID,
+		EntryID:              change.EntryID,
+		EgressID:             change.EgressID,
+		EntryCertificateID:   entryCert,
+		LandingCertificateID: targetCert,
+		Peer:                 plan.Peers[0],
+		ExpectedExit:         entry.Desired.EntryNetwork.Peers[0].ExpectedExit,
+		Listener:             glivela.TransportListener{ID: listenerID, Port: port, Key: key, Source: sourceIPv6, Transport: "ipv6-ss2022", Address: serverIPv6, EgressIP: exit},
 	}
+	enrollFixtureServerTransport(t, s, entry, resource)
 	target := s.nodes[targetCert]
 	identity := entry.Desired.EntryNetwork.Peers[0].Identity
 	if _, err = s.Exchange(context.Background(), targetCert, &Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: target.Desired.Revision, ConfigSHA256: target.Desired.ConfigSHA256, RuntimeReady: true}, ManagementIdentity: &identity}); err != nil {

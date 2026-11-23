@@ -280,7 +280,7 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 	entries = slices.DeleteFunc(entries, func(entry glivela.NativeEntry) bool {
 		return entry.Protocol == glivela.VLESSReality && hiddenNative[entry.Material.Credential.ID] && !publishedBases[entry.Material.Credential.ID]
 	})
-	if len(entries) == 0 && !mihomo {
+	if len(entries) == 0 {
 		return subscriptionContent{}, errSubscriptionUnverified
 	}
 	result := subscriptionContent{contentType: "text/plain; charset=utf-8", userInfo: "upload=0; download=" + strconv.FormatInt(quota.UsedBytes, 10) + "; total=" + strconv.FormatInt(account.Account.Plan.TotalBytes, 10)}
@@ -288,51 +288,7 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 		result.userInfo += "; expire=" + strconv.FormatInt(account.Account.Plan.ExpiryTime/1000, 10)
 	}
 	if mihomo {
-		chains := []glivela.PublishedClientChain{}
-		for _, original := range m.ClientChains {
-			chain, chainErr := m.EffectiveClientChain(original)
-			if chainErr != nil {
-				return subscriptionContent{}, errSubscriptionUnverified
-			}
-			if issued := s.subscriptionNames[chain.ID]; issued != "" {
-				chain.Name = issued
-			}
-			if !chain.Enabled || chain.AccountID != account.Account.ID {
-				continue
-			}
-			landingNode, source, chainErr := chainLanding(s.nodes, chain)
-			if chainErr != nil || clientChainUnavailableReason(s.nodes, chain) != "" || !s.subscriptionNodeEnabled(landingNode, now) {
-				continue
-			}
-			listener := clientListener(chain, source)
-			if !slices.Contains(landingNode.Desired.Landing.ClientListeners, listener) {
-				continue
-			}
-			if chain.Relay != nil {
-				relay, err := chainRelay(s.nodes, chain)
-				if err != nil || !s.subscriptionNodeEnabled(relay, now) || !slices.Contains(relay.Desired.Landing.ClientListeners, clientRelayListener(chain)) {
-					continue
-				}
-			}
-			for id, material := range byID {
-				if material.Credential.Kind == glivela.NativeCredential && material.Credential.EntryID == chain.EntryID {
-					server := landingNode.Desired.Landing.Transport.PublicAddress
-					if chain.PrivateLink != nil {
-						server = chain.PrivateLink.Address
-					}
-					if chain.Transport == "ipv6-ss2022" {
-						server = chain.ServerIPv6
-					}
-					published := glivela.PublishedClientChain{Chain: chain, Base: glivela.NativeEntry{Material: material, Protocol: glivela.VLESSReality, Link: links[id]}, Server: server}
-					label := s.subscriptionLandingLocked(chain.EgressID)
-					published.EgressRegionPrefix = importedLandingRegionPrefix(label.RegionCode)
-					published.EgressNameSuffix = label.NameSuffix
-					chains = append(chains, published)
-					break
-				}
-			}
-		}
-		result.body, result.items, err = glivela.RenderMihomo(entries, account.Account.ID, glivela.FixedMode, routes, m.SubscriptionOrders[accountID].IDs, chains...)
+		result.body, result.items, err = glivela.RenderMihomo(entries, account.Account.ID, glivela.FixedMode, routes, m.SubscriptionOrders[accountID].IDs)
 		result.contentType = "application/yaml; charset=utf-8"
 	} else {
 		result.body, err = glivela.RenderLinks(entries, account.Account.ID, glivela.FixedMode, routes, m.SubscriptionOrders[accountID].IDs, true)
