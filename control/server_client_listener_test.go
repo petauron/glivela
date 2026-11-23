@@ -47,6 +47,8 @@ func TestServerReusesIssuedIPv6Listener(t *testing.T) {
 		t.Fatal(err)
 	}
 	target.RouteEntries = nil
+	target.Checks = nil
+	target.Receipt, target.ReportedAt = nil, time.Time{}
 	if err = s.Put(target); err != nil {
 		t.Fatal(err)
 	}

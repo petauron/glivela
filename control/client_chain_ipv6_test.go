@@ -157,7 +157,7 @@ func TestClientChainsRetiredAndLegacyTombstonesPreserved(t *testing.T) {
 		t.Fatalf("Mihomo subscription leaked retired client chain: code=%d body=%s", mihomo.Code, mihomo.Body.String())
 	}
 	shadow := getSubscription(t, reloaded, "/sub/example-token?format=shadowrocket", "Shadowrocket")
-	if shadow.Code != 200 || strings.Contains(shadow.Body.String(), "chain=") || strings.Contains(shadow.Body.String(), "ss://") {
+	if shadow.Code != 200 || strings.Contains(shadow.Body.String(), "chain=") || strings.HasPrefix(shadow.Body.String(), "ss://") || strings.Contains(shadow.Body.String(), "\nss://") {
 		t.Fatalf("Shadowrocket subscription leaked retired client chain: code=%d body=%s", shadow.Code, shadow.Body.String())
 	}
 
