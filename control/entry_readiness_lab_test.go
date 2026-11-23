@@ -21,11 +21,11 @@ import (
 	"github.com/petauron/glivela"
 )
 
-// Opt-in real-core acceptance. Only run in the dedicated CT116; uses synthetic
+// Opt-in real-core acceptance. Only run in an isolated lab guest; uses synthetic
 // identities and loopback listeners. Apple is the external REALITY target.
 func TestEntryReadinessLab(t *testing.T) {
 	if os.Getenv("GLIVELA_READINESS_LAB") != "1" {
-		t.Skip("requires isolated CT116")
+		t.Skip("requires isolated lab guest")
 	}
 	binary := os.Getenv("GLIVELA_XRAY_BINARY")
 	if !filepath.IsAbs(binary) {
