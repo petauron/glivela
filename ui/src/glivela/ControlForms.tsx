@@ -1,4 +1,3 @@
-import { PrivateLinkFields,emptyPrivateLink,completePrivateLink } from "./PrivateClientLink";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,60 +66,31 @@ export function CreateAccount({ inventory, names, disabled, save }: { inventory:
 
 export function CreateRoute({ inventory, names, disabled, save, latencies, now, latencyFailed }: { inventory: Inventory; names: Map<string, string>; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean>; latencies: Map<string, RouteLatency>; now: number; latencyFailed: boolean }) {
   const formID = useId();
-  const [mode, setMode] = useState("server");
-  const [transport, setTransport] = useState("ipv4-ss2022");
-  const [privateLink,setPrivateLink]=useState(emptyPrivateLink);
-  const privateChain=mode==="client"&&transport==="private-ipv4-ss2022";
-  const [egressIp, setEgressIp] = useState("");
-  const [sourceIpv6, setSourceIpv6] = useState("");
-  const [serverIpv6, setServerIpv6] = useState("");
-  const [relayID, setRelayID] = useState("none");
-  const [relayIpv6, setRelayIpv6] = useState("");
-  const [relayTransport, setRelayTransport] = useState("ipv6");
-  const [relaySourceIpv4, setRelaySourceIpv4] = useState("");
-  const [relayServerIpv4, setRelayServerIpv4] = useState("");
-  const [name, setName] = useState("");
   const id = useRef(crypto.randomUUID());
   const [accountID, setAccountID] = useState("");
   const [entryID, setEntryID] = useState("");
   const [egressID, setEgressID] = useState("");
   const [hideNative, setHideNative] = useState(false);
   useEffect(() => {
-    if (inventory.routes.some(item => item.id === id.current) || inventory.clientChains?.some(item => item.id === id.current)) {
+    if (inventory.routes.some(item => item.id === id.current)) {
       id.current = crypto.randomUUID();
-      setAccountID(""); setEntryID(""); setEgressID(""); setHideNative(false); setName(""); setEgressIp("");
-      setSourceIpv6(""); setServerIpv6("");
-      setRelayID("none"); setRelayIpv6(""); setRelayTransport("ipv6"); setRelaySourceIpv4(""); setRelayServerIpv4("");
+      setAccountID(""); setEntryID(""); setEgressID(""); setHideNative(false);
     }
-  }, [inventory.routes, inventory.clientChains]);
+  }, [inventory.routes]);
   const account = inventory.accounts.find(a => a.account.id === accountID);
   const entry = inventory.runtimes.find(node => node.role === "entry" && node.id === entryID);
-  const ipv6Chain = mode === "client" && transport === "ipv6-ss2022";
-  const relayEnabled = ipv6Chain && relayID !== "none";
-  const ipv4Relay = relayEnabled && relayTransport === "ipv4";
-  const landings = ipv6Chain ? inventory.runtimes.filter(n => n.role === "landing").map(n => n.id) : entry?.peers ?? [];
+  const landings = entry?.peers ?? [];
   return <form onSubmit={event => {
     event.preventDefault();
-    if (privateChain&&!completePrivateLink(privateLink) || !account || !entry || !landings.includes(egressID) || ipv6Chain && (!serverIpv6.trim() || !ipv4Relay && !sourceIpv6.trim()) || relayEnabled && (!relayIpv6.trim() || !landings.includes(relayID) || relayID === egressID || relayID === entryID) || ipv4Relay && (!relaySourceIpv4.trim() || !relayServerIpv4.trim())) return;
-    void save(mode === "client" ? "client-chains" : "routes", { id: id.current, accountId: accountID, entryId: entryID, egressId: egressID, enabled: true, ...(mode === "client" ? { name: name.trim(), egressIp: egressIp.trim(), transport:privateChain?"ipv4-ss2022":transport,...(privateChain?{privateLink}:{}), ...(ipv6Chain ? { sourceIpv6: relayEnabled ? relayIpv6.trim() : sourceIpv6.trim(), serverIpv6: serverIpv6.trim(), ...(relayEnabled ? { relayId: relayID, ...(ipv4Relay ? { relayTransport: "ipv4-relay-ss2022", relaySourceIpv4: relaySourceIpv4.trim(), relayServerIpv4: relayServerIpv4.trim() } : { relaySourceIpv6: sourceIpv6.trim(), relayServerIpv6: relayIpv6.trim() }) } : {}) } : {}) } : { hideNative }), expectedRevision: account.account.desiredRevision });
+    if (!account || !entry || !landings.includes(egressID)) return;
+    void save("routes", { id: id.current, accountId: accountID, entryId: entryID, egressId: egressID, enabled: true, hideNative, expectedRevision: account.account.desiredRevision });
   }}><FieldGroup>
-    <Field><FieldLabel htmlFor={`${formID}-mode`}>生成模式</FieldLabel><SelectControl id={`${formID}-mode`} aria-label="生成模式" disabled={disabled} value={mode} onValueChange={value => { setMode(value); setEgressID(""); setHideNative(false); }} options={[{ value: "server", label: "转发" }, { value: "client", label: "链式" }]} /></Field>
-    {mode === "client" ? <>
-      <p className="text-sm text-muted-foreground">仅 TCP；使用独立落地凭据。仅 Mihomo 格式包含链式配置，普通链接订阅不包含；现有服务端转发保持不变。停用后请更新客户端订阅。</p>
-      <Field><FieldLabel>组合名称<Input required maxLength={64} disabled={disabled} value={name} onChange={event => setName(event.target.value)} placeholder="香港 → 落地" /></FieldLabel></Field>
-      <Field><FieldLabel htmlFor={`${formID}-transport`}>落地传输</FieldLabel><SelectControl id={`${formID}-transport`} aria-label="落地传输" disabled={disabled} value={transport} onValueChange={value => { setTransport(value); setEgressID(""); }} options={[{ value: "ipv4-ss2022", label: "公网 IPv4 · SS2022" }, {value:"private-ipv4-ss2022",label:"专属内网 IPv4 · SS2022"}, { value: "ipv6-ss2022", label: "公网 IPv6 · SS2022" }]} /></Field>
-    </> : null}
     <Field><FieldLabel htmlFor={`${formID}-account`}>账户</FieldLabel><SelectControl id={`${formID}-account`} aria-label="账户" required disabled={disabled} value={accountID} onValueChange={setAccountID} placeholder="请选择" options={inventory.accounts.map(a => ({ value: a.account.id, label: a.account.displayName }))} /></Field>
     <Field><FieldLabel htmlFor={`${formID}-entry`}>入口</FieldLabel><SelectControl id={`${formID}-entry`} aria-label="入口" required disabled={disabled} value={entryID} onValueChange={value => { setEntryID(value); setEgressID(""); }} placeholder="请选择" options={inventory.runtimes.filter(n => n.role === "entry").map(n => ({ value: n.id, label: names.get(n.id) ?? n.id }))} /></Field>
-    {ipv6Chain ? <Field><FieldLabel htmlFor={`${formID}-relay`}>中转节点</FieldLabel><SelectControl id={`${formID}-relay`} aria-label="中转节点" disabled={disabled} value={relayID} onValueChange={setRelayID} options={[{value:"none",label:"无（双跳）"},...landings.filter(id=>id!==entryID).map(id=>({value:id,label:names.get(id)??id,disabled:id===egressID}))]} /></Field> : null}
-    {relayEnabled ? <Field><FieldLabel htmlFor={`${formID}-relay-transport`}>入口至中转传输</FieldLabel><SelectControl id={`${formID}-relay-transport`} aria-label="入口至中转传输" disabled={disabled} value={relayTransport} onValueChange={setRelayTransport} options={[{value:"ipv6",label:"公网 IPv6 · SS2022"},{value:"ipv4",label:"公网 IPv4 · SS2022"}]} /></Field> : null}
-    <Field><FieldLabel htmlFor={`${formID}-landing`}>{ipv6Chain ? "落地" : "已授权落地"}</FieldLabel><SelectControl id={`${formID}-landing`} aria-label={ipv6Chain ? "落地" : "已授权落地"} required disabled={disabled} value={egressID} onValueChange={setEgressID} placeholder="请选择" options={landings.map(id => ({ value: id, label: `${names.get(id) ?? id}${!ipv6Chain ? optionLatency(latencies.get(latencyKey(entryID, id)), now, latencyFailed) : ""}` }))} /></Field>
-    {mode === "client" ? <Field><FieldLabel htmlFor={`${formID}-egress-ip`}>最终出口绑定 IP（可选）</FieldLabel><Input id={`${formID}-egress-ip`} aria-describedby={`${formID}-egress-hint`} maxLength={45} disabled={disabled} value={egressIp} onChange={event => setEgressIp(event.target.value)} placeholder="留空使用落地默认出口"/><FieldDescription id={`${formID}-egress-hint`}>填写落地网卡已分配的 IPv4 或 IPv6 地址。此线路固定使用该出口，不改变其他线路，也不随传输地址族切换。</FieldDescription></Field> : null}
-    {privateChain ? <PrivateLinkFields value={privateLink} onChange={setPrivateLink} disabled={disabled}/>:null}
-    {ipv6Chain ? <><p className="text-sm text-muted-foreground">使用已核验的公网单一地址；每一跳只允许上一跳地址连接，地址变化后需重新授权。</p>{ipv4Relay ? <><Field><FieldLabel>入口出口 IPv4<Input required disabled={disabled} value={relaySourceIpv4} onChange={event => setRelaySourceIpv4(event.target.value)} /></FieldLabel></Field><Field><FieldLabel>中转监听 IPv4<Input required disabled={disabled} value={relayServerIpv4} onChange={event => setRelayServerIpv4(event.target.value)} /></FieldLabel></Field></> : <Field><FieldLabel>入口出口 IPv6<Input required disabled={disabled} value={sourceIpv6} onChange={event => setSourceIpv6(event.target.value)} /></FieldLabel></Field>}{relayEnabled ? <Field><FieldLabel>{ipv4Relay?"中转出口 IPv6":"中转监听及出口 IPv6"}<Input required disabled={disabled} value={relayIpv6} onChange={event => setRelayIpv6(event.target.value)} /></FieldLabel></Field> : null}<Field><FieldLabel>落地监听 IPv6<Input required disabled={disabled} value={serverIpv6} onChange={event => setServerIpv6(event.target.value)} /></FieldLabel></Field></> : null}
-    {mode === "server" ? <Field><FieldLabel className="gl-toggle-label" htmlFor={`${formID}-hide-native`}>隐藏入口直连<input id={`${formID}-hide-native`} className="gl-toggle" type="checkbox" role="switch" aria-describedby={`${formID}-hide-native-hint`} disabled={disabled} checked={hideNative} onChange={event => setHideNative(event.target.checked)} /></FieldLabel><FieldDescription id={`${formID}-hide-native-hint`}>在订阅中隐藏该入口的 VLESS 直连节点，仅保留转发线路；保留原身份与历史流量。</FieldDescription></Field> : null}
-    {!ipv6Chain && !privateChain && entryID && egressID ? <div className="text-sm"><span className="text-muted-foreground">落地传输端口 TCP 1080 参考延迟：</span><LatencyCell value={latencies.get(latencyKey(entryID, egressID))} now={now} failed={latencyFailed} /></div> : null}
-    <Button type="submit" disabled={disabled || privateChain&&!completePrivateLink(privateLink) || !account || !entry || !egressID || mode === "client" && !name.trim() || ipv6Chain && (!serverIpv6.trim() || !ipv4Relay && !sourceIpv6.trim()) || relayEnabled && (!relayIpv6.trim() || relayID === egressID || relayID === entryID) || ipv4Relay && (!relaySourceIpv4.trim() || !relayServerIpv4.trim())}>新增线路</Button>
+    <Field><FieldLabel htmlFor={`${formID}-landing`}>已授权落地</FieldLabel><SelectControl id={`${formID}-landing`} aria-label="已授权落地" required disabled={disabled} value={egressID} onValueChange={setEgressID} placeholder="请选择" options={landings.map(id => ({ value: id, label: `${names.get(id) ?? id}${optionLatency(latencies.get(latencyKey(entryID, id)), now, latencyFailed)}` }))} /></Field>
+    <Field><FieldLabel className="gl-toggle-label" htmlFor={`${formID}-hide-native`}>隐藏入口直连<input id={`${formID}-hide-native`} className="gl-toggle" type="checkbox" role="switch" aria-describedby={`${formID}-hide-native-hint`} disabled={disabled} checked={hideNative} onChange={event => setHideNative(event.target.checked)} /></FieldLabel><FieldDescription id={`${formID}-hide-native-hint`}>在订阅中隐藏该入口的 VLESS 直连节点，仅保留转发线路；保留原身份与历史流量。</FieldDescription></Field>
+    {entryID && egressID ? <div className="text-sm"><span className="text-muted-foreground">落地传输端口 TCP 1080 参考延迟：</span><LatencyCell value={latencies.get(latencyKey(entryID, egressID))} now={now} failed={latencyFailed} /></div> : null}
+    <Button type="submit" disabled={disabled || !account || !entry || !egressID}>新增线路</Button>
   </FieldGroup></form>;
 }
 

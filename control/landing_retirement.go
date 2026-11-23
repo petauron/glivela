@@ -136,7 +136,7 @@ func retiredLandingMaterial(m glivela.ImportMaterial, change RetireLandingChange
 }
 
 func retiredNodeMaterial(m glivela.ImportMaterial, change RetireLandingChange, entry bool) (glivela.ImportMaterial, map[string]bool, error) {
-	refused := errors.New("control: disable dependent client chains and server routes first")
+	refused := errors.New("control: disable dependent server routes first")
 	for _, endpoint := range m.Endpoints {
 		if endpoint.Reality.EntryID == change.ID && !entry {
 			return m, nil, refused
@@ -229,9 +229,6 @@ func retiredNodeMaterial(m glivela.ImportMaterial, change RetireLandingChange, e
 	next.DeletedClientChains = maps.Clone(m.DeletedClientChains)
 	for _, chain := range m.ClientChains {
 		if chain.EntryID == change.ID || chain.EgressID == change.ID || chain.Relay != nil && chain.Relay.NodeID == change.ID {
-			if chain.Enabled {
-				return m, nil, refused
-			}
 			removed[chain.ID] = true
 			delete(next.DeletedClientChains, chain.ID)
 		} else {

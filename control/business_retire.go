@@ -87,17 +87,6 @@ func (s *Store) RetireEntry(ctx context.Context, change RetireEntryChange) error
 			return errors.New("control: retire owned server transport first")
 		}
 	}
-	for _, chain := range next.ClientChains {
-		if chain.EntryID != change.ID {
-			continue
-		}
-		if chain.Enabled {
-			return errors.New("control: retire active client chain first")
-		}
-		if !clientChainDeletionReady(s.nodes, next, chain, now) {
-			return errors.New("control: client chain listener retirement not verified")
-		}
-	}
 	next.Endpoints = slices.Clone(next.Endpoints)
 	index := slices.IndexFunc(next.Endpoints, func(e glivela.ImportEndpoint) bool { return e.Reality.EntryID == change.ID })
 	if index < 0 || realityChangePending(next.Endpoints[index]) {

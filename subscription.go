@@ -116,33 +116,18 @@ func RenderLinks(entries []NativeEntry, accountID string, mode PublishingMode, r
 	return result, nil
 }
 
-type PublishedClientChain struct {
-	Chain              ClientChain
-	Base               NativeEntry
-	Server             string
-	EgressRegionPrefix string
-	EgressNameSuffix   string
-}
-
-func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, routes []PublishedRoute, order []string, chains ...PublishedClientChain) ([]byte, []SubscriptionItem, error) {
-	var resolved []resolvedSubscriptionEntry
-	var err error
-	if len(entries) != 0 || len(chains) == 0 {
-		resolved, err = resolveSubscription(entries, accountID, mode, routes)
-	}
+func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, routes []PublishedRoute, order []string) ([]byte, []SubscriptionItem, error) {
+	resolved, err := resolveSubscription(entries, accountID, mode, routes)
 	if err != nil {
 		return nil, nil, err
 	}
 	type proxyEntry struct {
 		SubscriptionItem
-		value   map[string]any
-		helpers []string
+		value map[string]any
 	}
-	values := make([]proxyEntry, 0, len(resolved)+len(chains))
-	helperValues := map[string]map[string]any{}
-	names := make([]any, 0, len(resolved)+1)
+	values := make([]proxyEntry, 0, len(resolved))
 	for _, entry := range resolved {
-		proxy, name, err := mihomoProxy(NativeEntry{Protocol: entry.Protocol, Link: entry.link})
+		proxy, _, err := mihomoProxy(NativeEntry{Protocol: entry.Protocol, Link: entry.link})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -150,81 +135,13 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 			proxy["udp"] = entry.udp
 		}
 		values = append(values, proxyEntry{SubscriptionItem: entry.SubscriptionItem, value: proxy})
-		names = append(names, name)
-	}
-	used := map[string]bool{"DIRECT": true, "REJECT": true, "节点选择": true}
-	for _, name := range names {
-		used[name.(string)] = true
-	}
-	chains = slices.Clone(chains)
-	slices.SortFunc(chains, func(a, b PublishedClientChain) int { return strings.Compare(a.Chain.ID, b.Chain.ID) })
-	helpers := map[string]string{}
-	for _, published := range chains {
-		c := published.Chain
-		validServer := (c.Transport == "" || c.Transport == IPv4ClientSS2022) && PublicTransportIPv4(published.Server) || c.Transport == "ipv6-ss2022" && published.Server == c.ServerIPv6 && PublicTransportIPv6(published.Server)
-		if c.PrivateLink != nil {
-			validServer = published.Server == c.PrivateLink.Address && c.PrivateLink.Validate() == nil
-		}
-		if c.Validate() != nil || (published.EgressRegionPrefix != "" && !validDisplayName(published.EgressRegionPrefix)) || (published.EgressNameSuffix != "" && (!validDisplayName(published.EgressNameSuffix) || strings.ContainsAny(published.EgressNameSuffix, "|｜"))) || !c.Enabled || c.AccountID != accountID || !validServer || published.Base.Protocol != VLESSReality || published.Base.Material.Credential.EntryID != c.EntryID {
-			return nil, nil, errors.New("glivela: invalid published client chain")
-		}
-		if _, err := nativeSubscriptionLines([]NativeEntry{published.Base}, accountID); err != nil {
-			return nil, nil, err
-		}
-		base, entryName, err := mihomoProxy(published.Base)
-		if err != nil {
-			return nil, nil, err
-		}
-		nameText := routeName(PublishedRoute{EntryName: entryName, EgressRegionPrefix: published.EgressRegionPrefix, EgressNameSuffix: published.EgressNameSuffix}) + "·链"
-		if c.Transport == "ipv6-ss2022" {
-			// New IPv6 chains use the operator's name so different landings are
-			// distinguishable; retain established names for existing chains.
-			nameText = c.Name
-		}
-		name := uniqueSubscriptionName(nameText, used)
-		helper := helpers[published.Base.Material.Credential.ID]
-		if helper == "" {
-			if _, entry, ok := strings.Cut(entryName, "｜"); ok {
-				entryName = entry
-			}
-			helper = uniqueSubscriptionName("入口｜"+compactEntryName(entryName), used)
-			helpers[published.Base.Material.Credential.ID] = helper
-			base["name"], base["udp"] = helper, false
-			helperValues[helper] = base
-		}
-		cipher := "aes-256-gcm"
-		if c.Transport == IPv4ClientSS2022 {
-			cipher = IPv4ClientSS2022Method
-		}
-		if c.Transport == "ipv6-ss2022" || c.Shared {
-			cipher = SS2022Method
-		}
-		dependencies := []string{helper}
-		if c.Relay != nil {
-			relayName := uniqueSubscriptionName("中转｜"+c.Name, used)
-			relayServer, relayCipher := c.Relay.ServerIPv6, SS2022Method
-			if c.Relay.Transport == IPv4RelaySS2022 {
-				relayServer, relayCipher = c.Relay.ServerIPv4, IPv4ClientSS2022Method
-			}
-			helperValues[relayName] = map[string]any{"name": relayName, "type": "ss", "server": relayServer, "port": c.Relay.Port, "cipher": relayCipher, "password": c.Relay.Key, "udp": false, "dialer-proxy": helper}
-			dependencies = append(dependencies, relayName)
-			helper = relayName
-		}
-		values = append(values, proxyEntry{SubscriptionItem: SubscriptionItem{ID: "chain/" + c.ID, Name: name, Kind: "chain", Protocol: ProtocolKind("shadowsocks")}, helpers: dependencies, value: map[string]any{"name": name, "type": "ss", "server": published.Server, "port": c.Port, "cipher": cipher, "password": c.Key, "udp": false, "dialer-proxy": helper}})
 	}
 	ranks := subscriptionRanks(order, resolved)
 	slices.SortStableFunc(values, func(a, b proxyEntry) int { return cmp.Compare(ranks.position(a.ID), ranks.position(b.ID)) })
-	proxies := make([]any, 0, len(values)+len(helperValues))
+	proxies := make([]any, 0, len(values))
 	items := make([]SubscriptionItem, 0, len(values))
-	names = make([]any, 0, len(values)+1)
-	addedHelpers := map[string]bool{}
+	names := make([]any, 0, len(values)+1)
 	for _, entry := range values {
-		for _, helper := range entry.helpers {
-			if !addedHelpers[helper] {
-				proxies = append(proxies, helperValues[helper])
-				addedHelpers[helper] = true
-			}
-		}
 		proxies = append(proxies, entry.value)
 		names = append(names, entry.Name)
 		items = append(items, entry.SubscriptionItem)
@@ -239,17 +156,6 @@ func RenderMihomo(entries []NativeEntry, accountID string, mode PublishingMode, 
 		return nil, nil, errors.New("glivela: cannot encode Mihomo subscription")
 	}
 	return output, items, nil
-}
-
-// Keep existing route names unchanged; only colliding additions receive a
-// readable number. Internal credential and chain IDs never enter display names.
-func uniqueSubscriptionName(name string, used map[string]bool) string {
-	candidate := name
-	for number := 2; used[candidate]; number++ {
-		candidate = name + "·" + strconv.Itoa(number)
-	}
-	used[candidate] = true
-	return candidate
 }
 
 func nativeSubscriptionLines(entries []NativeEntry, accountID string) ([]byte, error) {

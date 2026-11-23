@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"strings"
 	"time"
 
 	glivela "github.com/petauron/glivela"
@@ -283,26 +282,11 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 			plan.Grants[i] = expected
 		}
 		plan.ClientLinks = nil
-		for _, original := range m.ClientChains {
-			chain, e := m.EffectiveClientChain(original)
-			if e != nil {
-				return nil, false, e
-			}
-			if m.DeletedClientChains[chain.ID] || chain.EntryID != node.ID || !chain.Enabled || chain.PrivateLink == nil || !slices.ContainsFunc(plan.Credentials, func(v glivela.CredentialMaterial) bool {
-				return v.Credential.Enabled && v.Credential.Kind == glivela.NativeCredential && v.Credential.AccountID == chain.AccountID
-			}) {
-				continue
-			}
-			if _, _, e = chainLanding(nodes, chain); e != nil {
-				continue
-			}
-			plan.ClientLinks = append(plan.ClientLinks, glivela.PrivateClientPolicy{PrivateClientLink: *chain.PrivateLink, ID: chain.ID, AccountID: chain.AccountID, Port: chain.Port})
+		speedPeersChanged := desired.EntryNetwork != nil && len(desired.EntryNetwork.SpeedPeers) != 0
+		if speedPeersChanged {
+			desired.EntryNetwork.SpeedPeers = nil
 		}
-		slices.SortFunc(plan.ClientLinks, func(a, b glivela.PrivateClientPolicy) int { return strings.Compare(a.ID, b.ID) })
-		if len(plan.ClientLinks) != 0 {
-			desired.EntryRenderVersion = glivela.XrayRenderVersion
-		}
-		if reflect.DeepEqual(plan, node.Desired.Entry) {
+		if !speedPeersChanged && reflect.DeepEqual(plan, node.Desired.Entry) {
 			continue
 		}
 		if plan.Revision == math.MaxUint64 {
@@ -318,15 +302,11 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 		invalidateEntryChecks(next, node.ID)
 		changed = true
 	}
-	landingChanged, err := projectClientLandings(next, m, now)
+	landingChanged, err := projectServerLandings(next, m, now)
 	if err != nil {
 		return nil, false, err
 	}
-	speedChanged, err := projectClientSpeedPeers(next, m, credentials)
-	if err != nil {
-		return nil, false, err
-	}
-	return next, changed || landingChanged || speedChanged, nil
+	return next, changed || landingChanged, nil
 }
 
 func (s *Store) reconcileOwnedEntriesLocked(now time.Time) error {

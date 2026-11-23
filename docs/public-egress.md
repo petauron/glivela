@@ -95,9 +95,9 @@ Use the panel's readback to check the actual application state, then perform
 separately authorized real-path verification. This operation does not upgrade a
 retained renderer to the newer automatic-family fallback format.
 
-## 同一落地实例的 V4 / V6 客户端出口
+## 同一落地实例的 V4 / V6 独立监听出口
 
-新建客户端链式线路时，可填写「最终出口绑定 IP」，绑定落地网卡已经分配的 IPv4 或 IPv6 地址；留空继续使用落地默认出口。公网传输可使用另一个地址族。API 的 `client-chains.egressIp` 是可选字段；修改既有线路时省略该字段会保留原值，显式空字符串才恢复默认出口。
+客户端链式（`client-chains`）已下线；服务端专属传输（`ServerTransports`）的监听仍支持通过 `egressIp` 绑定落地网卡已分配的 IPv4 或 IPv6 地址，未指定时使用落地默认出口，公网传输可使用另一个地址族。
 
 同一落地身份和 Xray worker 可同时服务两个地址族。原有默认出口、监听、凭据及 relay 的来源地址保持不变；无需新实例或新节点证书。线路详情显示其固定出口。所有绑定地址在本地激活前校验；不在本机的地址会在停止现有 worker 前拒绝。
 

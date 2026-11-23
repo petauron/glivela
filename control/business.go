@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -85,7 +84,6 @@ func (a BusinessAccount) MarshalJSON() ([]byte, error) {
 // Historical statuses are not current runtime-health evidence.
 type BusinessInventory struct {
 	ServerTransports []ServerTransportView `json:"serverTransports"`
-	ClientChains     []ClientChainView     `json:"clientChains"`
 	Availability     availabilityState     `json:"availability"`
 	State            string                `json:"state"`
 	SnapshotID       string                `json:"snapshotId,omitempty"`
@@ -198,8 +196,7 @@ func (s *Store) LoadBusiness(keyPath string) error {
 			return migrationErr
 		}
 		if changed {
-			projected, nodeChanged, projectionErr := projectBusinessEntries(s.nodes, migrated, time.Now())
-			if projectionErr != nil || nodeChanged || !reflect.DeepEqual(projected, s.nodes) {
+			if _, _, projectionErr := projectBusinessEntries(s.nodes, migrated, time.Now()); projectionErr != nil {
 				return errors.New("control: server ownership migration would change a runtime")
 			}
 			s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key), sourceSHA256: sha256.Sum256(material.RetainedSource)}
@@ -273,25 +270,7 @@ func (s *Store) Business() BusinessInventory {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	view := BusinessInventory{State: "empty", Availability: availabilityState{Version: s.availability.Version, Revision: s.availability.Revision, Nodes: s.effectiveAvailabilities()}, Accounts: []BusinessAccount{}, Nodes: []BusinessNode{}, Endpoints: []BusinessEndpoint{}, Routes: []BusinessRoute{}, Runtimes: []BusinessRuntime{}}
-	view.ClientChains = []ClientChainView{}
 	view.ServerTransports = []ServerTransportView{}
-	if s.business != nil {
-		for _, c := range s.business.material.ClientChains {
-			if s.business.material.DeletedClientChains[c.ID] || s.entryRetiredLocked(c.EntryID) {
-				continue
-			}
-			c, err := s.business.material.EffectiveClientChain(c)
-			if err != nil {
-				continue
-			}
-			item := ClientChainView{PrivateLink: c.PrivateLink, EgressIP: c.EgressIP, UnavailableReason: clientChainUnavailableReason(s.nodes, c), Shared: c.Shared, Port: c.Port, ID: c.ID, AccountID: c.AccountID, EntryID: c.EntryID, EgressID: c.EgressID, Name: c.Name, Enabled: c.Enabled, Transport: c.Transport, SourceIPv6: c.SourceIPv6, ServerIPv6: c.ServerIPv6}
-			if c.Relay != nil {
-				item.RelayID, item.RelaySourceIPv6, item.RelayServerIPv6 = c.Relay.NodeID, c.Relay.SourceIPv6, c.Relay.ServerIPv6
-				item.RelayTransport, item.RelaySourceIPv4, item.RelayServerIPv4 = c.Relay.Transport, c.Relay.SourceIPv4, c.Relay.ServerIPv4
-			}
-			view.ClientChains = append(view.ClientChains, item)
-		}
-	}
 	if s.business == nil {
 		// Transport-only staged controllers still own enrollment and availability;
 		// they must not need to adopt the legacy ledger to pause a known source.

@@ -41,7 +41,7 @@ export function GlivelaControl({standalone=false, agents=[]}: {standalone?:boole
     try {
       const result = await manage<{ state?: string; subscriptionToken?: string; subscriptionUrl?: string }>(operation, body);
       if (result.subscriptionUrl || result.subscriptionToken) { setToken(result.subscriptionUrl ?? result.subscriptionToken ?? ""); const subject=body&&typeof body==="object"?body as Record<string,unknown>:{};setTokenAccountId(typeof subject.accountId==="string"?subject.accountId:typeof subject.id==="string"?subject.id:""); }
-      setNotice(operation === "business" ? "状态已刷新" : operation === "subscription-order" ? "订阅顺序已保存，OpenClash 刷新订阅后生效。" : operation === "account-subscription" ? "已读取订阅链接；请私下保存，不代表线路验证通过。" : operation === "retire-landing" ? "落地身份已撤销，专属链式和诊断已清理；未登录或卸载退租主机。" : operation === "retire-returned-entry" ? "入口身份已撤销，专属线路与密钥已清理；历史归档和备份尚需另行确认。" : operation === "retire-entry" ? "入口已从控制端退役；离线主机的停止与清理尚未验证。" : (operation === "routes" || operation === "client-chains") && body && typeof body === "object" && "delete" in body && body.delete === true ? "线路已删除，请刷新客户端订阅。" : "配置已保存；节点应用和真实线路验证仍须分别通过。");
+      setNotice(operation === "business" ? "状态已刷新" : operation === "subscription-order" ? "订阅顺序已保存，OpenClash 刷新订阅后生效。" : operation === "account-subscription" ? "已读取订阅链接；请私下保存，不代表线路验证通过。" : operation === "retire-landing" ? "落地身份已撤销，专属线路和诊断已清理；未登录或卸载退租主机。" : operation === "retire-returned-entry" ? "入口身份已撤销，专属线路与密钥已清理；历史归档和备份尚需另行确认。" : operation === "retire-entry" ? "入口已从控制端退役；离线主机的停止与清理尚未验证。" : operation === "routes" && body && typeof body === "object" && "delete" in body && body.delete === true ? "线路已删除，请刷新客户端订阅。" : "配置已保存；节点应用和真实线路验证仍须分别通过。");
       await refresh();
       return true;
     } catch (failure) { setError(failure instanceof Error ? failure.message : "操作未确认"); return false; }
@@ -58,7 +58,7 @@ export function GlivelaControl({standalone=false, agents=[]}: {standalone?:boole
  const [dialog,setDialog]=useState<"account"|"route"|"availability"|null>(null);
  const [pauseNode,setPauseNode]=useState("");
  const [createdAccountId,setCreatedAccountId]=useState("");
- const saveDialog=async(operation:string,body:unknown)=>{const ok=await change(operation,body);if(ok){setDialog(null);if(operation==="accounts"){setPage("accounts");setCreatedAccountId((body as {id:string}).id);}else if(operation==="routes"||operation==="client-chains")setPage("routes");}return ok;};
+ const saveDialog=async(operation:string,body:unknown)=>{const ok=await change(operation,body);if(ok){setDialog(null);if(operation==="accounts"){setPage("accounts");setCreatedAccountId((body as {id:string}).id);}else if(operation==="routes")setPage("routes");}return ok;};
  const disabled=busy||!owned;
  const applied=inventory?.runtimes.filter(n=>n.runtimeReady).length??0;
  const subtitles={nodes:inventory?`${new Set(inventory.runtimes.map(node=>node.hostId||node.id)).size} 个节点 · ${applied} 个角色已应用 · ${inventory.runtimes.length-applied} 个角色待核验`:"读取节点运行状态",accounts:"管理账户额度与订阅访问",routes:"管理入口与落地之间的订阅授权",quality:"查看实际出口评分、解锁状态与检测时间",diagnostics:"检查线路与节点状态",settings:"管理 REALITY 目标与连接配置"};

@@ -8,68 +8,36 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestIPv6ClientChainSubscription(t *testing.T) {
+func TestRetiredClientChainValidationAndSubscriptionsRejectDialerProxy(t *testing.T) {
 	secret := "11111111-1111-4111-8111-111111111111"
 	base := Credential{ID: "native-a", AccountID: "account-a", Kind: NativeCredential, User: "Phone", Identity: Identity(secret), EntryID: "entry-a", Enabled: true}
 	entry := NativeEntry{Material: CredentialMaterial{Credential: base, ProtocolID: secret}, Protocol: VLESSReality, Link: "vless://" + secret + "@entry.example.com:443?security=reality&type=tcp&sni=www.example.com&pbk=public&sid=abcd&fp=chrome&flow=xtls-rprx-vision#Entry"}
-	chain := ClientChain{ID: "chain-a", AccountID: "account-a", EntryID: "entry-a", EgressID: "egress-a", Name: "HK V6 → BGP", Port: 24001, Key: base64.StdEncoding.EncodeToString(make([]byte, 16)), Enabled: true, Transport: "ipv6-ss2022", SourceIPv6: "2001:4860:4860::8888", ServerIPv6: "2606:4700:4700::1111", EntryCertificateID: strings.Repeat("a", 64), LandingCertificateID: strings.Repeat("b", 64)}
-	publication := PublishedClientChain{Chain: chain, Base: entry, Server: chain.ServerIPv6}
-	before, _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil)
+	output, items, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil, publication)
-	if err != nil {
-		t.Fatal(err)
+	if strings.Contains(string(output), "dialer-proxy") || len(items) != 1 || items[0].Kind != "native" {
+		t.Fatalf("unexpected Mihomo output: %s", output)
 	}
-	var old, result struct {
+	var result struct {
 		Proxies []map[string]any `yaml:"proxies"`
 	}
-	if yaml.Unmarshal(before, &old) != nil || yaml.Unmarshal(output, &result) != nil {
-		t.Fatal("subscription could not be parsed")
+	if yaml.Unmarshal(output, &result) != nil || len(result.Proxies) != 1 || result.Proxies[0]["type"] != "vless" {
+		t.Fatal("rendered Mihomo inventory changed")
 	}
-	if len(old.Proxies) != 1 || len(result.Proxies) != 3 || result.Proxies[0]["name"] != old.Proxies[0]["name"] || result.Proxies[0]["uuid"] != old.Proxies[0]["uuid"] {
-		t.Fatal("existing native entry changed")
-	}
-	var transport, dependency map[string]any
-	for _, proxy := range result.Proxies {
-		if proxy["type"] == "ss" {
-			transport = proxy
+	// Shadowrocket renderer must reject retired client-chain Shadowsocks or dialer-proxy proxies.
+	for _, retiredYAML := range []string{
+		"proxies:\n  - name: Helper\n    type: vless\n    server: entry.example.com\n    port: 443\n    uuid: " + secret + "\n    network: tcp\n    servername: www.example.com\n    flow: xtls-rprx-vision\n    reality-opts:\n      public-key: public\n      short-id: abcd\n  - name: Chain\n    type: ss\n    server: 2606:4700:4700::1111\n    port: 24001\n    cipher: " + SS2022Method + "\n    password: " + base64.StdEncoding.EncodeToString(make([]byte, 16)) + "\n    dialer-proxy: Helper\n",
+		"proxies:\n  - name: ChainedVLESS\n    type: vless\n    server: entry.example.com\n    port: 443\n    uuid: " + secret + "\n    network: tcp\n    servername: www.example.com\n    flow: xtls-rprx-vision\n    dialer-proxy: Helper\n    reality-opts:\n      public-key: public\n      short-id: abcd\n",
+	} {
+		if _, err := RenderShadowrocketNodes([]byte(retiredYAML)); err == nil {
+			t.Fatal("retired client-chain proxy accepted by Shadowrocket renderer")
 		}
 	}
-	for _, proxy := range result.Proxies {
-		if transport != nil && proxy["name"] == transport["dialer-proxy"] {
-			dependency = proxy
-		}
-	}
-	if transport == nil || transport["name"] != chain.Name || dependency == nil || dependency["type"] != "vless" || dependency["uuid"] != secret || transport["server"] != chain.ServerIPv6 || transport["cipher"] != SS2022Method || transport["password"] != chain.Key || transport["udp"] != false {
-		t.Fatal("chain lost its IPv6 SS2022 target, TCP policy or VLESS dependency")
-	}
-	second := chain
-	second.ID, second.EgressID, second.Name, second.Port, second.ServerIPv6 = "chain-b", "egress-b", "Entry IPv6 → Landing IPv6", 24002, "2606:4700:4700::1001"
-	second.LandingCertificateID = strings.Repeat("c", 64)
-	two, _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil, publication, PublishedClientChain{Chain: second, Base: entry, Server: second.ServerIPv6})
-	if err != nil || yaml.Unmarshal(two, &result) != nil {
-		t.Fatal("two landing chains could not be rendered")
-	}
-	seen := map[string]bool{}
-	for _, proxy := range result.Proxies {
-		if proxy["type"] == "ss" {
-			seen[proxy["name"].(string)] = true
-			if proxy["dialer-proxy"] != dependency["name"] {
-				t.Fatal("landing chains lost their shared VLESS dependency")
-			}
-		}
-	}
-	if !seen[chain.Name] || !seen[second.Name] || len(seen) != 2 {
-		t.Fatal("landing names are missing or ambiguous")
-	}
-	publication.Server = "1.1.1.1"
-	if _, _, err := RenderMihomo([]NativeEntry{entry}, "account-a", FixedMode, nil, nil, publication); err == nil {
-		t.Fatal("unexpected server allowed an IPv4 fallback")
-	}
-	if _, _, err := RenderMihomo([]NativeEntry{entry}, "other-account", FixedMode, nil, nil, PublishedClientChain{Chain: chain, Base: entry, Server: chain.ServerIPv6}); err == nil {
-		t.Fatal("another account received the chain")
+	// Legacy ClientChain records remain strictly validated for historical ledger compatibility.
+	chain := ClientChain{ID: "chain-a", AccountID: "account-a", EntryID: "entry-a", EgressID: "egress-a", Name: "Entry IPv6 → Landing IPv6", Port: 24001, Key: base64.StdEncoding.EncodeToString(make([]byte, 16)), Enabled: false, Transport: "ipv6-ss2022", SourceIPv6: "2001:4860:4860::8888", ServerIPv6: "2606:4700:4700::1111", EntryCertificateID: strings.Repeat("a", 64), LandingCertificateID: strings.Repeat("b", 64)}
+	if err := chain.Validate(); err != nil {
+		t.Fatal("valid historical ClientChain rejected:", err)
 	}
 	for _, mutate := range []func(*ClientChain){
 		func(c *ClientChain) { c.SourceIPv6 = "::/0" },
@@ -81,7 +49,7 @@ func TestIPv6ClientChainSubscription(t *testing.T) {
 		invalid := chain
 		mutate(&invalid)
 		if invalid.Validate() == nil {
-			t.Fatal("invalid source, endpoint, identity or key accepted")
+			t.Fatal("invalid historical source, endpoint, identity or key accepted")
 		}
 	}
 }

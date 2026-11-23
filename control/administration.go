@@ -297,20 +297,6 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			_ = json.NewEncoder(w).Encode(struct {
 				URL string `json:"subscriptionUrl"`
 			}{link})
-		case "/v1/admin/client-chains":
-			var request ClientChainChange
-			if decode(http.MaxBytesReader(w, r.Body, 8192), &request) != nil {
-				http.Error(w, "invalid client chain request", http.StatusBadRequest)
-				return
-			}
-			status, err := store.ChangeClientChain(r.Context(), request)
-			if err != nil {
-				http.Error(w, "client chain change not confirmed", http.StatusConflict)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(status)
 		case "/v1/admin/link-speeds":
 			var request struct {
 				Start *SpeedRequest `json:"start,omitempty"`

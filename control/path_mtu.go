@@ -81,21 +81,7 @@ func (s *Store) pathMTUTargetLocked(mode, id, landingID string) (Node, string, e
 		return Node{}, "", fail
 	}
 	m := s.business.material
-	if mode == "client" {
-		credentials, _, err := effectiveBusinessCredentials(m, time.Now())
-		if err != nil {
-			return Node{}, "", fail
-		}
-		for _, c := range m.ClientChains {
-			if c.ID != id || c.EgressID != landingID {
-				continue
-			}
-			peer, entry, _, ok := chainSpeedPeer(s.nodes, m, c, credentials)
-			if ok && pathMTUAllowed(entry.Desired, peer.Address) {
-				return entry, peer.Address, nil
-			}
-		}
-	} else if mode == "server" {
+	if mode == "server" {
 		for _, a := range m.Plan.Accounts {
 			if !a.Account.Plan.Enabled {
 				continue
@@ -142,12 +128,7 @@ func (s *Store) managePathMTU(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	view := pathMTUView{Address: address, Revision: settings.Revision, Online: s.availableRuntime(n, now), Supported: now.Sub(s.pathMTUNodes[n.CertificateID]) < 2*time.Minute}
-	// Count displayed routes sharing this destination, across accounts/modes.
-	for _, c := range s.business.material.ClientChains {
-		if entry, addr, e := s.pathMTUTargetLocked("client", c.ID, c.EgressID); e == nil && entry.ID == n.ID && addr == address {
-			view.Shared++
-		}
-	}
+	// Count displayed routes sharing this destination across accounts.
 	for _, a := range s.business.material.Plan.Accounts {
 		for _, g := range a.Grants {
 			for _, landing := range []string{g.EgressID, g.IPv4EgressID} {

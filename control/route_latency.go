@@ -6,7 +6,6 @@ import (
 	"math"
 	"net/netip"
 	"reflect"
-	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -153,33 +152,6 @@ func (s *Store) latencyTargetsLocked() map[string]latencyTarget {
 			}
 			target := latencyTarget{Certificate: cert, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Transport.Endpoint(peer.Address), EntryID: entry.ID, LandingID: node.ID, Port: peer.Port}
 			out[latencyKey(entry.ID, node.ID, target.Port)] = target
-		}
-	}
-	if s.business == nil || s.business.material.Ownership == nil || s.business.faulted {
-		return out
-	}
-	material := s.business.material
-	credentials, _, err := effectiveBusinessCredentials(material, time.Now())
-	if err != nil {
-		return out
-	}
-	// Client chains own their exact transport independently of server-forwarding
-	// peers. A projected listener and source grant must exist before diagnostics.
-	for _, original := range material.ClientChains {
-		chain, err := material.EffectiveClientChain(original)
-		if err != nil {
-			continue
-		}
-		peer, entry, node, ok := chainSpeedPeer(s.nodes, material, chain, credentials)
-		if !ok || entry.Desired.EntryNetwork == nil || !slices.Contains(entry.Desired.EntryNetwork.SpeedPeers, peer) {
-			continue
-		}
-		target := latencyTarget{Certificate: entry.CertificateID, EntryRevision: entry.Desired.Revision, LandingRevision: node.Desired.Revision, EntryHash: entry.Desired.ConfigSHA256, LandingHash: node.Desired.ConfigSHA256, Address: peer.Address, EntryID: entry.ID, LandingID: node.ID, Port: chain.Port}
-		if chain.Transport == "ipv6-ss2022" {
-			target.Source = peer.Source
-		}
-		if (LatencyProbe{AttemptID: "latency", EntryID: target.EntryID, LandingID: target.LandingID, Address: target.Address, Source: target.Source, Port: target.Port}).Validate() == nil {
-			out[latencyTargetKey(target)] = target
 		}
 	}
 	return out

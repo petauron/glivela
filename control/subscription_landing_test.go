@@ -3,35 +3,19 @@ package control
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	glivela "github.com/petauron/glivela"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestSubscriptionLandingPresentationPreservesPoliciesAndReloads(t *testing.T) {
-	s, _, entryCert, _ := subscriptionFixture(t, false)
-	landingCert := strings.Repeat("b", 64)
-	plan := *artifact(1).Landing
-	plan.Sources[0].PublicAddress = "1.1.1.1"
-	plan.Transport = glivela.PrivateTransport{Protocol: "ss2022", Key: base64.StdEncoding.EncodeToString(make([]byte, 16)), PublicAddress: "9.9.9.9"}
-	desired, err := NewDesired(plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Put(Node{ID: "landing-example", CertificateID: landingCert, Desired: desired, RouteEntries: map[string]RouteEntry{"entry-example": {CertificateID: entryCert, Address: "100.64.0.3"}}}); err != nil {
-		t.Fatal(err)
-	}
-	change := ClientChainChange{ID: "chain-a", AccountID: "account-example", EntryID: "entry-example", EgressID: "landing-example", Name: "Existing chain", Enabled: true, ExpectedRevision: s.business.material.Plan.Accounts[0].Account.DesiredRevision}
-	if _, err := s.ChangeClientChain(context.Background(), change); err != nil {
-		t.Fatal(err)
-	}
+	s, _, _, _ := subscriptionFixture(t, true)
 
 	ctx := context.Background()
 	originalBusiness, _ := os.ReadFile(filepath.Join(filepath.Dir(s.path), "business.json"))

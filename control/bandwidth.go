@@ -162,13 +162,14 @@ func (p SpeedAssignment) validate() error {
 	}
 	return nil
 }
+func publicSpeedAddresses(address, source string) bool {
+	return address != source && (glivela.PublicTransportIPv4(address) && glivela.PublicTransportIPv4(source) || glivela.PublicTransportIPv6(address) && glivela.PublicTransportIPv6(source))
+}
+
 func (s *Store) speedPairLocked(entryID, landingID string, requireFresh bool) (latencyTarget, string, string, error) {
 	fail := errors.New("pair_unavailable")
 	if s.business == nil || s.business.faulted || s.business.material.Ownership == nil {
 		return latencyTarget{}, "", "", fail
-	}
-	if target, certificate, source, err := s.chainSpeedPairLocked(entryID, landingID, requireFresh); err == nil {
-		return target, certificate, source, nil
 	}
 	enabled := false
 	for _, a := range s.business.material.Plan.Accounts {

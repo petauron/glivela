@@ -2,9 +2,12 @@ package control
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
+	"time"
 
 	glivela "github.com/petauron/glivela"
 	"github.com/petauron/glivela/landing"
@@ -203,4 +206,117 @@ func serverTransportUsed(nodes map[string]Node, m glivela.ImportMaterial, r gliv
 		}
 	}
 	return false
+}
+
+func projectServerLandings(nodes map[string]Node, m glivela.ImportMaterial, now time.Time) (bool, error) {
+	if err := validateServerTransportBindings(nodes, m); err != nil {
+		return false, err
+	}
+	_, serverGrants, err := effectiveBusinessCredentials(m, now)
+	if err != nil {
+		return false, err
+	}
+	wanted := map[string][]landing.ClientListener{}
+	for _, resource := range m.ServerTransports {
+		if !serverTransportUsed(nodes, m, resource, serverGrants) {
+			continue
+		}
+		if err := appendServerListeners(nodes, wanted, resource); err != nil {
+			return false, err
+		}
+	}
+	udpListeners, udpSources, err := routeUDPLandings(nodes, m, serverGrants)
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for cert, n := range nodes {
+		if n.Desired.Landing == nil {
+			continue
+		}
+		plan := *n.Desired.Landing
+		plan.Sources = slices.Clone(plan.Sources)
+		for i := range plan.Sources {
+			plan.Sources[i].UDPOverTCP = slices.Contains(udpSources[n.ID], plan.Sources[i].Address)
+		}
+		listeners, err := orderedTransportListeners(plan.ClientListeners, wanted[n.ID])
+		if err != nil {
+			return false, err
+		}
+		plan.ClientListeners = listeners
+		plan.UDPOverTCPListeners = udpListeners[n.ID]
+		if reflect.DeepEqual(plan, *n.Desired.Landing) {
+			continue
+		}
+		if plan.Revision == math.MaxUint64 {
+			return false, errors.New("control: landing revision exhausted")
+		}
+		plan.Revision++
+		desired, err := NewDesired(plan)
+		if err != nil {
+			return false, err
+		}
+		n.Desired, n.Receipt, n.ReportedAt = desired, nil, time.Time{}
+		n.Checks = nil
+		nodes[cert] = n
+		changed = true
+	}
+	return changed, nil
+}
+
+// Datagrams reuse existing SS2022 TCP ownership. This grants neither a new
+// source nor a public UDP socket, and never changes transport keys or ports.
+func routeUDPLandings(nodes map[string]Node, m glivela.ImportMaterial, grants map[string]glivela.RouteGrant) (map[string][]string, map[string][]string, error) {
+	listeners, sources := map[string][]string{}, map[string][]string{}
+	byID := map[string]Node{}
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	for _, g := range grants {
+		if !g.UDP || !g.Enabled || !g.Route.Enabled || m.DeletedRoutes[g.ID] {
+			continue
+		}
+		entry := byID[g.EntryID]
+		if entry.Desired.Entry == nil || entry.Desired.EntryNetwork == nil {
+			return nil, nil, errors.New("control: UDP entry is not enrolled")
+		}
+		keys := []string{g.PeerKey()}
+		if g.IPv4EgressID != "" {
+			keys = append(keys, g.IPv4EgressID)
+		}
+		for _, key := range keys {
+			i := slices.IndexFunc(entry.Desired.Entry.Peers, func(p glivela.RoutePeer) bool { return p.PeerKey() == key })
+			if i < 0 {
+				return nil, nil, errors.New("control: UDP requires an existing peer")
+			}
+			p := entry.Desired.Entry.Peers[i]
+			target := byID[p.EgressID]
+			if p.Transport.Protocol != "ss2022" || target.Desired.Landing == nil {
+				return nil, nil, errors.New("control: UDP-over-TCP requires an enrolled SS2022 landing")
+			}
+			if p.Transport.ClientListenerID != "" {
+				r, ok := configuredServerTransportIn(nodes, m, entry, target, p)
+				if !ok || r.AccountID != g.AccountID {
+					return nil, nil, errors.New("control: UDP listener ownership differs")
+				}
+				listeners[target.ID] = append(listeners[target.ID], r.Listener.ID)
+			} else {
+				if entry.Desired.EntryNetwork.Source == nil || p.Transport != target.Desired.Landing.Transport {
+					return nil, nil, errors.New("control: UDP source transport differs")
+				}
+				address := entry.Desired.EntryNetwork.Source.Address
+				if !slices.ContainsFunc(target.Desired.Landing.Sources, func(s landing.Source) bool { return s.Address == address && s.TCPOnly }) {
+					return nil, nil, errors.New("control: UDP requires an existing exact TCP source")
+				}
+				sources[target.ID] = append(sources[target.ID], address)
+			}
+		}
+	}
+	for _, set := range []map[string][]string{listeners, sources} {
+		for id, values := range set {
+			slices.SortFunc(values, strings.Compare)
+			set[id] = slices.Compact(values)
+		}
+	}
+	return listeners, sources, nil
 }

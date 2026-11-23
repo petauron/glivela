@@ -223,3 +223,83 @@ func migrateNativeServerLandings(nodes map[string]Node, original glivela.ImportM
 	}
 	return nil
 }
+
+// One-way migration helpers retained solely to lift legacy Schema 0 ledgers into
+// ServerTransportVersion 1 without consulting retired client-chain runtime code.
+func chainLanding(nodes map[string]Node, c glivela.ClientChain) (Node, string, error) {
+	if c.Transport == "ipv6-ss2022" {
+		if c.Validate() != nil {
+			return Node{}, "", errors.New("control: invalid IPv6 client chain")
+		}
+		entry, entryExists := nodes[c.EntryCertificateID]
+		target, targetExists := nodes[c.LandingCertificateID]
+		entryFamily := entryExists && entry.Desired.Entry != nil && (c.Relay != nil && c.Relay.Transport == glivela.IPv4RelaySS2022 && entry.Desired.Entry.NativeEgress != glivela.EgressIPv6Only || (c.Relay == nil || c.Relay.Transport != glivela.IPv4RelaySS2022) && entry.Desired.Entry.NativeEgress != glivela.EgressIPv4Only)
+		if entryExists && targetExists && entry.CertificateID == c.EntryCertificateID && target.CertificateID == c.LandingCertificateID && entry.ID == c.EntryID && entryFamily && target.ID == c.EgressID && target.Desired.Landing != nil && (target.Desired.Landing.IPv6OnlyAddress == "" || target.Desired.Landing.IPv6OnlyAddress == c.ServerIPv6) {
+			if c.Relay != nil {
+				if _, err := chainRelay(nodes, c); err != nil {
+					return Node{}, "", err
+				}
+			}
+			return target, c.SourceIPv6, nil
+		}
+		return Node{}, "", errors.New("control: client chain requires enrolled entry and landing identities")
+	}
+	if c.Transport != "" && c.Transport != glivela.IPv4ClientSS2022 {
+		return Node{}, "", errors.New("control: unsupported client chain transport")
+	}
+	for _, n := range nodes {
+		if n.ID != c.EgressID || n.Desired.Landing == nil {
+			continue
+		}
+		p := n.Desired.Landing
+		member, ok := n.RouteEntries[c.EntryID]
+		entry, known := nodes[member.CertificateID]
+		if !ok || !known || entry.ID != c.EntryID || entry.Desired.Entry == nil || entry.Desired.Entry.NativeEgress == glivela.EgressIPv6Only || p.Transport.PublicAddress == "" {
+			break
+		}
+		if c.PrivateLink != nil {
+			if c.PrivateLink.Validate() != nil {
+				break
+			}
+			return n, c.PrivateLink.Source, nil
+		}
+		for _, source := range p.Sources {
+			if source.Address == member.Address && glivela.PublicTransportIPv4(source.PublicAddress) {
+				return n, source.PublicAddress, nil
+			}
+		}
+	}
+	return Node{}, "", errors.New("control: client chain requires an enrolled public landing source")
+}
+
+func chainRelay(nodes map[string]Node, c glivela.ClientChain) (Node, error) {
+	if c.Relay == nil {
+		return Node{}, errors.New("control: client relay missing")
+	}
+	r := c.Relay
+	node, ok := nodes[r.CertificateID]
+	if !ok || node.CertificateID != r.CertificateID || node.ID != r.NodeID || node.Desired.Landing == nil || node.Desired.Landing.EgressIP != c.SourceIPv6 {
+		return Node{}, errors.New("control: client relay requires an enrolled landing with matching IPv6 egress")
+	}
+	plan := node.Desired.Landing
+	if r.Transport == glivela.IPv4RelaySS2022 && (plan.IPv6OnlyAddress != "" || plan.Transport.PublicAddress != r.ServerIPv4) || r.Transport == "" && plan.IPv6OnlyAddress != "" && plan.IPv6OnlyAddress != r.ServerIPv6 {
+		return Node{}, errors.New("control: client relay listener address differs from enrollment")
+	}
+	return node, nil
+}
+
+func clientListener(c glivela.ClientChain, source string) landing.ClientListener {
+	result := landing.ClientListener{EgressIP: c.EgressIP, Shared: c.Shared, ID: c.ID, Port: c.Port, Key: c.Key, Source: source, Transport: c.Transport, Address: c.ServerIPv6}
+	if c.PrivateLink != nil {
+		result.Address, result.Interface = c.PrivateLink.Address, c.PrivateLink.Interface
+	}
+	return result
+}
+
+func clientRelayListener(c glivela.ClientChain) landing.ClientListener {
+	r := c.Relay
+	if r.Transport == glivela.IPv4RelaySS2022 {
+		return landing.ClientListener{ID: c.ID, Port: r.Port, Key: r.Key, Source: r.SourceIPv4, Transport: r.Transport}
+	}
+	return landing.ClientListener{ID: c.ID, Port: r.Port, Key: r.Key, Source: r.SourceIPv6, Transport: "ipv6-ss2022", Address: r.ServerIPv6}
+}
