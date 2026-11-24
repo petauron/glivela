@@ -27,12 +27,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          for attempt in $(seq 1 180); do
+          for attempt in $(seq 1 360); do
             result=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$GITHUB_SHA&per_page=100" \
               --jq '.workflow_runs | sort_by(.run_number) | last | if . == null then "waiting" elif .status == "completed" then .conclusion else "waiting" end')
             case "$result" in
               success) exit 0 ;;
-              waiting) sleep 10 ;;
+              waiting) sleep 5 ;;
               *) echo "Source CI did not succeed: $result" >&2; exit 1 ;;
             esac
           done
@@ -84,16 +84,25 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/legacy-export/go.sum
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.19.0'
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      - name: Cache verified pinned upstream release inputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/glivela-upstream-cache
+          key: glivela-upstream-v1-${{ hashFiles('scripts/build-native-release.sh') }}
       - name: Install reviewed management UI dependencies
         run: npm ci --prefix ui
       - name: Build distributions from exact checked release source
         env:
           GH_TOKEN: ${{ github.token }}
+          GLIVELA_UPSTREAM_CACHE_DIR: ${{ runner.temp }}/glivela-upstream-cache
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
           RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
         run: |

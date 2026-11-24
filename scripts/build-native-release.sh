@@ -17,7 +17,52 @@ printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
 commit=$(git rev-parse HEAD)
 epoch=$(git show -s --format=%ct HEAD)
 stage=$(mktemp -d)
-trap 'test -n "$stage" && rm -rf -- "$stage"' EXIT HUP INT TERM
+cleanup_stage() {
+  trap - EXIT HUP INT TERM
+  if [ -n "$stage" ]; then
+    for pid_file in "$stage"/worker-*.pid; do
+      if [ -f "$pid_file" ]; then
+        pid=$(cat "$pid_file")
+        kill "$pid" 2>/dev/null || true
+      fi
+    done
+    wait 2>/dev/null || true
+    rm -rf -- "$stage"
+  fi
+}
+trap cleanup_stage EXIT
+trap 'cleanup_stage; exit 129' HUP
+trap 'cleanup_stage; exit 130' INT
+trap 'cleanup_stage; exit 143' TERM
+
+upstream_cache="${GLIVELA_UPSTREAM_CACHE_DIR:-}"
+if [ -n "$upstream_cache" ]; then
+  mkdir -p "$upstream_cache"
+  upstream_cache=$(CDPATH='' cd -- "$upstream_cache" && pwd)
+fi
+
+fetch_verified_asset() {
+  _repo="$1"
+  _tag="$2"
+  _asset="$3"
+  _digest="$4"
+  _dest="$5"
+  if [ -n "$upstream_cache" ]; then
+    _cached="$upstream_cache/${_digest}-${_asset}"
+    if [ -f "$_cached" ] && printf '%s  %s\n' "$_digest" "$_cached" | sha256sum --check --status 2>/dev/null; then
+      cp "$_cached" "$_dest"
+      printf '%s  %s\n' "$_digest" "$_dest" | sha256sum --check --status
+      return 0
+    fi
+  fi
+  gh release download "$_tag" --repo "$_repo" --pattern "$_asset" --output "$_dest"
+  printf '%s  %s\n' "$_digest" "$_dest" | sha256sum --check --status
+  if [ -n "$upstream_cache" ]; then
+    _tmp_cache=$(mktemp "$upstream_cache/.${_digest}-${_asset}.XXXXXX")
+    cp "$_dest" "$_tmp_cache"
+    mv -f "$_tmp_cache" "$_cached"
+  fi
+}
 
 # Reuse the reviewed UI toolchain/lockfile. Its bundle is served by Glivela's
 # own management listener; no platform business API or remote UI fetch.
@@ -26,7 +71,10 @@ npm run build --prefix ui
 test -s "ui/dist/ui-glivela-$version.js"
 test -s "ui/dist/ui-glivela-$version.css"
 
-for arch in amd64 arm64; do
+go_root=$(go env GOROOT)
+
+build_arch() {
+  arch="$1"
   case "$arch" in
     amd64)
       asset=Xray-linux-64.zip
@@ -38,24 +86,24 @@ for arch in amd64 arm64; do
       digest=1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d
       iperf_asset=iperf3-arm64v8
       iperf_digest=34364466812357fe021a8647cb433c8006b0360e3b690ecda470a979a2601031 ;;
+    *)
+      echo "Unsupported architecture: $arch" >&2
+      exit 2 ;;
   esac
   bundle="$stage/$arch"
-  mkdir "$bundle"
+  mkdir -p "$bundle" "$stage/xdg-data-$arch" "$stage/xdg-cache-$arch"
   # Resolve the exact official asset through GitHub's API after browser URL
   # downloads returned HTTP 504; the pinned bytes are unchanged.
-  gh release download v26.10.31 --repo XTLS/Xray-core \
-    --pattern "$asset" --output "$stage/$asset"
-  printf '%s  %s\n' "$digest" "$stage/$asset" | sha256sum --check --status
+  fetch_verified_asset XTLS/Xray-core v26.10.31 "$asset" "$digest" "$stage/$asset"
   unzip -p "$stage/$asset" xray > "$bundle/xray"
   unzip -p "$stage/$asset" LICENSE > "$bundle/LICENSE.xray"
   test -s "$bundle/xray"
   test -s "$bundle/LICENSE.xray"
   # The supplier build is separately pinned and attested; it is never fetched
   # by a running node and the attestation is not a reproducible-build claim.
-  gh release download 3.22 --repo userdocs/iperf3-static \
-    --pattern "$iperf_asset" --output "$bundle/iperf3"
-  printf '%s  %s\n' "$iperf_digest" "$bundle/iperf3" | sha256sum --check --status
-  gh attestation verify "$bundle/iperf3" --repo userdocs/iperf3-static \
+  fetch_verified_asset userdocs/iperf3-static 3.22 "$iperf_asset" "$iperf_digest" "$bundle/iperf3"
+  XDG_DATA_HOME="$stage/xdg-data-$arch" XDG_CACHE_HOME="$stage/xdg-cache-$arch" \
+    gh attestation verify "$bundle/iperf3" --repo userdocs/iperf3-static \
     --signer-workflow userdocs/iperf3-static/.github/workflows/ci-linux-crossbuild.yml \
     --source-digest 7d71626b4364b6cc95b6611fa0d66a401d53fd07 --deny-self-hosted-runners
   cp licenses/iperf3-static.txt "$bundle/LICENSE.iperf3"
@@ -89,7 +137,7 @@ for arch in amd64 arm64; do
   (
     cd tools/legacy-export
     GOWORK=off go list -mod=readonly -m -f '{{if and .Dir (not .Main)}}{{.Path}} {{.Dir}}{{end}}' all
-  ) > "$stage/offline-modules"
+  ) > "$stage/offline-modules-$arch"
   while read -r module directory; do
     if [ -z "$module" ] || [ -z "$directory" ]; then continue; fi
     found_license=false
@@ -101,8 +149,7 @@ for arch in amd64 arm64; do
       fi
     done
     test "$found_license" = true
-  done < "$stage/offline-modules" > "$offline/THIRD-PARTY-LICENSES"
-  go_root=$(go env GOROOT)
+  done < "$stage/offline-modules-$arch" > "$offline/THIRD-PARTY-LICENSES"
   printf '\nGo standard library / LICENSE\n\n' >> "$offline/THIRD-PARTY-LICENSES"
   cat "$go_root/LICENSE" >> "$offline/THIRD-PARTY-LICENSES"
   test -s "$offline/THIRD-PARTY-LICENSES"
@@ -113,6 +160,29 @@ for arch in amd64 arm64; do
   tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
     --format=gnu -C "$offline" -cf "$stage/offline-$arch.tar" LICENSE.glivela THIRD-PARTY-LICENSES glivela-legacy-export migration.json
   gzip -n -c "$stage/offline-$arch.tar" > "$output/glivela-legacy-export-$version-linux-$arch.tar.gz"
+}
+
+for arch in amd64 arm64; do
+  (build_arch "$arch") > "$stage/build-$arch.log" 2>&1 &
+  printf '%s\n' "$!" > "$stage/worker-$arch.pid"
 done
+
+failed=0
+for arch in amd64 arm64; do
+  pid=$(cat "$stage/worker-$arch.pid")
+  worker_status=0
+  wait "$pid" || worker_status=$?
+  rm -f "$stage/worker-$arch.pid"
+  if [ -s "$stage/build-$arch.log" ]; then
+    echo "=== build-native-release ($arch) ==="
+    cat "$stage/build-$arch.log"
+  fi
+  if [ "$worker_status" -ne 0 ]; then
+    echo "Native release build failed for $arch with exit status $worker_status" >&2
+    failed=1
+  fi
+done
+test "$failed" -eq 0
+
 cd "$output"
-sha256sum ./*.tar.gz > SHA256SUMS
+LC_ALL=C sha256sum ./*.tar.gz > SHA256SUMS

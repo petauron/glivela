@@ -44,9 +44,15 @@ identity, program storage, subscription origin or ledger is reinitialized.
 ## Required checks
 
 Preserve the existing CI jobs: backend verification, UI/dependency checks, native
-runtime distributions and official-core configuration acceptance. Preserve code
-scanning and required branch gates. CI uses loopback or isolated synthetic
-fixtures, never production routes.
+runtime distributions and official-core configuration acceptance. Content-verified
+version-only Release Please PRs (modifying only `.release-please-manifest.json`,
+`CHANGELOG.md`, and the three version fields in `ui/package.json` /
+`ui/package-lock.json` with zero other edits) run the scoped UI check and
+fail-closed `CI / gate`, while any extra file or non-version edit fails closed
+to the full CI suite; after merge, `push` to `main` reuses verified exact-tree
+PR CI results before `publish` performs its double reproducible build and SLSA
+attestation. GitHub Code Scanning Default Setup remains active asynchronously.
+CI uses loopback or isolated synthetic fixtures, never production routes.
 
 CI retains bounded build/dependency caches and no downloadable Actions artifacts.
 Docker build records remain disabled. Source CI success does not deploy anything.
