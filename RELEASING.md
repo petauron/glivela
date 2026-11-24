@@ -63,9 +63,11 @@ dependency. Core changes require reviewed architecture digests and matching
 existing acceptance inputs.
 
 Build twice and compare outputs. Stage distribution archives, image metadata and
-checksums in the draft GitHub Release, download and verify the assets, then
-publish the draft. A retry may reuse an exact verified draft asset; it must not
-replace a mismatched file or modify a published release.
+checksums in the draft GitHub Release, download and verify the assets, emit SLSA
+build provenance attestations (`actions/attest`) for the distribution archives,
+image metadata and multi-platform controller image, then publish the draft. A
+retry may reuse an exact verified draft asset; it must not replace a mismatched
+file or modify a published release.
 
 The controller image at `ghcr.io/petauron/glivela` must match the source SHA and
 both supported platforms. Use its verified immutable digest in the signed catalog.
@@ -74,10 +76,16 @@ not moving an image tag or claiming that a skipped publish job succeeded.
 
 ## Catalog and installed applications
 
-A Glivela source release does not publish the signed application catalog or
-upgrade an installed controller/node. Those are separate authorized operations.
-Build the independent UI from the immutable Glivela source and its lockfile;
-preserve catalog integrity, signing and monotonic revision checks.
+After the source release publishes on protected `main`, the non-blocking
+`notify-catalog` job mints a short-lived `petauron-nova` installation token
+scoped solely to `petauron/catalog` (`contents: write`) and sends a zero-payload
+`repository_dispatch` (`catalog-reconcile`) wakeup signal. That signal carries
+no download URLs, digests or signing authority: `petauron/catalog` independently
+discovers the release, verifies its protected source commit, CI, SLSA
+attestations and `iperf3`/runtime contracts, mirrors the native archives, builds
+the independent UI from the exact verified commit and lockfile, and signs the
+monotonic `catalog-rN` revision under its own protected environment. Upgrading
+an installed controller or node remains a separate operator action.
 
 For an authorized upgrade, protect the necessary private state and installation
 identity, upgrade one applicable pair, and verify actual client access and

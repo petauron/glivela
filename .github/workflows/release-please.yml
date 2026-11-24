@@ -70,6 +70,9 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     env:
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
     steps:
@@ -126,6 +129,31 @@ jobs:
           done
           cd "$RUNNER_TEMP/native-readback"
           sha256sum --check SHA256SUMS
+      - name: Prepare provenance attestation inputs
+        id: attestation_inputs
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: |
+          version=$(jq -er '.version' "$RUNNER_TEMP/native-release/glivela-controller-image.json")
+          commit=$(jq -er '.commit' "$RUNNER_TEMP/native-release/glivela-controller-image.json")
+          digest=$(jq -er '.reference | split("@")[1] | select(test("^sha256:[a-f0-9]{64}$"))' "$RUNNER_TEMP/native-release/glivela-controller-image.json")
+          printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          test "$RELEASE_TAG" = "v$version"
+          test "$commit" = "$RELEASE_SHA"
+          sed -E 's|^([a-f0-9]{64} [ *])\./|\1|' "$RUNNER_TEMP/native-release/SHA256SUMS" > "$RUNNER_TEMP/attest-checksums.txt"
+          test -s "$RUNNER_TEMP/attest-checksums.txt"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Attest distribution archive provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/attest-checksums.txt
+      - name: Attest controller image provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.attestation_inputs.outputs.digest }}
+          push-to-registry: true
       - name: Publish the prepared draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -170,3 +198,34 @@ jobs:
           token: ${{ steps.release_app_token.outputs.token }}
           target-branch: main
           skip-github-release: true
+
+  notify-catalog:
+    name: Wake up official catalog reconciler
+    needs: [prepare, publish]
+    if: >-
+      !cancelled() &&
+      github.repository == 'petauron/glivela' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.publish.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Mint short-lived catalog wakeup token
+        id: catalog_token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: petauron
+          repositories: catalog
+          permission-contents: write
+      - name: Dispatch zero-payload catalog reconcile signal
+        env:
+          GH_TOKEN: ${{ steps.catalog_token.outputs.token }}
+        run: |
+          gh api --method POST repos/petauron/catalog/dispatches \
+            -f event_type=catalog-reconcile
