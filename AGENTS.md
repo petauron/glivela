@@ -25,8 +25,13 @@
   bump versions, move tags, or add a second tag-triggered release path.
 - Required checks must represent real checks on the exact version PR head SHA.
   A `workflow_dispatch` run cannot substitute for required PR workflow checks.
-  Do not automate approval, fabricate checks or bypass protection; metadata
-  validation is not a substitute for CI or CodeQL.
+  Do not automate approval, fabricate checks or bypass protection. Content-verified
+  version-only Release Please PRs (modifying only `.release-please-manifest.json`,
+  `CHANGELOG.md`, `ui/package.json`, and `ui/package-lock.json` with strictly
+  increasing SemVer and zero non-version changes in the UI manifest/lockfile) may
+  run the scoped `ui` check and fail-closed `CI / gate`, while any extra file or
+  non-version change fails closed to the full CI suite; CodeQL Default Setup stays
+  active asynchronously.
 - Publish only from an immutable, checked commit on protected `main`. Use the
   Release Please output SHA/tag throughout checkout, build, provenance and
   publication; fail closed on identity/version mismatches or failed checks.

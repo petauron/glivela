@@ -42,56 +42,33 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -eu
-          classify_files() {
-            files="$1"
-            [ -n "$files" ] || { go=true; ui=true; native=true; selection=true; return; }
-            go=false
-            ui=false
-            native=false
-            selection=false
-            old_ifs=$IFS
-            nl=$(printf '\nx'); nl=${nl%x}; IFS=$nl
-            for path in $files; do
-              [ -n "$path" ] || continue
-              case "$path" in
-                LICENSE*|NOTICE*|*THIRD_PARTY*|*LICENSES*)
-                  go=true; ui=true; native=true; selection=true ;;
-                *.md|docs/*|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE.md)
-                  ;;
-                ui/*)
-                  ui=true; native=true ;;
-                *)
-                  go=true; ui=true; native=true; selection=true ;;
+          parse_scope() {
+            while IFS='=' read -r key value; do
+              case "$key" in
+                go) go="$value" ;;
+                ui) ui="$value" ;;
+                native) native="$value" ;;
+                selection) selection="$value" ;;
               esac
-            done
-            IFS=$old_ifs
+            done <<EOF
+          $1
+          EOF
           }
           go=true; ui=true; native=true; selection=true
           if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
-            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-            classify_files "$changed"
+            scope_out=$(sh scripts/classify-ci-changes.sh --git "$BASE_SHA" "$HEAD_SHA")
+            parse_scope "$scope_out"
           elif [ "$EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ] && [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-            changed=$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")
-            must_run_main=false
-            old_ifs=$IFS
-            nl=$(printf '\nx'); nl=${nl%x}; IFS=$nl
-            for path in $changed; do
-              case "$path" in
-                .release-please-manifest.json) must_run_main=true ;;
-              esac
-            done
-            IFS=$old_ifs
-            if [ "$must_run_main" = "false" ]; then
-              classify_files "$changed"
-              if [ "$go" = "true" ] || [ "$ui" = "true" ] || [ "$native" = "true" ] || [ "$selection" = "true" ]; then
-                main_tree=$(git rev-parse "${GITHUB_SHA}^{tree}")
-                pr_head=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.merged_at != null and .merge_commit_sha == "'"$GITHUB_SHA"'" and .base.ref == "main" and .head.repo.full_name == "'"$GITHUB_REPOSITORY"'")] | if length == 1 then .[0].head.sha else empty end' 2>/dev/null || true)
-                if [ -n "$pr_head" ]; then
-                  pr_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$pr_head" --jq '.tree.sha // empty' 2>/dev/null || true)
-                  pr_ci=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$pr_head&per_page=100" --jq '.workflow_runs | sort_by(.run_number) | last | if . != null and .head_sha == "'"$pr_head"'" and .head_repository.full_name == "'"$GITHUB_REPOSITORY"'" and .status == "completed" and .conclusion == "success" then "ok" else empty end' 2>/dev/null || true)
-                  if [ "$pr_tree" = "$main_tree" ] && [ "$pr_ci" = "ok" ]; then
-                    go=false; ui=false; native=false; selection=false
-                  fi
+            scope_out=$(sh scripts/classify-ci-changes.sh --git "$BEFORE_SHA" "$GITHUB_SHA")
+            parse_scope "$scope_out"
+            if [ "$go" = "true" ] || [ "$ui" = "true" ] || [ "$native" = "true" ] || [ "$selection" = "true" ]; then
+              main_tree=$(git rev-parse "${GITHUB_SHA}^{tree}")
+              pr_head=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.merged_at != null and .merge_commit_sha == "'"$GITHUB_SHA"'" and .base.ref == "main" and .head.repo.full_name == "'"$GITHUB_REPOSITORY"'")] | if length == 1 then .[0].head.sha else empty end' 2>/dev/null || true)
+              if [ -n "$pr_head" ]; then
+                pr_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$pr_head" --jq '.tree.sha // empty' 2>/dev/null || true)
+                pr_ci=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$pr_head&per_page=100" --jq '.workflow_runs | sort_by(.run_number) | last | if . != null and .head_sha == "'"$pr_head"'" and .head_repository.full_name == "'"$GITHUB_REPOSITORY"'" and .status == "completed" and .conclusion == "success" then "ok" else empty end' 2>/dev/null || true)
+                if [ "$pr_tree" = "$main_tree" ] && [ "$pr_ci" = "ok" ]; then
+                  go=false; ui=false; native=false; selection=false
                 fi
               fi
             fi
@@ -114,16 +91,25 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/legacy-export/go.sum
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.19.0'
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      - name: Cache verified pinned upstream release inputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/glivela-upstream-cache
+          key: glivela-upstream-v1-${{ hashFiles('scripts/build-native-release.sh') }}
       - name: Install reviewed management UI dependencies
         run: npm ci --prefix ui
       - name: Build twice and compare immutable distributions
         env:
           GH_TOKEN: ${{ github.token }}
+          GLIVELA_UPSTREAM_CACHE_DIR: ${{ runner.temp }}/glivela-upstream-cache
         run: |
           sh scripts/build-native-release.sh "$RUNNER_TEMP/native-first"
           sh scripts/build-native-release.sh "$RUNNER_TEMP/native-second"
@@ -166,22 +152,83 @@ jobs:
           wait "$server"
       - name: Exercise actual landing DNS policy in isolated namespace
         run: |
+          set -eu
           go test -c -o "$RUNNER_TEMP/glivela-dns.test" ./landing
-          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
-          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
-          sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=dual GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
-          sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDP$' -test.v -test.timeout 50s
-          for listener in main shared ipv6; do
-            for family in ipv4 ipv6; do
-              sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER="$listener" GLIVELA_UDP_EGRESS_FAMILY="$family" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
+          pids=""
+          run_case() {
+            name="$1"; shift
+            log="$RUNNER_TEMP/landing-$name.log"
+            "$@" > "$log" 2>&1 &
+            pids="$pids $!:$name:$log"
+          }
+          wait_cases() {
+            failed=0
+            for entry in $pids; do
+              pid=${entry%%:*}
+              rest=${entry#*:}
+              name=${rest%%:*}
+              log=${rest#*:}
+              status=0
+              wait "$pid" || status=$?
+              echo "=== $name ==="
+              cat "$log"
+              rm -f "$log"
+              if [ "$status" -ne 0 ]; then
+                echo "$name failed with exit status $status" >&2
+                failed=1
+              fi
             done
-          done
+            pids=""
+            test "$failed" -eq 0
+          }
+          run_case dns-dual sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=dual GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
+          run_case dns-ipv6 sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_LANDING_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
+          run_case dns-ipv4 sudo env GLIVELA_LANDING_DNS_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingDNSAndTLS$' -test.v -test.timeout 45s
+          run_case udp-direct sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDP$' -test.v -test.timeout 50s
+          wait_cases
+          run_case udp-tcp-main-ipv4 sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER=main GLIVELA_UDP_EGRESS_FAMILY=ipv4 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
+          run_case udp-tcp-main-ipv6 sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER=main GLIVELA_UDP_EGRESS_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
+          run_case udp-tcp-shared-ipv4 sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER=shared GLIVELA_UDP_EGRESS_FAMILY=ipv4 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
+          run_case udp-tcp-shared-ipv6 sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER=shared GLIVELA_UDP_EGRESS_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
+          wait_cases
+          run_case udp-tcp-ipv6-ipv4 sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER=ipv6 GLIVELA_UDP_EGRESS_FAMILY=ipv4 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
+          run_case udp-tcp-ipv6-ipv6 sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER=ipv6 GLIVELA_UDP_EGRESS_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
+          wait_cases
       - name: Verify actual entry account authentication in isolated namespace
         run: |
+          set -eu
           go test -c -o "$RUNNER_TEMP/glivela-entry-auth.test" ./control
-          sudo env GLIVELA_ENTRY_AUTH_TEST=1 GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net --mount --propagation private "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestRenderedEntryAccountAuthentication$' -test.v -test.timeout 100s
-          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestEntry(StartupPeerIsolation|DriverDirectReadinessWithUnavailableLanding)$' -test.v -test.timeout 45s
-          sudo env GLIVELA_TEST_XRAY="$RUNNER_TEMP/native-runtime/xray" GLIVELA_TEST_TRANSPORT_FENCE=1 unshare --net sh -c 'ip link set lo up; exec "$1" -test.run "^TestSS2022ProbeWithOfficialCore$" -test.v -test.timeout 45s' sh "$RUNNER_TEMP/glivela-entry-auth.test"
+          pids=""
+          run_case() {
+            name="$1"; shift
+            log="$RUNNER_TEMP/entry-$name.log"
+            "$@" > "$log" 2>&1 &
+            pids="$pids $!:$name:$log"
+          }
+          wait_cases() {
+            failed=0
+            for entry in $pids; do
+              pid=${entry%%:*}
+              rest=${entry#*:}
+              name=${rest%%:*}
+              log=${rest#*:}
+              status=0
+              wait "$pid" || status=$?
+              echo "=== $name ==="
+              cat "$log"
+              rm -f "$log"
+              if [ "$status" -ne 0 ]; then
+                echo "$name failed with exit status $status" >&2
+                failed=1
+              fi
+            done
+            pids=""
+            test "$failed" -eq 0
+          }
+          run_case entry-auth sudo env GLIVELA_ENTRY_AUTH_TEST=1 GLIVELA_DISTRIBUTION="$RUNNER_TEMP/native-runtime" GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net --mount --propagation private "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestRenderedEntryAccountAuthentication$' -test.v -test.timeout 100s
+          run_case entry-firewall sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-entry-auth.test" -test.run '^TestEntry(StartupPeerIsolation|DriverDirectReadinessWithUnavailableLanding)$' -test.v -test.timeout 45s
+          run_case ss2022-probe sudo env GLIVELA_TEST_XRAY="$RUNNER_TEMP/native-runtime/xray" GLIVELA_TEST_TRANSPORT_FENCE=1 unshare --net sh -c 'ip link set lo up; exec "$1" -test.run "^TestSS2022ProbeWithOfficialCore$" -test.v -test.timeout 45s' sh "$RUNNER_TEMP/glivela-entry-auth.test"
+          wait_cases
   selection-runtime:
     name: Reviewed target-selection runtime
     needs: changes
@@ -217,8 +264,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/legacy-export/go.sum
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
+      - name: Verify CI and release workflow policies
+        run: sh scripts/test-ci-workflows.sh
       - name: Vet
         run: go vet ./...
       - name: Verify isolated offline migration tool
@@ -236,12 +288,41 @@ jobs:
           fi
       - name: Verify native firewall in isolated network namespace
         run: |
+          set -eu
           sh scripts/install-ci-runtime-tools.sh nftables iproute2
           go test -c -o "$RUNNER_TEMP/glivela-landing.test" ./landing
-          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelFirewallLifecycle$' -test.v -test.timeout 30s
-          sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelEntryGateLifecycle$' -test.v -test.timeout 45s
           go test -c -o "$RUNNER_TEMP/glivela-entry-control.test" ./control
-          sudo env GLIVELA_ENTRY_RUNTIME_KERNEL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-entry-control.test" -test.run '^TestKernelEntryDriverBlockedPeerAndNodeResume$' -test.v -test.timeout 45s
+          pids=""
+          run_case() {
+            name="$1"; shift
+            log="$RUNNER_TEMP/fw-$name.log"
+            "$@" > "$log" 2>&1 &
+            pids="$pids $!:$name:$log"
+          }
+          wait_cases() {
+            failed=0
+            for entry in $pids; do
+              pid=${entry%%:*}
+              rest=${entry#*:}
+              name=${rest%%:*}
+              log=${rest#*:}
+              status=0
+              wait "$pid" || status=$?
+              echo "=== $name ==="
+              cat "$log"
+              rm -f "$log"
+              if [ "$status" -ne 0 ]; then
+                echo "$name failed with exit status $status" >&2
+                failed=1
+              fi
+            done
+            pids=""
+            test "$failed" -eq 0
+          }
+          run_case firewall-lifecycle sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelFirewallLifecycle$' -test.v -test.timeout 30s
+          run_case entry-gate-lifecycle sudo env GLIVELA_KERNEL_FIREWALL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-landing.test" -test.run '^TestKernelEntryGateLifecycle$' -test.v -test.timeout 45s
+          run_case entry-driver-blocked sudo env GLIVELA_ENTRY_RUNTIME_KERNEL_TEST=1 unshare --net "$RUNNER_TEMP/glivela-entry-control.test" -test.run '^TestKernelEntryDriverBlockedPeerAndNodeResume$' -test.v -test.timeout 45s
+          wait_cases
       - name: Run complete tests with race detection
         run: go test -race ./... -count=1
   ui:
@@ -303,11 +384,11 @@ jobs:
           check_job() {
             enabled="$1"
             result="$2"
-            if [ "$enabled" = "true" ]; then
-              test "$result" = success
-            else
-              test "$result" = skipped
-            fi
+            case "$enabled" in
+              true) test "$result" = success ;;
+              false) test "$result" = skipped ;;
+              *) echo "Unexpected classifier flag: ${enabled:-<empty>}" >&2; exit 1 ;;
+            esac
           }
           check_job "$NATIVE_ENABLED" "$NATIVE_RESULT"
           check_job "$SELECTION_ENABLED" "$SELECTION_RESULT"
