@@ -12,7 +12,7 @@ required checks.
 The `release-pr` job in `.github/workflows/release-please.yml` mints a
 short-lived, repository-scoped installation token from the minimal-permission
 organization GitHub App (`petauron-nova`: `contents: write` and
-`pull-requests: write`, configured via organization variable `RELEASE_APP_ID`
+`pull-requests: write`, configured via organization variable `RELEASE_APP_CLIENT_ID`
 and organization secret `RELEASE_APP_PRIVATE_KEY`). Because the version PR is
 created and updated by `petauron-nova[bot]` rather than `GITHUB_TOKEN`, GitHub
 automatically triggers the existing `pull_request` CI and CodeQL checks without

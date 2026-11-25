@@ -14,7 +14,7 @@
 - Use Release Please v5, pinned to a reviewed full commit SHA. Version PR
   creation/updates use a short-lived, repository-scoped installation token from
   the minimal-permission organization release GitHub App (`petauron-nova`:
-  `contents: write` and `pull-requests: write` via `RELEASE_APP_ID` and
+  `contents: write` and `pull-requests: write` via `RELEASE_APP_CLIENT_ID` and
   `RELEASE_APP_PRIVATE_KEY`) so normal `pull_request` CI and CodeQL checks run
   automatically; do not add a personal PAT. Actual CI and release publication
   continue using the built-in `GITHUB_TOKEN` and minimal permissions; never
