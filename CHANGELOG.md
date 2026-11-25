@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/petauron/glivela/compare/v0.1.1...v0.2.0) (2026-11-25)
+
+
+### Features
+
+* retire client-side chains across control plane, subscriptions, and UI ([#226](https://github.com/petauron/glivela/issues/226)) ([44686e5](https://github.com/petauron/glivela/commit/44686e52dfbaeda17a0f0b0a3b8bab76d46df57a))
+
 ## [0.1.1](https://github.com/petauron/glivela/compare/v0.1.0...v0.1.1) (2026-11-22)
 
 
