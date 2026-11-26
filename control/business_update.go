@@ -12,7 +12,6 @@ import (
 	"reflect"
 	"slices"
 	"time"
-	"unsafe"
 
 	glivela "github.com/petauron/glivela"
 )
@@ -112,9 +111,11 @@ func (s *Store) saveOwnedBusiness(next glivela.ImportMaterial, allowArchiveCache
 		business.faulted = true
 		return errors.New("control: owned business storage changed; explicit recovery required")
 	}
-	sameSourceSlice := len(next.RetainedSource) == len(business.material.RetainedSource) &&
-		unsafe.SliceData(next.RetainedSource) == unsafe.SliceData(business.material.RetainedSource)
-	cacheFresh := allowArchiveCache && sameSourceSlice &&
+	if sha256.Sum256(next.RetainedSource) != business.sourceSHA256 || !bytes.Equal(next.RetainedSource, business.material.RetainedSource) {
+		business.faulted = true
+		return errors.New("control: immutable business archive changed; explicit offline operation required")
+	}
+	cacheFresh := allowArchiveCache &&
 		business.archiveSHA256 != "" &&
 		!business.archiveVerifiedAt.IsZero() &&
 		!now.Before(business.archiveVerifiedAt) &&
@@ -135,10 +136,6 @@ func (s *Store) saveOwnedBusiness(next glivela.ImportMaterial, allowArchiveCache
 		}
 	}
 	if !usedCache {
-		if sha256.Sum256(next.RetainedSource) != business.sourceSHA256 || !bytes.Equal(next.RetainedSource, business.material.RetainedSource) {
-			business.faulted = true
-			return errors.New("control: immutable business archive changed; explicit offline operation required")
-		}
 		var prepErr error
 		archiveSHA, legacy, verifiedStamp, prepErr = prepareOwnedLedgerArchive(directory, disk, business.snapshotID)
 		if prepErr != nil {

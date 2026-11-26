@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
+
+	glivela "github.com/petauron/glivela"
+	"github.com/petauron/glivela/landing"
 )
 
 func TestSteadyStateExchangeCoalescesNodesCommitsAndPreservesTransitions(t *testing.T) {
@@ -154,5 +159,156 @@ func TestSteadyStateExchangeCoalescesNodesCommitsAndPreservesTransitions(t *test
 	}
 	if reopenedCleared.nodes[entryCert].Receipt != nil {
 		t.Fatal("cleared receipt not persisted on disk")
+	}
+}
+
+func TestSteadyStateLandingCoalescingAndEntryNilHealthCommits(t *testing.T) {
+	s, d, entryCert, landingCert := subscriptionFixture(t, true)
+	landingDesired := s.nodes[landingCert].Desired
+
+	// Landing steady-state heartbeats coalesce, while ManagementIdentity changes commit immediately.
+	landingObs := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: landingDesired.Revision, ConfigSHA256: landingDesired.ConfigSHA256, RuntimeReady: true}}
+	if _, err := s.Exchange(context.Background(), landingCert, &landingObs); err != nil {
+		t.Fatal(err)
+	}
+	if s.nodesDirty {
+		t.Fatal("initial landing report did not commit immediately")
+	}
+	nodesBefore, err := os.ReadFile(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Exchange(context.Background(), landingCert, &landingObs); err != nil {
+		t.Fatal(err)
+	}
+	if !s.nodesDirty {
+		t.Fatal("steady-state landing heartbeat unexpectedly committed")
+	}
+	nodesAfter, err := os.ReadFile(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(nodesBefore, nodesAfter) {
+		t.Fatal("steady-state landing heartbeat rewrote nodes.json")
+	}
+	withIdentity := landingObs.clone()
+	withIdentity.ManagementIdentity = &landing.PeerIdentity{ID: "landing-mesh", PublicKey: "nodekey:landing-mesh", Address: landingDesired.Landing.Address}
+	if _, err := s.Exchange(context.Background(), landingCert, &withIdentity); err != nil {
+		t.Fatal(err)
+	}
+	if s.nodesDirty {
+		t.Fatal("landing management identity change did not commit immediately")
+	}
+	reopened, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.nodes[landingCert].Receipt == nil || reopened.nodes[landingCert].Receipt.ManagementIdentity == nil || *reopened.nodes[landingCert].Receipt.ManagementIdentity != *withIdentity.ManagementIdentity {
+		t.Fatal("landing management identity was not persisted")
+	}
+	if _, err := s.Exchange(context.Background(), landingCert, &withIdentity); err != nil {
+		t.Fatal(err)
+	}
+	if !s.nodesDirty {
+		t.Fatal("steady-state landing heartbeat with unchanged management identity unexpectedly committed")
+	}
+
+	// Consecutive entry exchanges with nil or rejected EntryHealth must always commit
+	// immediately so the advancing EntryHealthBarrierAt survives an unclean restart.
+	nilHealth := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: d.Revision, ConfigSHA256: d.ConfigSHA256, RuntimeReady: true}}
+	if _, err := s.Exchange(context.Background(), entryCert, &nilHealth); err != nil {
+		t.Fatal(err)
+	}
+	if s.nodesDirty {
+		t.Fatal("first nil-health entry exchange did not commit")
+	}
+	futureHealth := healthyEntryObservation(d, time.Now().UTC().Add(time.Hour))
+	if _, err := s.Exchange(context.Background(), entryCert, &futureHealth); err != nil {
+		t.Fatal(err)
+	}
+	if s.nodesDirty {
+		t.Fatal("consecutive nil/rejected-health entry exchange was coalesced")
+	}
+	expectedBarrier := s.nodes[entryCert].EntryHealthBarrierAt
+	reopenedEntry, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reopenedEntry.nodes[entryCert].EntryHealthBarrierAt.Equal(expectedBarrier) {
+		t.Fatal("advancing entry replay barrier was not persisted on consecutive nil-health exchange")
+	}
+}
+
+func TestBackupControllerFlushesDirtyNodesBeforeAvailabilitySnapshot(t *testing.T) {
+	s, _, entryCert, _ := subscriptionFixture(t, true)
+	now := time.Now().UTC()
+	next := s.business.material
+	next.Endpoints = slices.Clone(next.Endpoints)
+	next.Endpoints[0].TotalBytes = 100
+	next.Endpoints[0].UsedBytes = 100
+	next.Endpoints[0].QuotaAppliedEnabled = false
+	if err := s.saveOwnedBusinessLocked(next); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAvailability("entry-a", "maintenance", now.Add(time.Hour), s.availability.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.reconcileOwnedEntriesLocked(now); err != nil {
+		t.Fatal(err)
+	}
+	d := s.nodes[entryCert].Desired
+	t1 := now.Add(-4 * time.Second)
+	obs1 := healthyEntryObservation(d, t1)
+	if _, err := s.Exchange(context.Background(), entryCert, &obs1); err != nil {
+		t.Fatal(err)
+	}
+	if s.nodesDirty {
+		t.Fatal("initial exchange did not commit")
+	}
+	obs2 := obs1.clone()
+	obs2.EntryHealth.SampledAt = t1.Add(2 * time.Second)
+	if _, err := s.Exchange(context.Background(), entryCert, &obs2); err != nil {
+		t.Fatal(err)
+	}
+	if !s.nodesDirty {
+		t.Fatal("steady-state exchange while maintenance suspension active did not coalesce")
+	}
+	// Expire the maintenance suspension so BackupController's flush triggers
+	// retainQuotaSuspensions and advances s.availability.Revision.
+	expired := s.availability.Nodes["entry-a"]
+	expired.ChangedAt = now.Add(-2 * time.Second)
+	expired.ResumeAt = now.Add(-time.Second)
+	s.availability.Nodes["entry-a"] = expired
+	revBefore := s.availability.Revision
+	if err := s.BackupController(time.Now().UTC()); err != nil {
+		t.Fatal("BackupController failed:", err)
+	}
+	if s.nodesDirty {
+		t.Fatal("BackupController left nodesDirty set")
+	}
+	if s.availability.Revision != revBefore+1 {
+		t.Fatalf("expected availability revision to advance during flush (%d -> %d)", revBefore, s.availability.Revision)
+	}
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(s.path), "controller-backup-*.gcm"))
+	if err != nil || len(paths) != 1 {
+		t.Fatal("backup snapshot missing", err)
+	}
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(parent, "restored")
+	if err := RestoreControllerBackup(paths[0], s.business.keyPath, destination); err != nil {
+		t.Fatal("RestoreControllerBackup rejected flushed availability/nodes snapshot:", err)
+	}
+	restored, err := OpenStore(filepath.Join(destination, "nodes.json"))
+	if err != nil {
+		t.Fatal("OpenStore rejected restored snapshot:", err)
+	}
+	if restored.availability.Revision != s.availability.Revision || restored.nodes[entryCert].AvailabilityRevision != s.availability.Revision {
+		t.Fatal("restored availability revision does not match flushed nodes snapshot")
 	}
 }

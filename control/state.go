@@ -486,6 +486,9 @@ func (s *Store) exchangeRequiresCommitLocked(certificate string, old, current No
 	if old.Receipt == nil || current.Receipt == nil {
 		return true
 	}
+	if current.Desired.Entry != nil && current.Receipt.EntryHealth == nil {
+		return true
+	}
 	if old.Receipt.AppliedReceipt != current.Receipt.AppliedReceipt ||
 		!samePeerIdentityPtr(old.Receipt.ManagementIdentity, current.Receipt.ManagementIdentity) ||
 		!sameSteadyEntryHealth(old.Receipt.EntryHealth, current.Receipt.EntryHealth) {
@@ -584,6 +587,7 @@ func (s *Store) commit(nodes map[string]Node) error {
 	s.wakeSpeedNodeChangesLocked(nodes)
 	s.nodes = nodes
 	s.nodesDirty = true
+	s.nodesCommittedAt = time.Time{}
 	s.publishSpeedNodesLocked()
 	directory, err := os.Open(filepath.Dir(s.path))
 	if err != nil {

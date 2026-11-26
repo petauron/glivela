@@ -466,4 +466,18 @@ func TestOwnedLedgerTrafficReusesVerifiedArchiveStatAndFencesChanges(t *testing.
 	if err = s2.observeBusinessTrafficLocked(s2.nodes[cert2], rNow, now2); err == nil || !s2.business.faulted || !bytes.Equal(beforeFault2, businessBytes(t, s2)) {
 		t.Fatal("same-size archive tamper was not fenced on periodic re-verification", err)
 	}
+	// In-memory shared-slice mutation of RetainedSource must still be fenced on the cached traffic path.
+	s3, _, cert3, _ := subscriptionFixture(t, false)
+	beforeFault3 := businessBytes(t, s3)
+	for i, b := range s3.business.material.RetainedSource {
+		if b == 's' {
+			s3.business.material.RetainedSource[i] = 't'
+			break
+		}
+	}
+	now3 := time.Now().UTC()
+	rNow3 := quotaReceipt(s3.nodes[cert3].Desired, now3.Add(-time.Hour), now3.Add(-time.Second), 18)
+	if err = s3.observeBusinessTrafficLocked(s3.nodes[cert3], rNow3, now3); err == nil || !s3.business.faulted || !bytes.Equal(beforeFault3, businessBytes(t, s3)) {
+		t.Fatal("in-memory RetainedSource mutation bypassed cached traffic fence", err)
+	}
 }
