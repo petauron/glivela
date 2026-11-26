@@ -158,6 +158,11 @@ func (s *Store) BackupController(now time.Time) error {
 		}
 		value.Files[subscriptionNamesFile] = raw
 	}
+	if s.nodesDirty {
+		if err := s.commit(s.nodes); err != nil {
+			return err
+		}
+	}
 	availabilityRaw, err := json.Marshal(s.availability)
 	if err != nil || s.availability.validate() != nil {
 		return errors.New("control: invalid availability backup source")

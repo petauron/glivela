@@ -373,3 +373,111 @@ func TestHistoryRewritePublishesBoundV2WithoutChangingLiveLedger(t *testing.T) {
 		t.Fatal("foreign evidence removed", err)
 	}
 }
+
+func TestOwnedLedgerTrafficReusesVerifiedArchiveStatAndFencesChanges(t *testing.T) {
+	s, _, cert, _ := subscriptionFixture(t, false)
+	if s.business.archiveVerifies != 1 {
+		t.Fatalf("expected initial archive verification on load, got %d", s.business.archiveVerifies)
+	}
+	dir := filepath.Dir(s.path)
+	archivePath := businessArchivePathForTest(t, dir)
+	now := time.Now().UTC()
+	started := now.Add(-time.Hour)
+	t1 := now.Add(-10 * time.Second)
+	r1 := quotaReceipt(s.nodes[cert].Desired, started, t1, 12)
+	if err := s.observeBusinessTrafficLocked(s.nodes[cert], r1, now); err != nil {
+		t.Fatal(err)
+	}
+	if s.business.archiveVerifies != 1 {
+		t.Fatalf("traffic update re-hashed verified archive (%d verifies)", s.business.archiveVerifies)
+	}
+	// Duplicate/idle traffic sample must neither rewrite business.json nor re-hash archive.
+	beforeIdle := businessBytes(t, s)
+	if err := s.observeBusinessTrafficLocked(s.nodes[cert], r1, now); err != nil || !bytes.Equal(beforeIdle, businessBytes(t, s)) || s.business.archiveVerifies != 1 {
+		t.Fatal("idle traffic sample unexpectedly wrote or re-hashed", err)
+	}
+	// Expired cache triggers one periodic full re-verification and refreshes cache.
+	s.business.archiveVerifiedAt = now.Add(-businessArchiveReverifyInterval - time.Second)
+	t2 := t1.Add(2 * time.Second)
+	r2 := quotaReceipt(s.nodes[cert].Desired, started, t2, 24)
+	if err := s.observeBusinessTrafficLocked(s.nodes[cert], r2, now); err != nil {
+		t.Fatal(err)
+	}
+	if s.business.archiveVerifies != 2 {
+		t.Fatalf("expired archive cache did not re-verify (%d verifies)", s.business.archiveVerifies)
+	}
+	t3 := t2.Add(time.Second)
+	r3 := quotaReceipt(s.nodes[cert].Desired, started, t3, 36)
+	if err := s.observeBusinessTrafficLocked(s.nodes[cert], r3, now); err != nil {
+		t.Fatal(err)
+	}
+	if s.business.archiveVerifies != 2 {
+		t.Fatalf("refreshed archive cache did not reuse stat (%d verifies)", s.business.archiveVerifies)
+	}
+	// Administrative plan edits always run full archive verification regardless of cache freshness.
+	plan := s.business.material.Plan.Accounts[0].Account.Plan
+	plan.TotalBytes++
+	if _, err := s.UpdateAccountPlan(context.Background(), "account-example", 7, plan); err != nil {
+		t.Fatal(err)
+	}
+	if s.business.archiveVerifies != 3 {
+		t.Fatalf("admin update skipped full archive verification (%d verifies)", s.business.archiveVerifies)
+	}
+	// Verify durable reopen retains the latest traffic counters and archive.
+	loaded, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = loaded.LoadBusiness(s.business.keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.business.material.TrafficCounters["credential-example"] != s.business.material.TrafficCounters["credential-example"] {
+		t.Fatal("traffic counters lost across reopen")
+	}
+	// Any archive stat change (size/mtime/inode/removal) forces immediate full verify and fences tamper.
+	raw, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(archivePath, append(raw, ' '), 0600); err != nil {
+		t.Fatal(err)
+	}
+	beforeFault := businessBytes(t, s)
+	t4 := t3.Add(time.Second)
+	r4 := quotaReceipt(s.nodes[cert].Desired, started, t4, 48)
+	if err = s.observeBusinessTrafficLocked(s.nodes[cert], r4, time.Now().UTC()); err == nil || !s.business.faulted || !bytes.Equal(beforeFault, businessBytes(t, s)) {
+		t.Fatal("tampered archive bypassed traffic write fence", err)
+	}
+	// Even a same-size in-place tamper is fenced once periodic re-verification falls due.
+	s2, _, cert2, _ := subscriptionFixture(t, false)
+	archivePath2 := businessArchivePathForTest(t, filepath.Dir(s2.path))
+	raw2, err := os.ReadFile(archivePath2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2[len(raw2)/2] ^= 1
+	if err = os.WriteFile(archivePath2, raw2, 0600); err != nil {
+		t.Fatal(err)
+	}
+	now2 := time.Now().UTC()
+	s2.business.archiveVerifiedAt = now2.Add(-businessArchiveReverifyInterval - time.Second)
+	beforeFault2 := businessBytes(t, s2)
+	rNow := quotaReceipt(s2.nodes[cert2].Desired, now2.Add(-time.Hour), now2.Add(-time.Second), 15)
+	if err = s2.observeBusinessTrafficLocked(s2.nodes[cert2], rNow, now2); err == nil || !s2.business.faulted || !bytes.Equal(beforeFault2, businessBytes(t, s2)) {
+		t.Fatal("same-size archive tamper was not fenced on periodic re-verification", err)
+	}
+	// In-memory shared-slice mutation of RetainedSource must still be fenced on the cached traffic path.
+	s3, _, cert3, _ := subscriptionFixture(t, false)
+	beforeFault3 := businessBytes(t, s3)
+	for i, b := range s3.business.material.RetainedSource {
+		if b == 's' {
+			s3.business.material.RetainedSource[i] = 't'
+			break
+		}
+	}
+	now3 := time.Now().UTC()
+	rNow3 := quotaReceipt(s3.nodes[cert3].Desired, now3.Add(-time.Hour), now3.Add(-time.Second), 18)
+	if err = s3.observeBusinessTrafficLocked(s3.nodes[cert3], rNow3, now3); err == nil || !s3.business.faulted || !bytes.Equal(beforeFault3, businessBytes(t, s3)) {
+		t.Fatal("in-memory RetainedSource mutation bypassed cached traffic fence", err)
+	}
+}

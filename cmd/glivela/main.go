@@ -484,14 +484,22 @@ func runConfiguration(ctx context.Context, cfg configuration) error {
 	}
 	backups, stopBackups := context.WithCancel(ctx)
 	backupsDone := make(chan struct{})
-	defer func() { stopBackups(); <-backupsDone }()
 	go func() {
 		defer close(backupsDone)
 		store.RunControllerBackups(backups, func(err error) {
 			log.Printf("Glivela controller backup not confirmed: %v; inspect retained recovery snapshots", err)
 		})
 	}()
-	return serveController(ctx, server, subscriptions)
+	serveErr := serveController(ctx, server, subscriptions)
+	stopBackups()
+	<-backupsDone
+	if flushErr := store.Flush(); flushErr != nil {
+		if serveErr == nil || errors.Is(serveErr, context.Canceled) {
+			return flushErr
+		}
+		return errors.Join(serveErr, flushErr)
+	}
+	return serveErr
 }
 
 // Entry-owned configuration and end-to-end checks use the same authenticated

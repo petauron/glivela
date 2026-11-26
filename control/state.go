@@ -35,6 +35,8 @@ type Node struct {
 	EntryHealthBarrierAt time.Time             `json:"entryHealthBarrierAt,omitempty"`
 }
 
+const nodesHeartbeatFlushInterval = 30 * time.Second
+
 // Store is a bounded single-process state file for the MVP. Callers must run
 // one controller per directory; it is not a multi-writer database protocol.
 // Desired entry plans contain sensitive runtime configuration. The node state
@@ -46,6 +48,9 @@ type Store struct {
 	quality              *QualityHistory
 	path                 string
 	nodes                map[string]Node
+	nodesDirty           bool
+	nodesCommittedAt     time.Time
+	nodesFlushInterval   time.Duration
 	availability         availabilityState
 	business             *businessState
 	managementUI         http.Handler
@@ -413,13 +418,99 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 	if err := reconcileOwnedRouteChecks(next, s.business, now, s.effectiveAvailabilities()); err != nil {
 		return Desired{}, err
 	}
-	if err := s.commit(next); err != nil {
-		return Desired{}, err
+	if s.exchangeRequiresCommitLocked(certificate, old, node, next, now) {
+		if err := s.commit(next); err != nil {
+			return Desired{}, err
+		}
+	} else {
+		s.wakeSpeedNodeChangesLocked(next)
+		s.nodes = next
+		s.nodesDirty = true
+		s.publishSpeedNodesLocked()
 	}
 	// A stale report is not accepted as healthy, but must not prevent the node
 	// from receiving a newer desired revision after an interrupted update.
 	result := node.Desired.clone()
 	return result, nil
+}
+
+// Flush persists any coalesced steady-state heartbeat updates to nodes.json.
+func (s *Store) Flush() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.nodesDirty {
+		return nil
+	}
+	return s.commit(s.nodes)
+}
+
+func (s *Store) heartbeatFlushInterval() time.Duration {
+	if s.nodesFlushInterval > 0 {
+		return s.nodesFlushInterval
+	}
+	return nodesHeartbeatFlushInterval
+}
+
+func sameRouteChecks(a, b map[string]RouteCheck) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		vb, ok := b[k]
+		if !ok || va.CertificateID != vb.CertificateID || !va.IssuedAt.Equal(vb.IssuedAt) || !va.ReceivedAt.Equal(vb.ReceivedAt) || !reflect.DeepEqual(va.Request, vb.Request) {
+			return false
+		}
+		if (va.Result == nil) != (vb.Result == nil) {
+			return false
+		}
+		if va.Result != nil && !reflect.DeepEqual(*va.Result, *vb.Result) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Store) exchangeRequiresCommitLocked(certificate string, old, current Node, next map[string]Node, now time.Time) bool {
+	if s.nodesCommittedAt.IsZero() || now.Before(s.nodesCommittedAt) || now.Sub(s.nodesCommittedAt) >= s.heartbeatFlushInterval() {
+		return true
+	}
+	if old.ReportedAt.IsZero() || !runtimeFresh(old, now) {
+		return true
+	}
+	if old.PublicationSuspended != current.PublicationSuspended ||
+		old.Desired.Revision != current.Desired.Revision ||
+		old.Desired.ConfigSHA256 != current.Desired.ConfigSHA256 ||
+		!reflect.DeepEqual(old.EntryQuota, current.EntryQuota) {
+		return true
+	}
+	if old.Receipt == nil || current.Receipt == nil {
+		return true
+	}
+	if current.Desired.Entry != nil && current.Receipt.EntryHealth == nil {
+		return true
+	}
+	if old.Receipt.AppliedReceipt != current.Receipt.AppliedReceipt ||
+		!samePeerIdentityPtr(old.Receipt.ManagementIdentity, current.Receipt.ManagementIdentity) ||
+		!sameSteadyEntryHealth(old.Receipt.EntryHealth, current.Receipt.EntryHealth) {
+		return true
+	}
+	if (old.Receipt.Traffic == nil) != (current.Receipt.Traffic == nil) {
+		return true
+	}
+	ownedBusiness := s.business != nil && s.business.material.Ownership != nil
+	if !ownedBusiness && current.Receipt.Traffic != nil && !reflect.DeepEqual(old.Receipt.Traffic, current.Receipt.Traffic) {
+		return true
+	}
+	for cert, after := range next {
+		before := s.nodes[cert]
+		if cert == certificate {
+			before = old
+		}
+		if !sameRouteChecks(before.Checks, after.Checks) {
+			return true
+		}
+	}
+	return s.needsAvailabilityCommitLocked(next, now)
 }
 
 func (s *Store) copy() map[string]Node {
@@ -495,6 +586,8 @@ func (s *Store) commit(nodes map[string]Node) error {
 	}
 	s.wakeSpeedNodeChangesLocked(nodes)
 	s.nodes = nodes
+	s.nodesDirty = true
+	s.nodesCommittedAt = time.Time{}
 	s.publishSpeedNodesLocked()
 	directory, err := os.Open(filepath.Dir(s.path))
 	if err != nil {
@@ -504,5 +597,7 @@ func (s *Store) commit(nodes map[string]Node) error {
 	if err := directory.Sync(); err != nil {
 		return err
 	}
+	s.nodesDirty = false
+	s.nodesCommittedAt = time.Now().UTC()
 	return nil
 }

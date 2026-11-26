@@ -19,12 +19,29 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 		return nil
 	}
 	next := s.business.material
-	accounts := slices.Clone(next.Plan.Accounts)
-	next.TrafficCounters = maps.Clone(next.TrafficCounters)
-	next.ResetSchedules = maps.Clone(next.ResetSchedules)
-	next.Endpoints = slices.Clone(next.Endpoints)
-	for i := range next.Endpoints {
-		endpoint := &next.Endpoints[i]
+	endpoints := next.Endpoints
+	accounts := next.Plan.Accounts
+	trafficCounters := next.TrafficCounters
+	resetSchedules := next.ResetSchedules
+	mutated := false
+	ensureCloned := func() {
+		if mutated {
+			return
+		}
+		mutated = true
+		accounts = slices.Clone(next.Plan.Accounts)
+		for i := range accounts {
+			accounts[i].Usage = slices.Clone(accounts[i].Usage)
+		}
+		trafficCounters = maps.Clone(next.TrafficCounters)
+		resetSchedules = maps.Clone(next.ResetSchedules)
+		endpoints = slices.Clone(next.Endpoints)
+		next.Endpoints = endpoints
+		next.TrafficCounters = trafficCounters
+		next.ResetSchedules = resetSchedules
+	}
+	for i := range endpoints {
+		endpoint := endpoints[i]
 		if endpoint.ResetDay == 0 || endpoint.Retired {
 			continue
 		}
@@ -33,14 +50,15 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 		if zone == "" || err != nil {
 			return errors.New("control: endpoint reset timezone required")
 		}
-		schedule := &endpoint.ResetSchedule
+		schedule := endpoint.ResetSchedule
 		if schedule.NextResetAt == "" {
 			local := now.In(location)
 			due := monthlyReset(local.Year(), local.Month(), endpoint.ResetDay, location)
 			if !due.After(now) {
 				due = monthlyReset(local.Year(), local.Month()+1, endpoint.ResetDay, location)
 			}
-			schedule.NextResetAt = due.Format(time.RFC3339Nano)
+			ensureCloned()
+			endpoints[i].ResetSchedule.NextResetAt = due.Format(time.RFC3339Nano)
 			continue
 		}
 		due, err := time.Parse(time.RFC3339Nano, schedule.NextResetAt)
@@ -49,47 +67,52 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 		}
 		due = due.In(location)
 		if !due.After(now) {
-			endpoint.UsedBytes = 0
-			endpoint.QuotaAppliedEnabled = true
+			ensureCloned()
+			target := &endpoints[i]
+			target.UsedBytes = 0
+			target.QuotaAppliedEnabled = true
 			for !due.After(now) {
-				schedule.LastResetAt = due.Format(time.RFC3339Nano)
-				due = monthlyReset(due.Year(), due.Month()+1, endpoint.ResetDay, due.Location())
+				target.ResetSchedule.LastResetAt = due.Format(time.RFC3339Nano)
+				due = monthlyReset(due.Year(), due.Month()+1, target.ResetDay, due.Location())
 			}
-			schedule.NextResetAt = due.Format(time.RFC3339Nano)
+			target.ResetSchedule.NextResetAt = due.Format(time.RFC3339Nano)
 		}
 	}
 	for i := range accounts {
-		account := &accounts[i]
-		account.Usage = slices.Clone(account.Usage)
-		schedule := next.ResetSchedules[account.Account.ID]
+		account := accounts[i]
 		days := account.Account.Plan.ResetDays
 		if days == 0 {
 			continue
 		}
+		schedule := resetSchedules[account.Account.ID]
 		if schedule.NextResetAt == "" {
+			ensureCloned()
 			schedule.NextResetAt = now.AddDate(0, 0, days).Format(time.RFC3339Nano)
-		} else {
-			due, err := time.Parse(time.RFC3339Nano, schedule.NextResetAt)
-			if err != nil {
-				return errors.New("control: invalid owned reset schedule")
-			}
-			if !due.After(now) {
-				account.Usage = glivela.ResetUsage(account.Usage)
-				account.RetiredUsageBytes = 0
-				for _, credential := range account.Credentials {
-					counter := next.TrafficCounters[credential.ID]
-					counter.UploadBytes, counter.DownloadBytes = 0, 0
-					next.TrafficCounters[credential.ID] = counter
-				}
-				// Advance from the recorded cycle, never from each retry time.
-				for !due.After(now) {
-					schedule.LastResetAt = due.Format(time.RFC3339Nano)
-					due = due.AddDate(0, 0, days)
-				}
-				schedule.NextResetAt = due.Format(time.RFC3339Nano)
-			}
+			resetSchedules[account.Account.ID] = schedule
+			continue
 		}
-		next.ResetSchedules[account.Account.ID] = schedule
+		due, err := time.Parse(time.RFC3339Nano, schedule.NextResetAt)
+		if err != nil {
+			return errors.New("control: invalid owned reset schedule")
+		}
+		if !due.After(now) {
+			ensureCloned()
+			target := &accounts[i]
+			target.Usage = glivela.ResetUsage(target.Usage)
+			target.RetiredUsageBytes = 0
+			for _, credential := range target.Credentials {
+				counter := trafficCounters[credential.ID]
+				counter.UploadBytes, counter.DownloadBytes = 0, 0
+				trafficCounters[credential.ID] = counter
+			}
+			// Advance from the recorded cycle, never from each retry time.
+			for !due.After(now) {
+				schedule.LastResetAt = due.Format(time.RFC3339Nano)
+				due = due.AddDate(0, 0, days)
+			}
+			schedule.NextResetAt = due.Format(time.RFC3339Nano)
+			resetSchedules[target.Account.ID] = schedule
+		}
 	}
 	if receipt != nil && receipt.Traffic != nil && glivela.VerifyAppliedReceipt(node.Desired.DesiredArtifact, receipt.AppliedReceipt) == nil {
 		sample := receipt.Traffic
@@ -98,12 +121,12 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 		}
 		for i := range accounts {
 			for j := range accounts[i].Usage {
-				member := &accounts[i].Usage[j]
+				member := accounts[i].Usage[j]
 				raw, found := sample.Counters[member.CredentialID]
 				if !found {
 					continue // Other entries are sampled independently.
 				}
-				counter := next.TrafficCounters[member.CredentialID]
+				counter := trafficCounters[member.CredentialID]
 				if counter.ObservedAt != "" {
 					observed, err := time.Parse(time.RFC3339Nano, counter.ObservedAt)
 					if err != nil || !sample.SampledAt.After(observed) {
@@ -135,14 +158,22 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 				if upload > math.MaxInt64-download || upload+download > math.MaxInt64-member.Observed || upload > math.MaxInt64-counter.UploadBytes || download > math.MaxInt64-counter.DownloadBytes {
 					return errors.New("control: traffic counter overflow")
 				}
-				member.Observed += upload + download
-				for k := range next.Endpoints {
-					endpoint := &next.Endpoints[k]
+				for k := range endpoints {
+					endpoint := endpoints[k]
 					if endpoint.Reality.EntryID != node.ID || endpoint.Retired {
 						continue
 					}
 					if upload+download > math.MaxInt64-endpoint.UsedBytes {
 						return errors.New("control: endpoint traffic counter overflow")
+					}
+				}
+				ensureCloned()
+				targetMember := &accounts[i].Usage[j]
+				targetMember.Observed += upload + download
+				for k := range endpoints {
+					endpoint := &endpoints[k]
+					if endpoint.Reality.EntryID != node.ID || endpoint.Retired {
+						continue
 					}
 					endpoint.UsedBytes += upload + download
 					if endpoint.TotalBytes > 0 && endpoint.UsedBytes >= endpoint.TotalBytes {
@@ -155,9 +186,12 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 				counter.StartedAt = sample.StartedAt
 				counter.ObservedAt = sample.SampledAt.Format(time.RFC3339Nano)
 				counter.WatermarkObservedAt = counter.ObservedAt
-				next.TrafficCounters[member.CredentialID] = counter
+				trafficCounters[targetMember.CredentialID] = counter
 			}
 		}
+	}
+	if !mutated {
+		return nil
 	}
 	var err error
 	next.Plan, err = glivela.PlanImport(accounts)
@@ -167,7 +201,7 @@ func (s *Store) observeBusinessTrafficLocked(node Node, receipt *Observation, no
 	if reflect.DeepEqual(next, s.business.material) {
 		return nil
 	}
-	return s.saveOwnedBusinessLocked(next)
+	return s.saveOwnedBusinessTrafficLocked(next, now)
 }
 
 func monthlyReset(year int, month time.Month, day int, location *time.Location) time.Time {
