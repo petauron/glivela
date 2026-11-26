@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/petauron/glivela/compare/v0.2.0...v0.2.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **control:** cache verified archive stat and coalesce steady-state heartbeat commits ([#238](https://github.com/petauron/glivela/issues/238)) ([72a2958](https://github.com/petauron/glivela/commit/72a2958a054ef42721c48bd2bc61dec4fbf9df25))
+
 ## [0.2.0](https://github.com/petauron/glivela/compare/v0.1.1...v0.2.0) (2026-11-25)
 
 
