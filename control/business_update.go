@@ -12,9 +12,12 @@ import (
 	"reflect"
 	"slices"
 	"time"
+	"unsafe"
 
 	glivela "github.com/petauron/glivela"
 )
+
+const businessArchiveReverifyInterval = 10 * time.Minute
 
 type AccountChangeResult struct {
 	AccountID       string   `json:"accountId"`
@@ -81,6 +84,14 @@ func (s *Store) UpdateAccountPlan(ctx context.Context, id string, expected uint6
 // commit. Projections can be rebuilt after a partial write; no second ledger
 // or cross-file transaction is introduced.
 func (s *Store) saveOwnedBusinessLocked(next glivela.ImportMaterial) error {
+	return s.saveOwnedBusiness(next, false, time.Now().UTC())
+}
+
+func (s *Store) saveOwnedBusinessTrafficLocked(next glivela.ImportMaterial, now time.Time) error {
+	return s.saveOwnedBusiness(next, true, now)
+}
+
+func (s *Store) saveOwnedBusiness(next glivela.ImportMaterial, allowArchiveCache bool, now time.Time) error {
 	business := s.business
 	invalid := errors.New("control: owned business write refused")
 	if business == nil || business.faulted || next.Ownership == nil || next.ServerTransportVersion != 1 {
@@ -101,14 +112,40 @@ func (s *Store) saveOwnedBusinessLocked(next glivela.ImportMaterial) error {
 		business.faulted = true
 		return errors.New("control: owned business storage changed; explicit recovery required")
 	}
-	if sha256.Sum256(next.RetainedSource) != business.sourceSHA256 || !bytes.Equal(next.RetainedSource, business.material.RetainedSource) {
-		business.faulted = true
-		return errors.New("control: immutable business archive changed; explicit offline operation required")
+	sameSourceSlice := len(next.RetainedSource) == len(business.material.RetainedSource) &&
+		unsafe.SliceData(next.RetainedSource) == unsafe.SliceData(business.material.RetainedSource)
+	cacheFresh := allowArchiveCache && sameSourceSlice &&
+		business.archiveSHA256 != "" &&
+		!business.archiveVerifiedAt.IsZero() &&
+		!now.Before(business.archiveVerifiedAt) &&
+		now.Sub(business.archiveVerifiedAt) < businessArchiveReverifyInterval
+	var archiveSHA string
+	var legacy bool
+	var verifiedStamp archiveFileStamp
+	usedCache := false
+	if cacheFresh {
+		if state, envErr := checkpointEnvelope(disk); envErr == nil &&
+			state.SnapshotID == business.snapshotID &&
+			state.Version == 2 &&
+			state.ArchiveSHA256 == business.archiveSHA256 {
+			if stamp, statErr := statLedgerArchive(directory, state.ArchiveSHA256); statErr == nil && stamp == business.archiveStamp {
+				archiveSHA = state.ArchiveSHA256
+				usedCache = true
+			}
+		}
 	}
-	archiveSHA, legacy, err := prepareOwnedLedgerArchive(directory, disk, business.snapshotID)
-	if err != nil {
-		business.faulted = true
-		return err
+	if !usedCache {
+		if sha256.Sum256(next.RetainedSource) != business.sourceSHA256 || !bytes.Equal(next.RetainedSource, business.material.RetainedSource) {
+			business.faulted = true
+			return errors.New("control: immutable business archive changed; explicit offline operation required")
+		}
+		var prepErr error
+		archiveSHA, legacy, verifiedStamp, prepErr = prepareOwnedLedgerArchive(directory, disk, business.snapshotID)
+		if prepErr != nil {
+			business.faulted = true
+			return prepErr
+		}
+		business.archiveVerifies++
 	}
 	if legacy || !reflect.DeepEqual(next, business.material) {
 		sealed, err := glivela.SealImportLedger(next, key, business.snapshotID, archiveSHA)
@@ -139,7 +176,15 @@ func (s *Store) saveOwnedBusinessLocked(next glivela.ImportMaterial) error {
 			return errors.New("control: owned business write was not confirmed")
 		}
 	}
-	return syncBusinessDirectory(directory)
+	if err := syncBusinessDirectory(directory); err != nil {
+		return err
+	}
+	if !usedCache {
+		business.archiveSHA256 = archiveSHA
+		business.archiveStamp = verifiedStamp
+		business.archiveVerifiedAt = now
+	}
+	return nil
 }
 
 func effectiveBusinessCredentials(m glivela.ImportMaterial, now time.Time) (map[string]glivela.CredentialMaterial, map[string]glivela.RouteGrant, error) {

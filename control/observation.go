@@ -170,6 +170,48 @@ func invalidateChangedEntryProofs(nodes map[string]Node, old, current Node, now 
 	return nil
 }
 
+func samePeerIdentityPtr(a, b *landing.PeerIdentity) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// sameSteadyEntryHealth reports whether current preserves the exact verified
+// healthy peer state of old, differing only in steady-state freshness
+// timestamps. Any non-healthy peer or structural/policy change returns false
+// so Store.Exchange commits immediately.
+func sameSteadyEntryHealth(old, current *EntryHealthReport) bool {
+	if old == nil || current == nil {
+		return old == current
+	}
+	if !samePeerIdentityPtr(old.Source, current.Source) || len(old.Peers) != len(current.Peers) {
+		return false
+	}
+	for key, after := range current.Peers {
+		before, ok := old.Peers[key]
+		if !ok || before.Identity != after.Identity {
+			return false
+		}
+		a, b := before.Status, after.Status
+		if b.State != "healthy" ||
+			a.State != b.State ||
+			a.Revision != b.Revision ||
+			a.LinkState != b.LinkState ||
+			a.Stage != b.Stage ||
+			a.Reason != b.Reason ||
+			a.TCP != b.TCP ||
+			a.UDP != b.UDP ||
+			a.ExitIP != b.ExitIP ||
+			!a.StartedAt.Equal(b.StartedAt) ||
+			!a.AllowedUntil.Equal(b.AllowedUntil) ||
+			a.ConsecutiveFailures != b.ConsecutiveFailures {
+			return false
+		}
+	}
+	return true
+}
+
 func entryRouteMatches(entry Node, probe RouteProbe) bool {
 	if entry.Desired.EntryNetwork == nil {
 		return false

@@ -159,6 +159,40 @@ func (s *Store) effectiveAvailabilities() map[string]Availability {
 	return result
 }
 
+func (s *Store) needsAvailabilityCommitLocked(nodes map[string]Node, now time.Time) bool {
+	wouldSuspend := func(id string, total, used int64, resume time.Time) bool {
+		if total <= 0 || used < total || !resume.IsZero() && !resume.After(now) {
+			return false
+		}
+		if old, ok := s.availability.Nodes[id]; ok && (old.ResumeAt.IsZero() || old.ResumeAt.After(now)) {
+			return false
+		}
+		return true
+	}
+	for _, n := range nodes {
+		if record, affected := s.availability.Nodes[n.ID]; affected && record.Revision > n.AvailabilityRevision {
+			return true
+		}
+		for id := range n.RouteEntries {
+			if record, affected := s.availability.Nodes[id]; affected && record.Revision > n.AvailabilityRevision {
+				return true
+			}
+		}
+		if q := n.EntryQuota; q != nil && wouldSuspend(n.ID, q.TotalBytes, q.UsedBytes, q.NextResetAt) {
+			return true
+		}
+	}
+	if s.business != nil {
+		for _, e := range s.business.material.Endpoints {
+			resume, _ := time.Parse(time.RFC3339Nano, e.ResetSchedule.NextResetAt)
+			if wouldSuspend(e.Reality.EntryID, e.TotalBytes, e.UsedBytes, resume) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Retain automatic exhaustion through recovery as well, so restart never turns
 // a previously deferred inventory into a truncated or implicitly passing one.
 func (s *Store) retainQuotaSuspensions(nodes map[string]Node) error {

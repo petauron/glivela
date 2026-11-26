@@ -19,13 +19,17 @@ import (
 // the sole current business source after offline ownership commit. Loading
 // either does not establish runtime or end-to-end route health.
 type businessState struct {
-	snapshotID   string
-	material     glivela.ImportMaterial
-	keyPath      string
-	faulted      bool
-	fileSHA256   [32]byte
-	keySHA256    [32]byte
-	sourceSHA256 [32]byte
+	snapshotID        string
+	material          glivela.ImportMaterial
+	keyPath           string
+	faulted           bool
+	fileSHA256        [32]byte
+	keySHA256         [32]byte
+	sourceSHA256      [32]byte
+	archiveSHA256     string
+	archiveStamp      archiveFileStamp
+	archiveVerifiedAt time.Time
+	archiveVerifies   uint64
 }
 
 type BusinessAccount struct {
