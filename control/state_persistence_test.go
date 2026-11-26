@@ -241,6 +241,7 @@ func TestSteadyStateLandingCoalescingAndEntryNilHealthCommits(t *testing.T) {
 
 func TestBackupControllerFlushesDirtyNodesBeforeAvailabilitySnapshot(t *testing.T) {
 	s, _, entryCert, _ := subscriptionFixture(t, true)
+	entryID := s.nodes[entryCert].ID
 	now := time.Now().UTC()
 	next := s.business.material
 	next.Endpoints = slices.Clone(next.Endpoints)
@@ -250,7 +251,7 @@ func TestBackupControllerFlushesDirtyNodesBeforeAvailabilitySnapshot(t *testing.
 	if err := s.saveOwnedBusinessLocked(next); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAvailability("entry-a", "maintenance", now.Add(time.Hour), s.availability.Revision); err != nil {
+	if err := s.SetAvailability(entryID, "maintenance", now.Add(time.Hour), s.availability.Revision); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.reconcileOwnedEntriesLocked(now); err != nil {
@@ -275,10 +276,10 @@ func TestBackupControllerFlushesDirtyNodesBeforeAvailabilitySnapshot(t *testing.
 	}
 	// Expire the maintenance suspension so BackupController's flush triggers
 	// retainQuotaSuspensions and advances s.availability.Revision.
-	expired := s.availability.Nodes["entry-a"]
+	expired := s.availability.Nodes[entryID]
 	expired.ChangedAt = now.Add(-2 * time.Second)
 	expired.ResumeAt = now.Add(-time.Second)
-	s.availability.Nodes["entry-a"] = expired
+	s.availability.Nodes[entryID] = expired
 	revBefore := s.availability.Revision
 	if err := s.BackupController(time.Now().UTC()); err != nil {
 		t.Fatal("BackupController failed:", err)
