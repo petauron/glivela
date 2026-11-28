@@ -348,6 +348,9 @@ func projectServerLandings(nodes map[string]Node, m glivela.ImportMaterial, now 
 		}
 		plan := *n.Desired.Landing
 		plan.Sources = slices.Clone(plan.Sources)
+		if len(plan.Sources) == 0 {
+			plan.Sources = nil
+		}
 		for i := range plan.Sources {
 			plan.Sources[i].UDPOverTCP = slices.Contains(udpSources[n.ID], plan.Sources[i].Address)
 		}

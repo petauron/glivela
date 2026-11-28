@@ -18,15 +18,15 @@ func testSS2022Key16(b byte) string {
 func TestRelayPoolModelsAndValidation(t *testing.T) {
 	k1 := testSS2022Key16(1)
 	k2 := testSS2022Key16(2)
-	eihPass := k1 + ":" + k2
+	eihKey := k1 + ":" + k2
 	if !ValidSS2022Key16(k1) || ValidSS2022Key16(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 17))) || ValidSS2022Key16("not-base64") {
 		t.Fatal("ValidSS2022Key16 accepted invalid key")
 	}
-	if !ValidEIHPassword(eihPass) || ValidEIHPassword(k1) || ValidEIHPassword(k1+":"+k2+":"+k1) {
-		t.Fatal("ValidEIHPassword accepted malformed credential")
+	if !ValidEIHKey(eihKey) || ValidEIHKey(k1) || ValidEIHKey(k1+":"+k2+":"+k1) {
+		t.Fatal("ValidEIHKey accepted malformed credential")
 	}
 
-	pt := PrivateTransport{Protocol: "ss2022", PublicAddress: "9.9.9.9", Port: RelayPoolPort, Key: eihPass}
+	pt := PrivateTransport{Protocol: "ss2022", PublicAddress: "9.9.9.9", Port: RelayPoolPort, Key: eihKey}
 	if err := pt.Validate(); err != nil {
 		t.Fatalf("valid EIH PrivateTransport rejected: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestRelayPoolModelsAndValidation(t *testing.T) {
 		Source:      "2001:4860:4860::8888",
 		Address:     "2001:4860:4860::1111",
 		Port:        RelayPoolPort,
-		Password:    eihPass,
+		Key:         eihKey,
 	}
 	if err := edge.Validate(); err != nil {
 		t.Fatalf("valid EntryRelayEdge rejected: %v", err)
@@ -176,7 +176,7 @@ func TestRelayPoolModelsAndValidation(t *testing.T) {
 			RelayEdgeID:    "re-a",
 			LandingAddress: "2606:4700:4700::1111",
 			LandingPort:    RelayPoolPort,
-			LandingPass:    eihPass,
+			LandingKey:     eihKey,
 		}},
 	}
 	if err := ep.Validate(); err != nil {
@@ -193,7 +193,7 @@ func TestRelayPoolModelsAndValidation(t *testing.T) {
 		RelayEdgeID:    "re-a",
 		LandingAddress: "2606:4700:4700::1111",
 		LandingPort:    RelayPoolPort,
-		LandingPass:    eihPass,
+		LandingKey:     eihKey,
 	}}
 	if badEP.Validate() == nil {
 		t.Fatal("EntryRelayPool accepted self-relay")
@@ -225,8 +225,8 @@ func TestRenderXrayConfigurationRelayPoolsAndObservatory(t *testing.T) {
 		t.Fatal("distinct grants sharing (acct, pool, egress) collided on PoolKey")
 	}
 
-	edgeA := EntryRelayEdge{ID: "re-a-tcp", RelayNodeID: "relay-a", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::1111", Port: RelayPoolPort, Password: testSS2022Key16(1) + ":" + testSS2022Key16(2)}
-	edgeB := EntryRelayEdge{ID: "re-b-tcp", RelayNodeID: "relay-b", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::2222", Port: RelayPoolPort, Password: testSS2022Key16(3) + ":" + testSS2022Key16(4)}
+	edgeA := EntryRelayEdge{ID: "re-a-tcp", RelayNodeID: "relay-a", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::1111", Port: RelayPoolPort, Key: testSS2022Key16(1) + ":" + testSS2022Key16(2)}
+	edgeB := EntryRelayEdge{ID: "re-b-tcp", RelayNodeID: "relay-b", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::2222", Port: RelayPoolPort, Key: testSS2022Key16(3) + ":" + testSS2022Key16(4)}
 	obs := ObservatoryConfig{Destination: DefaultObservatoryDestination, IntervalSec: 15, Sampling: 3, TimeoutSec: 5}
 	p1 := EntryRelayPool{
 		Key:       g1.PoolKey(),
@@ -236,8 +236,8 @@ func TestRenderXrayConfigurationRelayPoolsAndObservatory(t *testing.T) {
 		EgressID:  "l1",
 		Strategy:  RelayPoolStrategy{Expected: 2, MaxRTTMS: 450, Tolerance: 0.05},
 		Candidates: []EntryPoolCandidate{
-			{RelayNodeID: "relay-a", RelayEdgeID: edgeA.ID, LandingAddress: "2606:4700:4700::1111", LandingPort: RelayPoolPort, LandingPass: testSS2022Key16(5) + ":" + testSS2022Key16(6)},
-			{RelayNodeID: "relay-b", RelayEdgeID: edgeB.ID, LandingAddress: "2606:4700:4700::1111", LandingPort: RelayPoolPort, LandingPass: testSS2022Key16(5) + ":" + testSS2022Key16(7)},
+			{RelayNodeID: "relay-a", RelayEdgeID: edgeA.ID, LandingAddress: "2606:4700:4700::1111", LandingPort: RelayPoolPort, LandingKey: testSS2022Key16(5) + ":" + testSS2022Key16(6)},
+			{RelayNodeID: "relay-b", RelayEdgeID: edgeB.ID, LandingAddress: "2606:4700:4700::1111", LandingPort: RelayPoolPort, LandingKey: testSS2022Key16(5) + ":" + testSS2022Key16(7)},
 		},
 	}
 	p1Alt := EntryRelayPool{
@@ -248,8 +248,8 @@ func TestRenderXrayConfigurationRelayPoolsAndObservatory(t *testing.T) {
 		EgressID:  "l1",
 		Strategy:  RelayPoolStrategy{Expected: 2, MaxRTTMS: 450, Tolerance: 0.05},
 		Candidates: []EntryPoolCandidate{
-			{RelayNodeID: "relay-a", RelayEdgeID: edgeA.ID, LandingAddress: "2620:fe::fe", LandingPort: RelayPoolPort, LandingPass: testSS2022Key16(5) + ":" + testSS2022Key16(10)},
-			{RelayNodeID: "relay-b", RelayEdgeID: edgeB.ID, LandingAddress: "2620:fe::fe", LandingPort: RelayPoolPort, LandingPass: testSS2022Key16(5) + ":" + testSS2022Key16(11)},
+			{RelayNodeID: "relay-a", RelayEdgeID: edgeA.ID, LandingAddress: "2620:fe::fe", LandingPort: RelayPoolPort, LandingKey: testSS2022Key16(5) + ":" + testSS2022Key16(10)},
+			{RelayNodeID: "relay-b", RelayEdgeID: edgeB.ID, LandingAddress: "2620:fe::fe", LandingPort: RelayPoolPort, LandingKey: testSS2022Key16(5) + ":" + testSS2022Key16(11)},
 		},
 	}
 	p2 := EntryRelayPool{
@@ -261,7 +261,7 @@ func TestRenderXrayConfigurationRelayPoolsAndObservatory(t *testing.T) {
 		UDP:       true,
 		Strategy:  RelayPoolStrategy{Expected: 1, MaxRTTMS: 500, Tolerance: 0.1},
 		Candidates: []EntryPoolCandidate{
-			{RelayNodeID: "relay-a", RelayEdgeID: edgeA.ID, LandingAddress: "2606:4700:4700::1001", LandingPort: RelayPoolPort, LandingPass: testSS2022Key16(8) + ":" + testSS2022Key16(9)},
+			{RelayNodeID: "relay-a", RelayEdgeID: edgeA.ID, LandingAddress: "2606:4700:4700::1001", LandingPort: RelayPoolPort, LandingKey: testSS2022Key16(8) + ":" + testSS2022Key16(9)},
 		},
 	}
 	p3 := EntryRelayPool{
@@ -434,13 +434,18 @@ func TestRenderXrayConfigurationRelayPoolsAndObservatory(t *testing.T) {
 		t.Fatalf("empty-only plan should not emit observatory: %+v", emptyCfg)
 	}
 
-	// Non-pooled plan remains byte-identical across versions 63, 127, and 255.
+	// Non-pooled plan remains byte-identical when enabling relay-pool bit 7
+	// (63 == 191 without access-log suppression; 127 == 255 with bit 6 set).
 	plain := XrayPlan{
 		Revision:         1,
 		RealityEndpoints: plan.RealityEndpoints,
 		Credentials:      []CredentialMaterial{{Credential: native, ProtocolID: nativeID}},
 	}
 	a63, err := BuildDesiredArtifactVersion(plain, 63)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a191, err := BuildDesiredArtifactVersion(plain, 191)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +457,7 @@ func TestRenderXrayConfigurationRelayPoolsAndObservatory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(a63.Config, a127.Config) || !bytes.Equal(a63.Config, a255.Config) {
+	if !bytes.Equal(a63.Config, a191.Config) || !bytes.Equal(a127.Config, a255.Config) {
 		t.Fatal("historical non-pooled Xray render bytes changed")
 	}
 }

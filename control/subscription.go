@@ -351,7 +351,7 @@ func (s *Store) routeUDPApplied(entry Node, grant glivela.RouteGrant) bool {
 			return false
 		}
 		for _, cand := range pool.Candidates {
-			serverKey, userKey, ok := strings.Cut(cand.LandingPass, ":")
+			serverKey, userKey, ok := strings.Cut(cand.LandingKey, ":")
 			if !ok {
 				continue
 			}

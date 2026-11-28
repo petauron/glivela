@@ -34,9 +34,9 @@ func ValidSS2022Key16(value string) bool {
 	return err == nil && len(raw) == 16 && base64.StdEncoding.EncodeToString(raw) == value
 }
 
-// ValidEIHPassword reports whether value is a canonical SS2022 EIH multi-user
-// password formatted as "<16B-server-iPSK>:<16B-uPSK>".
-func ValidEIHPassword(value string) bool {
+// ValidEIHKey reports whether value is a canonical SS2022 EIH multi-user
+// key formatted as "<16B-server-iPSK>:<16B-uPSK>".
+func ValidEIHKey(value string) bool {
 	serverKey, userKey, ok := strings.Cut(value, ":")
 	return ok && !strings.Contains(userKey, ":") && ValidSS2022Key16(serverKey) && ValidSS2022Key16(userKey)
 }
@@ -324,13 +324,13 @@ type EntryRelayEdge struct {
 	Source      string `json:"source"`
 	Address     string `json:"address"`
 	Port        int    `json:"port"`
-	Password    string `json:"password"`
+	Key         string `json:"key"`
 }
 
 func (e EntryRelayEdge) Validate() error {
 	isV4 := PublicTransportIPv4(e.Address)
 	isV6 := PublicTransportIPv6(e.Address)
-	if !ValidIdentifier(e.ID) || !ValidIdentifier(e.RelayNodeID) || e.Port != RelayPoolPort || (!isV4 && !isV6) || e.Source == e.Address || !ValidEIHPassword(e.Password) {
+	if !ValidIdentifier(e.ID) || !ValidIdentifier(e.RelayNodeID) || e.Port != RelayPoolPort || (!isV4 && !isV6) || e.Source == e.Address || !ValidEIHKey(e.Key) {
 		return errors.New("glivela: invalid entry relay edge")
 	}
 	if isV4 && !PublicTransportIPv4(e.Source) || isV6 && !PublicTransportIPv6(e.Source) {
@@ -346,11 +346,11 @@ type EntryPoolCandidate struct {
 	RelayEdgeID    string `json:"relayEdgeId"`
 	LandingAddress string `json:"landingAddress"`
 	LandingPort    int    `json:"landingPort"`
-	LandingPass    string `json:"landingPassword"`
+	LandingKey     string `json:"landingKey"`
 }
 
 func (c EntryPoolCandidate) Validate() error {
-	if !ValidIdentifier(c.RelayNodeID) || !ValidIdentifier(c.RelayEdgeID) || c.LandingPort != RelayPoolPort || !(PublicTransportIPv4(c.LandingAddress) || PublicTransportIPv6(c.LandingAddress)) || !ValidEIHPassword(c.LandingPass) {
+	if !ValidIdentifier(c.RelayNodeID) || !ValidIdentifier(c.RelayEdgeID) || c.LandingPort != RelayPoolPort || !(PublicTransportIPv4(c.LandingAddress) || PublicTransportIPv6(c.LandingAddress)) || !ValidEIHKey(c.LandingKey) {
 		return errors.New("glivela: invalid entry pool candidate")
 	}
 	return nil

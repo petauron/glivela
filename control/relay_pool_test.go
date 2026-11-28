@@ -176,7 +176,7 @@ func TestRelayPoolPhysicalEdgeReuseAndCredentialIsolation(t *testing.T) {
 			p1Alt = ep
 		}
 	}
-	if p1.Key == p1Alt.Key || p1.Candidates[0].LandingPass == p1Alt.Candidates[0].LandingPass {
+	if p1.Key == p1Alt.Key || p1.Candidates[0].LandingKey == p1Alt.Candidates[0].LandingKey {
 		t.Fatal("two grants with distinct EgressIP on same landing were merged onto identical uPSK/pool")
 	}
 
@@ -576,7 +576,13 @@ func TestForwardMigrationV1ThreeHopToV2RelayPool(t *testing.T) {
 	npeer.RelayIdentity = &relayID
 	network.Peers = append(network.Peers, npeer)
 
-	baseCred := plan.Credentials[0]
+	baseIdx := slices.IndexFunc(plan.Credentials, func(c glivela.CredentialMaterial) bool {
+		return c.Credential.Kind == glivela.NativeCredential && c.Credential.AccountID == grant.AccountID && c.Credential.EntryID == grant.EntryID
+	})
+	if baseIdx < 0 {
+		t.Fatal("missing native base credential")
+	}
+	baseCred := plan.Credentials[baseIdx]
 	routeUUID := "00000000-0000-4000-8000-000000000240"
 	routeCred := glivela.Credential{ID: "cred-legacy-threehop", AccountID: grant.AccountID, Kind: glivela.RouteCredential, User: glivela.RouteUser("grant-legacy-threehop"), Identity: glivela.Identity(routeUUID), EntryID: grant.EntryID, EgressID: grant.EgressID, Enabled: true}
 	v1Grant := glivela.RouteGrant{ID: "grant-legacy-threehop", AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, ClientChainID: chainID, UDP: true, InboundTag: plan.RealityEndpoints[0].InboundTag, Base: baseCred.Credential, Route: routeCred, Mode: glivela.FixedMode, Enabled: true, DesiredRev: 1}
@@ -649,7 +655,7 @@ func TestForwardMigrationV1ThreeHopToV2RelayPool(t *testing.T) {
 	v1Mat.ProtocolSecrets[routeCred.ID] = routeUUID
 	v1Mat.TrafficCounters[routeCred.ID] = glivela.ImportTrafficCounters{UploadBytes: 4000, DownloadBytes: 8345, RawUploadBytes: 4000, RawDownloadBytes: 8345}
 	v1Mat.SubscriptionOrders = map[string]glivela.SubscriptionOrder{
-		grant.AccountID: {Revision: 2, IDs: []string{routeCred.ID}},
+		grant.AccountID: {Revision: 2, IDs: []string{"route/" + v1Grant.ID}},
 	}
 	if err := v1Mat.Validate(); err != nil {
 		t.Fatalf("v1 material invalid: %v", err)
@@ -911,6 +917,7 @@ func TestControlledSocketCutoverOptionAAndRollback(t *testing.T) {
 
 	// InspectSocketCutover inventories ALL 3 consumer kinds
 	// (two-hop-source, pooled-route-landing, AND pooled-route-relay)!
+	reportFreshLanding(t, s, landing2Cert, landing2ID)
 	reportFreshEntry(t, s, entryCert)
 	plan, err := s.InspectSocketCutover("landing-example", "9.9.9.9")
 	if err != nil || !plan.Occupied || plan.Deferred || len(plan.Consumers) != 3 {
@@ -1396,7 +1403,8 @@ func TestObservatoryLowFrequencyReportingAndCoalescing(t *testing.T) {
 	s.mu.Lock()
 	s.nodesFlushInterval = time.Hour
 	s.mu.Unlock()
-	obs := healthyEntryObservation(entry.Desired, time.Now().UTC())
+	t1 := time.Now().UTC().Add(-2 * time.Second)
+	obs := healthyEntryObservation(entry.Desired, t1)
 	obs.MaxEntryRenderVersion = glivela.XrayRenderVersion
 	for id, peer := range obs.EntryHealth.Peers {
 		peer.Status.LinkState = "authenticated"
@@ -1413,14 +1421,16 @@ func TestObservatoryLowFrequencyReportingAndCoalescing(t *testing.T) {
 	if len(inv.ObservatoryPaths) != 1 || inv.ObservatoryPaths[0].RelayNodeID != "relay-obs" || inv.ObservatoryPaths[0].DelayMS != 42 || !inv.ObservatoryPaths[0].Alive {
 		t.Fatalf("Business inventory missing ObservatoryPaths: %+v", inv.ObservatoryPaths)
 	}
-	obs2 := healthyEntryObservation(entry.Desired, time.Now().UTC())
-	obs2.MaxEntryRenderVersion = glivela.XrayRenderVersion
+	t2 := t1.Add(time.Second)
+	obs2 := obs.clone()
+	obs2.EntryHealth.SampledAt = t2
 	for id, peer := range obs2.EntryHealth.Peers {
-		peer.Status.LinkState = "authenticated"
+		peer.Status.CheckedAt = t2
+		peer.Status.LastHealthyAt = t2
 		obs2.EntryHealth.Peers[id] = peer
 	}
 	repUpdated := rep1.clone()
-	repUpdated.SampledAt = time.Now().UTC()
+	repUpdated.SampledAt = t2
 	repUpdated.Paths[0].DelayMS = 55
 	obs2.Observatory = repUpdated
 	if _, err := s.Exchange(context.Background(), entryCert, &obs2); err != nil {
@@ -1544,12 +1554,12 @@ func TestRelayPoolAdminEndpointsAndDockerDriverRejection(t *testing.T) {
 			Bridge:                 "br-example",
 			NetworkAddress:         "172.20.0.2",
 			UID:                    1000,
-			GID:                    1000,
+			GID:                    0,
 		},
 	}
 	entryPlan := *s.nodes[entryCert].Desired.clone().Entry
 	entryPlan.Peers = nil
-	entryPlan.RelayEdges = []glivela.EntryRelayEdge{{ID: "re-1", RelayNodeID: "relay-admin", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::1111", Port: glivela.RelayPoolPort, Password: "MDEyMzQ1Njc4OWFiY2RlZg==:YWJjZGVmZ2hpamtsbW5vcA=="}}
+	entryPlan.RelayEdges = []glivela.EntryRelayEdge{{ID: "re-1", RelayNodeID: "relay-admin", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::1111", Port: glivela.RelayPoolPort, Key: "MDEyMzQ1Njc4OWFiY2RlZg==:YWJjZGVmZ2hpamtsbW5vcA=="}}
 	entryNet := EntryNetwork{
 		RelayPeers: []EntryRelayNetworkPeer{{
 			NodeID:        "relay-admin",
@@ -1870,7 +1880,13 @@ func TestSocketCutoverLegacyThreeHopAndDualStackTransportPreservation(t *testing
 	}
 	plan.Peers = append(plan.Peers, legacyPeer)
 	network.Peers = append(network.Peers, EntryPeer{EgressID: "landing-legacy-24000", ClientChainID: chainID, Identity: landing2ID, RelayIdentity: &relayID, Target: network.Peers[0].Target, ExpectedExit: "8.8.8.8"})
-	baseCred := plan.Credentials[0]
+	baseIdx := slices.IndexFunc(plan.Credentials, func(c glivela.CredentialMaterial) bool {
+		return c.Credential.Kind == glivela.NativeCredential && c.Credential.AccountID == grant.AccountID && c.Credential.EntryID == grant.EntryID
+	})
+	if baseIdx < 0 {
+		t.Fatal("missing native base credential")
+	}
+	baseCred := plan.Credentials[baseIdx]
 	routeUUID := "00000000-0000-4000-8000-000000000241"
 	routeCred := glivela.Credential{ID: "cred-leg-24000", AccountID: grant.AccountID, Kind: glivela.RouteCredential, User: glivela.RouteUser("grant-leg-24000"), Identity: glivela.Identity(routeUUID), EntryID: grant.EntryID, EgressID: "landing-legacy-24000", Enabled: true}
 	legGrant := glivela.RouteGrant{ID: "grant-leg-24000", AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: "landing-legacy-24000", ClientChainID: chainID, UDP: true, InboundTag: plan.RealityEndpoints[0].InboundTag, Base: baseCred.Credential, Route: routeCred, Mode: glivela.FixedMode, Enabled: true, DesiredRev: 1}

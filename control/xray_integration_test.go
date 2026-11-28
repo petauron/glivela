@@ -190,8 +190,8 @@ func TestOfficialXrayEntryPlanValidation(t *testing.T) {
 	obs := glivela.DefaultObservatoryConfig()
 	pooledPlan.Observatory = &obs
 	pooledPlan.RelayEdges = []glivela.EntryRelayEdge{
-		{ID: "re-a", RelayNodeID: "relay-a", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::1111", Port: glivela.RelayPoolPort, Password: "MDEyMzQ1Njc4OWFiY2RlZg==:YWJjZGVmZ2hpamtsbW5vcA=="},
-		{ID: "re-b", RelayNodeID: "relay-b", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::2222", Port: glivela.RelayPoolPort, Password: "MDEyMzQ1Njc4OWFiY2RlZg==:cHFyc3R1dnd4eXp7fH1+fw=="},
+		{ID: "re-a", RelayNodeID: "relay-a", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::1111", Port: glivela.RelayPoolPort, Key: "MDEyMzQ1Njc4OWFiY2RlZg==:YWJjZGVmZ2hpamtsbW5vcA=="},
+		{ID: "re-b", RelayNodeID: "relay-b", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::2222", Port: glivela.RelayPoolPort, Key: "MDEyMzQ1Njc4OWFiY2RlZg==:cHFyc3R1dnd4eXp7fH1+fw=="},
 	}
 	pooledPlan.RelayPools = []glivela.EntryRelayPool{{
 		Key:       poolGrant.PoolKey(),
@@ -202,8 +202,8 @@ func TestOfficialXrayEntryPlanValidation(t *testing.T) {
 		UDP:       true,
 		Strategy:  glivela.DefaultRelayPoolStrategy(2),
 		Candidates: []glivela.EntryPoolCandidate{
-			{RelayNodeID: "relay-a", RelayEdgeID: "re-a", LandingAddress: "2606:4700:4700::1111", LandingPort: glivela.RelayPoolPort, LandingPass: "MDEyMzQ1Njc4OWFiY2RlZg==:YWJjZGVmZ2hpamtsbW5vcA=="},
-			{RelayNodeID: "relay-b", RelayEdgeID: "re-b", LandingAddress: "2606:4700:4700::1111", LandingPort: glivela.RelayPoolPort, LandingPass: "MDEyMzQ1Njc4OWFiY2RlZg==:cHFyc3R1dnd4eXp7fH1+fw=="},
+			{RelayNodeID: "relay-a", RelayEdgeID: "re-a", LandingAddress: "2606:4700:4700::1111", LandingPort: glivela.RelayPoolPort, LandingKey: "MDEyMzQ1Njc4OWFiY2RlZg==:YWJjZGVmZ2hpamtsbW5vcA=="},
+			{RelayNodeID: "relay-b", RelayEdgeID: "re-b", LandingAddress: "2606:4700:4700::1111", LandingPort: glivela.RelayPoolPort, LandingKey: "MDEyMzQ1Njc4OWFiY2RlZg==:cHFyc3R1dnd4eXp7fH1+fw=="},
 		},
 	}}
 	pooledNet := EntryNetwork{

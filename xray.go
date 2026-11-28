@@ -388,7 +388,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 					"address":  edge.Address,
 					"port":     edge.Port,
 					"method":   SS2022Method,
-					"password": edge.Password,
+					"password": edge.Key,
 				}},
 			},
 		})
@@ -416,7 +416,7 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 								"address":  cand.LandingAddress,
 								"port":     cand.LandingPort,
 								"method":   SS2022Method,
-								"password": cand.LandingPass,
+								"password": cand.LandingKey,
 							}},
 						},
 						"streamSettings": map[string]any{

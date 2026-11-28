@@ -31,7 +31,7 @@ func (t PrivateTransport) Validate() error {
 		return nil
 	}
 	if strings.Contains(t.Key, ":") {
-		if t.Protocol != "ss2022" || t.Port != RelayPoolPort || t.PrivateLink != nil || !ValidEIHPassword(t.Key) || !(PublicTransportIPv4(t.PublicAddress) || PublicTransportIPv6(t.PublicAddress)) || t.ClientListenerID != "" && !ValidIdentifier(t.ClientListenerID) {
+		if t.Protocol != "ss2022" || t.Port != RelayPoolPort || t.PrivateLink != nil || !ValidEIHKey(t.Key) || !(PublicTransportIPv4(t.PublicAddress) || PublicTransportIPv6(t.PublicAddress)) || t.ClientListenerID != "" && !ValidIdentifier(t.ClientListenerID) {
 			return errors.New("glivela: invalid EIH private transport")
 		}
 		return nil

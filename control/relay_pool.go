@@ -654,9 +654,9 @@ func projectRelayPools(nodes map[string]Node, m glivela.ImportMaterial, now time
 		entrySrc       string
 		relayIngress   string
 		edgeID         string
-		edgePassword   string
+		edgeKey        string
 		landingAddress string
-		landingPass    string
+		landingKey     string
 		relayUser      landing.EIHUser
 		landingUser    landing.EIHUser
 	}
@@ -734,9 +734,9 @@ func projectRelayPools(nodes map[string]Node, m glivela.ImportMaterial, now time
 				entrySrc:       entrySrc,
 				relayIngress:   relayIngress,
 				edgeID:         edgeCredID,
-				edgePassword:   relayKey.ServerKey + ":" + edgeSecret,
+				edgeKey:        relayKey.ServerKey + ":" + edgeSecret,
 				landingAddress: pr.LandingAddress,
-				landingPass:    targetKey.ServerKey + ":" + hopSecret,
+				landingKey:     targetKey.ServerKey + ":" + hopSecret,
 				relayUser:      relayUser,
 				landingUser:    landingUser,
 			})
@@ -937,14 +937,14 @@ func projectRelayPools(nodes map[string]Node, m glivela.ImportMaterial, now time
 						Source:      cand.entrySrc,
 						Address:     cand.relayIngress,
 						Port:        glivela.RelayPoolPort,
-						Password:    cand.edgePassword,
+						Key:         cand.edgeKey,
 					}
 					entryCand := glivela.EntryPoolCandidate{
 						RelayNodeID:    cand.relayNodeID,
 						RelayEdgeID:    cand.edgeID,
 						LandingAddress: cand.landingAddress,
 						LandingPort:    glivela.RelayPoolPort,
-						LandingPass:    cand.landingPass,
+						LandingKey:     cand.landingKey,
 					}
 					// Control-plane admission check: a candidate already active on this
 					// entry stays active across transient heartbeat blips as long as its
@@ -1017,9 +1017,15 @@ func projectRelayPools(nodes map[string]Node, m glivela.ImportMaterial, now time
 		plan.Peers = slices.DeleteFunc(plan.Peers, func(p glivela.RoutePeer) bool {
 			return p.Relay != nil && !isPendingLegacyThreeHop(m, p.Transport.ClientListenerID)
 		})
+		if len(plan.Peers) == 0 {
+			plan.Peers = nil
+		}
 		network.Peers = slices.DeleteFunc(network.Peers, func(p EntryPeer) bool {
 			return p.RelayIdentity != nil && !isPendingLegacyThreeHop(m, p.ClientChainID)
 		})
+		if len(network.Peers) == 0 {
+			network.Peers = nil
+		}
 		if len(network.Peers) == 0 && len(nextRelayPeers) == 0 && len(nextPooledLandings) == 0 {
 			network.Source = nil
 		}

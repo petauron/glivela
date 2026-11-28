@@ -653,11 +653,20 @@ func buildCutoverTargetDesired(base landing.Plan, address, serverKey string, eih
 		}
 		return removedClientIDs[cl.ID] || (cAddr == address && cl.Port == glivela.RelayPoolPort)
 	})
+	if len(targetPlan.ClientListeners) == 0 {
+		targetPlan.ClientListeners = nil
+	}
 	targetPlan.UDPOverTCPListeners = slices.DeleteFunc(slices.Clone(targetPlan.UDPOverTCPListeners), func(lid string) bool {
 		return !slices.ContainsFunc(targetPlan.ClientListeners, func(cl landing.ClientListener) bool { return cl.ID == lid })
 	})
+	if len(targetPlan.UDPOverTCPListeners) == 0 {
+		targetPlan.UDPOverTCPListeners = nil
+	}
 	if targetPlan.HasServerListener() && targetPlan.Transport.Endpoint(targetPlan.Address) == address && targetPlan.Transport.ListenerPort() == glivela.RelayPoolPort {
 		targetPlan.Sources = slices.DeleteFunc(slices.Clone(targetPlan.Sources), func(src landing.Source) bool { return removedSourceIPs[src.PublicAddress] })
+		if len(targetPlan.Sources) == 0 {
+			targetPlan.Sources = nil
+		}
 		targetPlan.Transport.Port = 0
 		// Retain Transport.PublicAddress (with Port==0) whenever other
 		// ClientListeners (e.g. IPv6 24001) still depend on the public binding.
@@ -675,8 +684,10 @@ func buildCutoverTargetDesired(base landing.Plan, address, serverKey string, eih
 			ServerKey: serverKey,
 			Users:     eihUsers,
 		})
-	} else {
+	} else if len(existingEIH) > 0 {
 		targetPlan.EIHListeners = existingEIH
+	} else {
+		targetPlan.EIHListeners = nil
 	}
 	if targetPlan.Revision == math.MaxUint64 {
 		return Desired{}, errors.New("control: landing revision exhausted")
@@ -994,14 +1005,14 @@ func (s *Store) replayCutoverEntriesLocked(record SocketCutover, now time.Time) 
 			if !glivela.ValidSS2022Key16(secret) {
 				return errors.New("control: cutover consumer credential missing")
 			}
-			eihPassword := serverKey + ":" + secret
+			eihKey := serverKey + ":" + secret
 			for i := range plan.Peers {
 				if plan.Peers[i].PeerKey() == c.PeerKey && plan.Peers[i].EgressID == record.TargetNodeID {
-					if plan.Peers[i].Transport.Protocol != "ss2022" || plan.Peers[i].Transport.PublicAddress != record.Address || plan.Peers[i].Transport.Port != glivela.RelayPoolPort || plan.Peers[i].Transport.Key != eihPassword || plan.Peers[i].Port != glivela.RelayPoolPort {
+					if plan.Peers[i].Transport.Protocol != "ss2022" || plan.Peers[i].Transport.PublicAddress != record.Address || plan.Peers[i].Transport.Port != glivela.RelayPoolPort || plan.Peers[i].Transport.Key != eihKey || plan.Peers[i].Port != glivela.RelayPoolPort {
 						plan.Peers[i].Transport.Protocol = "ss2022"
 						plan.Peers[i].Transport.PublicAddress = record.Address
 						plan.Peers[i].Transport.Port = glivela.RelayPoolPort
-						plan.Peers[i].Transport.Key = eihPassword
+						plan.Peers[i].Transport.Key = eihKey
 						plan.Peers[i].Port = glivela.RelayPoolPort
 						entryMutated = true
 					}
@@ -1009,8 +1020,8 @@ func (s *Store) replayCutoverEntriesLocked(record SocketCutover, now time.Time) 
 			}
 			if c.ServerTransportID != "" {
 				if r, exists := nextMat.ServerTransports[c.ServerTransportID]; exists {
-					r.Peer.Transport.Key = eihPassword
-					r.Listener.Key = eihPassword
+					r.Peer.Transport.Key = eihKey
+					r.Listener.Key = eihKey
 					nextMat.ServerTransports[c.ServerTransportID] = r
 				}
 			}
@@ -1245,11 +1256,11 @@ func (s *Store) applyCutoverRollbackLocked(record SocketCutover, now time.Time) 
 	}
 	nextMat := s.business.material
 	serverKey := nextMat.EIHNodeKeys[record.TargetNodeID].ServerKey
-	eihPasswords := map[string]bool{}
+	eihKeys := map[string]bool{}
 	for _, c := range record.Consumers {
 		if c.CredentialID != "" && serverKey != "" {
 			if sec := nextMat.RelayPoolCredentials[c.CredentialID]; sec != "" {
-				eihPasswords[serverKey+":"+sec] = true
+				eihKeys[serverKey+":"+sec] = true
 			}
 		}
 	}
@@ -1260,6 +1271,9 @@ func (s *Store) applyCutoverRollbackLocked(record SocketCutover, now time.Time) 
 	filteredEIH := slices.DeleteFunc(targetPlan.CloneEIHListeners(), func(l landing.EIHListener) bool {
 		return l.Address == record.Address && l.Port == glivela.RelayPoolPort
 	})
+	if len(filteredEIH) == 0 {
+		filteredEIH = nil
+	}
 	if len(filteredEIH) != len(targetPlan.EIHListeners) {
 		targetPlan.EIHListeners = filteredEIH
 		targetChanged = true
@@ -1314,9 +1328,9 @@ func (s *Store) applyCutoverRollbackLocked(record SocketCutover, now time.Time) 
 		entryMutated := false
 		for i := range plan.Peers {
 			if plan.Peers[i].PeerKey() == prb.PeerKey && plan.Peers[i].EgressID == prb.EgressID {
-				// Restore ONLY if this peer currently holds this cutover's EIH password
+				// Restore ONLY if this peer currently holds this cutover's EIH key
 				// (or was partially switched), never touching unrelated peers or grants.
-				if strings.Contains(plan.Peers[i].Transport.Key, ":") && (len(eihPasswords) == 0 || eihPasswords[plan.Peers[i].Transport.Key]) {
+				if strings.Contains(plan.Peers[i].Transport.Key, ":") && (len(eihKeys) == 0 || eihKeys[plan.Peers[i].Transport.Key]) {
 					plan.Peers[i].Port = prb.Port
 					plan.Peers[i].Transport = prb.Transport
 					entryMutated = true
