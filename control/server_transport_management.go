@@ -39,7 +39,7 @@ func (s *Store) ChangeServerTransport(ctx context.Context, c ServerTransportChan
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if s.business == nil || s.business.faulted || s.business.material.Ownership == nil || c.ExpectedRevision == 0 || c.ExpectedRevision == math.MaxUint64 || c.Resource.Validate() != nil {
+	if s.business == nil || s.business.faulted || s.business.material.Ownership == nil || c.ExpectedRevision == 0 || c.ExpectedRevision == math.MaxUint64 || c.Resource.Validate() != nil || c.Resource.Peer.Relay != nil || c.Resource.RelayListener != nil {
 		return bad
 	}
 	next := s.business.material
@@ -79,7 +79,7 @@ func (s *Store) ChangeServerTransport(ctx context.Context, c ServerTransportChan
 		}
 		for _, account := range next.Plan.Accounts {
 			for _, g := range account.Grants {
-				if !next.DeletedRoutes[g.ID] && g.EntryID == old.EntryID && g.EgressID == old.EgressID && g.ClientChainID == old.Peer.ClientChainID {
+				if !next.DeletedRoutes[g.ID] && g.RelayPoolID == "" && g.EntryID == old.EntryID && g.EgressID == old.EgressID && g.ClientChainID == old.Peer.ClientChainID {
 					return bad
 				}
 			}
@@ -102,7 +102,7 @@ func (s *Store) ChangeServerTransport(ctx context.Context, c ServerTransportChan
 				target = n
 			}
 		}
-		if _, ok := serverTransportIdentity(s.nodes, c.Resource, entry, target, c.Resource.Peer); !ok || !runtimeFresh(entry, time.Now()) || !runtimeFresh(target, time.Now()) || !slices.Contains(target.Desired.Landing.ClientListeners, c.Resource.Listener) {
+		if _, ok := serverTransportIdentity(s.nodes, next, c.Resource, entry, target, c.Resource.Peer); !ok || !runtimeFresh(entry, time.Now()) || !runtimeFresh(target, time.Now()) || !slices.Contains(target.Desired.Landing.ClientListeners, c.Resource.Listener) {
 			return bad
 		}
 		if c.Resource.Peer.Relay != nil {

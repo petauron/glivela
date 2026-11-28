@@ -48,7 +48,7 @@ func readLegacyEntry(ctx context.Context, id, application string) (legacyEntrySn
 	}
 	state, err := decodeEntryContainer(raw)
 	canonicalizeLegacyEntryMounts(&state)
-	if err != nil || state.ID != id || (state.Config.Image != legacyEntryImageReference && state.Config.Image != entryImageReference) || !slices.Equal(state.Config.Entrypoint, []string{"/usr/local/bin/xray"}) || !slices.Equal(state.Config.Cmd, []string{"run", "-c", "/etc/vastora/config.json"}) || state.Host.Privileged || !state.Host.ReadonlyRootfs || state.Host.AutoRemove || state.State.Restarting || state.State.Paused || state.State.Dead || !legacyEntryMountsValid(state) {
+	if err != nil || state.ID != id || (state.Config.Image != legacyEntryImageReference && !isPinnedEntryImageReference(state.Config.Image)) || !slices.Equal(state.Config.Entrypoint, []string{"/usr/local/bin/xray"}) || !slices.Equal(state.Config.Cmd, []string{"run", "-c", "/etc/vastora/config.json"}) || state.Host.Privileged || !state.Host.ReadonlyRootfs || state.Host.AutoRemove || state.State.Restarting || state.State.Paused || state.State.Dead || !legacyEntryMountsValid(state) {
 		return legacyEntrySnapshot{}, invalid
 	}
 	switch state.Host.Restart {

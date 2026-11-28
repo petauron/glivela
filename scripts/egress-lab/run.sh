@@ -5,7 +5,7 @@ case "$lab" in /*) ;; *) echo 'absolute lab directory required' >&2; exit 1;; es
 [ "$(uname -s)" = Linux ] || { echo 'Linux is required' >&2; exit 1; }
 prefix=glivela-egress-$$
 network=$prefix-network
-xray=ghcr.io/xtls/xray-core:26.9.30@sha256:6d30597c3e729b5dc1faac8dbc0138fbbe6d4d787bfb54120ea48f14e2e7b5ca
+xray=ghcr.io/xtls/xray-core:26.11.9@sha256:9812e382e229e9ed63fd179bf1a4e3fe244c12ff3ae4fd8128745d79c87575ab
 python=python@sha256:399babc8b49529dabfd9c922f2b5eea81d611e4512e3ed250d75bd2e7683f4b0
 for name in "$prefix-peer" "$prefix-xray"; do
  if docker container inspect "$name" >/dev/null 2>&1; then echo 'test container already exists' >&2; exit 1; fi

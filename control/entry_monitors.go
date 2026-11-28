@@ -297,7 +297,7 @@ func (m *entryMonitors) start(ctx context.Context, desired Desired, gates []*lan
 }
 
 func sameEntryTransport(a, b *EntryNetwork) bool {
-	if a == nil || b == nil || !reflect.DeepEqual(a.Source, b.Source) || len(a.Peers) != len(b.Peers) {
+	if a == nil || b == nil || !reflect.DeepEqual(a.Source, b.Source) || len(a.Peers) != len(b.Peers) || !reflect.DeepEqual(a.RelayPeers, b.RelayPeers) || !reflect.DeepEqual(a.PooledLandings, b.PooledLandings) {
 		return false
 	}
 	peers := make(map[string]EntryPeer, len(a.Peers))

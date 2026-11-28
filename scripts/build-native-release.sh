@@ -78,12 +78,12 @@ build_arch() {
   case "$arch" in
     amd64)
       asset=Xray-linux-64.zip
-      digest=e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214
+      digest=b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82
       iperf_asset=iperf3-amd64
       iperf_digest=ef4c89f3fc01c56cf00d34b900024c74f68e540dab452eef4fd902544d9c1c64 ;;
     arm64)
       asset=Xray-linux-arm64-v8a.zip
-      digest=1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d
+      digest=64ed6858982a7f5eb85d88b811089063bd4f17561f4c8f44e0f1dc8e6f6430be
       iperf_asset=iperf3-arm64v8
       iperf_digest=34364466812357fe021a8647cb433c8006b0360e3b690ecda470a979a2601031 ;;
     *)
@@ -94,7 +94,7 @@ build_arch() {
   mkdir -p "$bundle" "$stage/xdg-data-$arch" "$stage/xdg-cache-$arch"
   # Resolve the exact official asset through GitHub's API after browser URL
   # downloads returned HTTP 504; the pinned bytes are unchanged.
-  fetch_verified_asset XTLS/Xray-core v26.10.31 "$asset" "$digest" "$stage/$asset"
+  fetch_verified_asset XTLS/Xray-core v26.11.9 "$asset" "$digest" "$stage/$asset"
   unzip -p "$stage/$asset" xray > "$bundle/xray"
   unzip -p "$stage/$asset" LICENSE > "$bundle/LICENSE.xray"
   test -s "$bundle/xray"
@@ -120,7 +120,7 @@ build_arch() {
   ui_css_digest=$(sha256sum "$bundle/glivela-ui.css" | cut -d ' ' -f 1)
   jq -n --arg version "$version" --arg commit "$commit" --arg arch "$arch" \
     --arg xray "$xray_digest" --arg archive "$digest" --arg iperf "$iperf_digest" --arg uiJS "$ui_js_digest" --arg uiCSS "$ui_css_digest" \
-    '{hostTCPBudget:"vastora-v1",version:$version,commit:$commit,os:"linux",architecture:$arch,xray:{version:"26.10.31",sha256:$xray,sourceArchiveSHA256:$archive},iperf3:{version:"3.22",sha256:$iperf},ui:{"glivela-ui.js":$uiJS,"glivela-ui.css":$uiCSS}}' > "$bundle/runtime.json"
+    '{hostTCPBudget:"vastora-v1",version:$version,commit:$commit,os:"linux",architecture:$arch,xray:{version:"26.11.9",sha256:$xray,sourceArchiveSHA256:$archive},iperf3:{version:"3.22",sha256:$iperf},ui:{"glivela-ui.js":$uiJS,"glivela-ui.css":$uiCSS}}' > "$bundle/runtime.json"
   chmod 0644 "$bundle/LICENSE.glivela" "$bundle/LICENSE.xray" "$bundle/LICENSE.iperf3" "$bundle/runtime.json"
   archive="glivela-$version-linux-$arch.tar.gz"
   tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \

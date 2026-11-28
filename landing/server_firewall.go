@@ -34,6 +34,7 @@ type ServerFirewall struct {
 	IPv6Only        bool                     `json:"ipv6Only,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	ClientListeners []ClientListenerPolicy   `json:"clientListeners,omitempty"`
+	EIHListeners    []EIHListenerPolicy      `json:"eihListeners,omitempty"`
 	Public          bool                     `json:"public,omitempty"`
 	EgressIP        string                   `json:"egressIp,omitempty"`
 	Revision        uint64                   `json:"revision"`
@@ -70,12 +71,28 @@ func (policy ServerFirewall) validate() error {
 			}
 		}
 	}
+	for _, listener := range policy.EIHListeners {
+		if err := policy.PublicSSH.RequireHost(listener.Address); err != nil {
+			return err
+		}
+		for _, ip := range listener.EgressIPs {
+			if !ValidEgressIP(ip) || policy.PublicSSH.RequireHost(ip) != nil {
+				return errors.New("landing: invalid EIH firewall exit")
+			}
+		}
+		for _, relay := range listener.RelayEgress {
+			if !ValidEgressIP(relay.Source) || policy.PublicSSH.RequireHost(relay.Source) != nil {
+				return errors.New("landing: invalid EIH relay firewall exit")
+			}
+		}
+	}
 	if !ValidEgressIP(policy.EgressIP) {
 		return errors.New("landing: invalid firewall egress IP")
 	}
 	seen := map[string]bool{}
 	for _, ip := range policy.UDPEgressIPs {
-		if seen[ip] || ip != policy.EgressIP && !slices.ContainsFunc(policy.ClientListeners, func(c ClientListenerPolicy) bool { return c.EgressIP == ip }) {
+		allowedEIH := slices.ContainsFunc(policy.EIHListeners, func(e EIHListenerPolicy) bool { return slices.Contains(e.EgressIPs, ip) })
+		if seen[ip] || ip != policy.EgressIP && !slices.ContainsFunc(policy.ClientListeners, func(c ClientListenerPolicy) bool { return c.EgressIP == ip }) && !allowedEIH {
 			return errors.New("landing: UDP exit is not an authorized egress")
 		}
 		seen[ip] = true
@@ -132,6 +149,50 @@ func (policy ServerFirewall) validateIdentity() error {
 		}
 		ports[c.Port] = c
 	}
+	seenEIH := map[string]bool{}
+	for _, e := range policy.EIHListeners {
+		isV4 := glivela.PublicTransportIPv4(e.Address)
+		isV6 := glivela.PublicTransportIPv6(e.Address)
+		if (!isV4 && !isV6) || e.Port != glivela.RelayPoolPort || seenEIH[e.Address] || len(e.Sources) == 0 || len(e.Sources) > 1024 {
+			return errors.New("landing: invalid EIH listener firewall")
+		}
+		if e.Interface != "" && (!bridgeNamePattern.MatchString(e.Interface) || e.Interface == "lo") {
+			return errors.New("landing: invalid EIH listener interface")
+		}
+		if policy.IPv6Only && (!isV6 || e.Address != policy.Address) {
+			return errors.New("landing: IPv4 EIH listener in IPv6-only firewall")
+		}
+		if !policy.IPv6Only && policy.Address == e.Address && policy.listenerPort() == e.Port {
+			return errors.New("landing: EIH firewall conflicts with server listener")
+		}
+		for _, c := range policy.ClientListeners {
+			cAddr := policy.Address
+			if c.Transport == "ipv6-ss2022" || c.Interface != "" {
+				cAddr = c.Address
+			}
+			if cAddr == e.Address && c.Port == e.Port {
+				return errors.New("landing: EIH firewall conflicts with client listener")
+			}
+		}
+		seenSources := map[string]bool{}
+		for _, src := range e.Sources {
+			if src == e.Address || seenSources[src] || isV4 && !glivela.PublicTransportIPv4(src) || isV6 && !glivela.PublicTransportIPv6(src) {
+				return errors.New("landing: invalid EIH firewall source")
+			}
+			seenSources[src] = true
+		}
+		for _, relay := range e.RelayEgress {
+			if relay.Port != glivela.RelayPoolPort || !ValidEgressIP(relay.Source) || !(glivela.PublicTransportIPv4(relay.Address) || glivela.PublicTransportIPv6(relay.Address)) || relay.Address == e.Address || relay.Address == relay.Source {
+				return errors.New("landing: invalid EIH relay firewall target")
+			}
+			srcIP, _ := netip.ParseAddr(relay.Source)
+			dstIP, _ := netip.ParseAddr(relay.Address)
+			if srcIP.Is6() != dstIP.Is6() {
+				return errors.New("landing: EIH relay firewall family mismatch")
+			}
+		}
+		seenEIH[e.Address] = true
+	}
 	return nil
 }
 
@@ -142,6 +203,26 @@ func (policy ServerFirewall) digest() string {
 	slices.Sort(policy.TCPOnlySources)
 	policy.UDPEgressIPs = slices.Clone(policy.UDPEgressIPs)
 	slices.Sort(policy.UDPEgressIPs)
+	if len(policy.EIHListeners) != 0 {
+		policy.EIHListeners = slices.Clone(policy.EIHListeners)
+		for i := range policy.EIHListeners {
+			policy.EIHListeners[i].Sources = slices.Clone(policy.EIHListeners[i].Sources)
+			slices.Sort(policy.EIHListeners[i].Sources)
+			policy.EIHListeners[i].EgressIPs = slices.Clone(policy.EIHListeners[i].EgressIPs)
+			slices.Sort(policy.EIHListeners[i].EgressIPs)
+			policy.EIHListeners[i].RelayEgress = slices.Clone(policy.EIHListeners[i].RelayEgress)
+			slices.SortFunc(policy.EIHListeners[i].RelayEgress, func(a, b EIHRelayPolicy) int {
+				if c := strings.Compare(a.Source, b.Source); c != 0 {
+					return c
+				}
+				if c := strings.Compare(a.Address, b.Address); c != 0 {
+					return c
+				}
+				return a.Port - b.Port
+			})
+		}
+		slices.SortFunc(policy.EIHListeners, func(a, b EIHListenerPolicy) int { return strings.Compare(a.Address, b.Address) })
+	}
 	data, _ := json.Marshal(policy)
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
@@ -149,6 +230,9 @@ func (policy ServerFirewall) digest() string {
 
 func (policy ServerFirewall) identity() (string, string) {
 	sum := policy.digest()
+	if len(policy.EIHListeners) != 0 {
+		return "glivela_landing_server_v4_" + sum[:16], "glivela-landing-server-v4:" + sum
+	}
 	if len(policy.UDPEgressIPs) != 0 {
 		return "glivela_landing_server_v3_" + sum[:16], "glivela-landing-server-v3:" + sum
 	}
@@ -239,6 +323,27 @@ func (policy ServerFirewall) renderObjectsWithPolicy(table, marker string, legac
 		}
 		rule("destinations", match(meta("oifname"), iface), match(payload(family, "saddr"), address), match(payload(family, "daddr"), c.Source), match(payload("tcp", "sport"), c.Port), match(nftObject{"ct": nftObject{"key": "direction"}}, "reply"), nftObject{"return": nil})
 	}
+	eihListeners := slices.Clone(policy.EIHListeners)
+	slices.SortFunc(eihListeners, func(a, b EIHListenerPolicy) int { return strings.Compare(a.Address, b.Address) })
+	for _, e := range eihListeners {
+		family := "ip"
+		if strings.Contains(e.Address, ":") {
+			family = "ip6"
+		}
+		iface := policy.Interface
+		if e.Interface != "" {
+			iface = e.Interface
+		}
+		eihSources := slices.Clone(e.Sources)
+		slices.Sort(eihSources)
+		for _, src := range eihSources {
+			rule("input", match(payload(family, "daddr"), e.Address), match(payload("tcp", "dport"), e.Port), match(meta("iifname"), iface), match(payload(family, "saddr"), src), nftObject{"return": nil})
+			rule("destinations", match(meta("oifname"), iface), match(payload(family, "saddr"), e.Address), match(payload(family, "daddr"), src), match(payload("tcp", "sport"), e.Port), match(nftObject{"ct": nftObject{"key": "direction"}}, "reply"), nftObject{"return": nil})
+		}
+		for _, protocol := range []string{"tcp", "udp"} {
+			rule("input", match(payload(family, "daddr"), e.Address), match(payload(protocol, "dport"), e.Port), nftObject{"drop": nil})
+		}
+	}
 	sources := slices.Clone(policy.Sources)
 	slices.Sort(sources)
 	for _, source := range sources {
@@ -308,7 +413,31 @@ func (policy ServerFirewall) renderObjectsWithPolicy(table, marker string, legac
 			addresses = append(addresses, c.EgressIP)
 		}
 	}
-	if slices.ContainsFunc(addresses, func(ip string) bool { return strings.Contains(ip, ":") }) {
+	var relayEgress []EIHRelayPolicy
+	for _, e := range eihListeners {
+		for _, ip := range e.EgressIPs {
+			if ip != "" && !slices.Contains(addresses, ip) {
+				addresses = append(addresses, ip)
+			}
+		}
+		for _, relay := range e.RelayEgress {
+			if !slices.Contains(relayEgress, relay) {
+				relayEgress = append(relayEgress, relay)
+			}
+		}
+	}
+	slices.SortFunc(relayEgress, func(a, b EIHRelayPolicy) int {
+		if c := strings.Compare(a.Source, b.Source); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.Address, b.Address); c != 0 {
+			return c
+		}
+		return a.Port - b.Port
+	})
+	hasIPv6Egress := slices.ContainsFunc(addresses, func(ip string) bool { return strings.Contains(ip, ":") }) ||
+		slices.ContainsFunc(relayEgress, func(r EIHRelayPolicy) bool { return strings.Contains(r.Source, ":") })
+	if hasIPv6Egress {
 		for _, cidr := range blockedIPv6 {
 			prefix := netip.MustParsePrefix(cidr)
 			rule("destinations", match(payload("ip6", "daddr"), nftObject{"prefix": nftObject{"addr": prefix.Addr().String(), "len": prefix.Bits()}}), nftObject{"drop": nil})
@@ -318,6 +447,13 @@ func (policy ServerFirewall) renderObjectsWithPolicy(table, marker string, legac
 		// XUDP full-cone associations can reuse an already-open UDP socket across
 		// destination ports after Xray's first-packet routing check.
 		rule("destinations", match(payload("udp", "dport"), 443), nftObject{"drop": nil})
+	}
+	for _, relay := range relayEgress {
+		family := "ip"
+		if strings.Contains(relay.Source, ":") {
+			family = "ip6"
+		}
+		rule("destinations", match(payload(family, "saddr"), relay.Source), match(payload(family, "daddr"), relay.Address), match(payload("tcp", "dport"), relay.Port), nftObject{"return": nil})
 	}
 	for _, ip := range addresses {
 		if strings.Contains(ip, ":") {
@@ -378,6 +514,110 @@ func verifyOwnedFirewall(ctx context.Context, table string, objects []map[string
 // or foreign table is never deleted to make a configuration update succeed.
 func (policy ServerFirewall) Remove(ctx context.Context) error {
 	return policy.remove(ctx, runNFT)
+}
+
+// RemoveMatchingEIH discovers per-EIH-listener interfaces from existing
+// Glivela-owned v4 tables, reconstructs exact candidate policies, and removes
+// only tables that pass full cryptographic identity and rule-by-rule checks.
+func (policy ServerFirewall) RemoveMatchingEIH(ctx context.Context) error {
+	return policy.removeMatchingEIH(ctx, runNFT)
+}
+
+func (policy ServerFirewall) removeMatchingEIH(ctx context.Context, run func(context.Context, []byte, ...string) ([]byte, error)) error {
+	if err := policy.validate(); err != nil {
+		return err
+	}
+	if len(policy.EIHListeners) == 0 {
+		return policy.remove(ctx, run)
+	}
+	data, err := run(ctx, nil, "--json", "list", "ruleset")
+	var document nftDocument
+	if err != nil || len(data) > nftOutputLimit || json.Unmarshal(data, &document) != nil {
+		return errors.New("landing: cannot inspect native firewall before EIH removal")
+	}
+	v4Tables := map[string]bool{}
+	tableIfaceByAddr := map[string]map[string]string{}
+	for _, obj := range document.Objects {
+		if tbl := obj["table"]; tbl != nil {
+			name, _ := tbl["name"].(string)
+			comment, _ := tbl["comment"].(string)
+			if strings.HasPrefix(name, "glivela_landing_server_v4_") && strings.HasPrefix(comment, "glivela-landing-server-v4:") {
+				v4Tables[name] = true
+			}
+		}
+	}
+	for _, obj := range document.Objects {
+		rule := obj["rule"]
+		if rule == nil || rule["chain"] != "input" {
+			continue
+		}
+		tableName, _ := rule["table"].(string)
+		if !v4Tables[tableName] {
+			continue
+		}
+		exprs, _ := rule["expr"].([]any)
+		var daddr, iif string
+		hasPort := false
+		for _, item := range exprs {
+			m, _ := item.(map[string]any)
+			match, _ := m["match"].(map[string]any)
+			if match == nil {
+				continue
+			}
+			left, _ := match["left"].(map[string]any)
+			if payload, _ := left["payload"].(map[string]any); payload != nil {
+				field, _ := payload["field"].(string)
+				if field == "daddr" {
+					if v, ok := match["right"].(string); ok {
+						daddr = v
+					}
+				} else if field == "dport" {
+					if v, ok := match["right"].(float64); ok && int(v) == glivela.RelayPoolPort {
+						hasPort = true
+					}
+				}
+			}
+			if meta, _ := left["meta"].(map[string]any); meta != nil && meta["key"] == "iifname" {
+				if v, ok := match["right"].(string); ok {
+					iif = v
+				}
+			}
+		}
+		if hasPort && daddr != "" && iif != "" {
+			if tableIfaceByAddr[tableName] == nil {
+				tableIfaceByAddr[tableName] = map[string]string{}
+			}
+			tableIfaceByAddr[tableName][daddr] = iif
+		}
+	}
+	tried := map[string]bool{}
+	tryRemove := func(cand ServerFirewall) error {
+		if cand.validate() != nil {
+			return nil
+		}
+		table, _ := cand.identity()
+		if tried[table] {
+			return nil
+		}
+		tried[table] = true
+		return cand.remove(ctx, run)
+	}
+	if err := tryRemove(policy); err != nil {
+		return err
+	}
+	for _, ifaceMap := range tableIfaceByAddr {
+		cand := policy
+		cand.EIHListeners = slices.Clone(policy.EIHListeners)
+		for i := range cand.EIHListeners {
+			if obsIface := ifaceMap[cand.EIHListeners[i].Address]; obsIface != "" {
+				cand.EIHListeners[i].Interface = obsIface
+			}
+		}
+		if err := tryRemove(cand); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (policy ServerFirewall) remove(ctx context.Context, run func(context.Context, []byte, ...string) ([]byte, error)) error {

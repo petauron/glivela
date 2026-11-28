@@ -29,8 +29,16 @@ type ImportMaterial struct {
 	// against current bytes on use, so in-place archive edits cannot reuse it.
 	sourceCache *importSourceCache
 
-	ServerTransportVersion uint8                      `json:"serverTransportVersion,omitempty"`
-	ServerTransports       map[string]ServerTransport `json:"serverTransports,omitempty"`
+	ServerTransportVersion uint8                       `json:"serverTransportVersion,omitempty"`
+	ServerTransports       map[string]ServerTransport  `json:"serverTransports,omitempty"`
+	EntryRelayConfigs      map[string]EntryRelayConfig `json:"entryRelayConfigs,omitempty"`
+	RelayPools             map[string]RelayPool        `json:"relayPools,omitempty"`
+	PooledRoutes           map[string]PooledRoute      `json:"pooledRoutes,omitempty"`
+	TwoHopEIHBindings      map[string]TwoHopEIHBinding `json:"twoHopEihBindings,omitempty"`
+	EIHNodeKeys            map[string]EIHNodeKey       `json:"eihNodeKeys,omitempty"`
+	// RelayPoolCredentials maps deterministic authorization scope IDs to
+	// canonical 16-byte base64 SS2022 EIH uPSK secrets. Encrypted at rest only.
+	RelayPoolCredentials map[string]string `json:"relayPoolCredentials,omitempty"`
 
 	// Grant ID to enrolled landing certificate. Bound by the immutable grant
 	// account/entry/exit; captured only after current mutual enrollment proof.
@@ -71,12 +79,28 @@ func (m ImportMaterial) validateWithSource(source importSourceHeader) error {
 	if err := m.validatePrunedEntries(); err != nil {
 		return err
 	}
-	if m.ServerTransportVersion > 1 || len(m.ServerTransports) > 1000 || len(m.ServerTransports) > 0 && m.ServerTransportVersion != 1 {
+	if m.ServerTransportVersion > CurrentServerTransportVersion || len(m.ServerTransports) > 1000 || len(m.ServerTransports) > 0 && m.ServerTransportVersion == 0 {
 		return errors.New("glivela: invalid server transport schema")
+	}
+	hasPoolFields := len(m.EntryRelayConfigs) > 0 || len(m.RelayPools) > 0 || len(m.PooledRoutes) > 0 || len(m.TwoHopEIHBindings) > 0 || len(m.EIHNodeKeys) > 0 || len(m.RelayPoolCredentials) > 0
+	if hasPoolFields && m.ServerTransportVersion != CurrentServerTransportVersion {
+		return errors.New("glivela: relay pool state requires current server transport schema")
+	}
+	if len(m.EntryRelayConfigs) > 1000 || len(m.RelayPools) > 1000 || len(m.PooledRoutes) > 10000 || len(m.TwoHopEIHBindings) > 10000 || len(m.EIHNodeKeys) > 1000 || len(m.RelayPoolCredentials) > 20000 {
+		return errors.New("glivela: relay pool inventory limit exceeded")
+	}
+	retainedLegacyTransports := map[string]bool{}
+	for _, route := range m.PooledRoutes {
+		if (route.PendingLegacyCutover || route.RetiringLegacyTransport) && route.LegacyTransportID != "" {
+			retainedLegacyTransports[route.LegacyTransportID] = true
+		}
 	}
 	for id, resource := range m.ServerTransports {
 		if id != resource.ID || resource.Validate() != nil {
 			return errors.New("glivela: invalid owned server transport")
+		}
+		if m.ServerTransportVersion == CurrentServerTransportVersion && (resource.Peer.Relay != nil || resource.RelayListener != nil) && !retainedLegacyTransports[id] {
+			return errors.New("glivela: legacy single-relay server transport is not permitted in relay pool schema")
 		}
 		found := false
 		for _, account := range m.Plan.Accounts {
@@ -90,6 +114,66 @@ func (m ImportMaterial) validateWithSource(source importSourceHeader) error {
 			return errors.New("glivela: server transport account or entry missing")
 		}
 	}
+	for entryID, cfg := range m.EntryRelayConfigs {
+		if !ValidIdentifier(entryID) || cfg.Validate() != nil {
+			return errors.New("glivela: invalid entry relay config")
+		}
+	}
+	for poolID, pool := range m.RelayPools {
+		if poolID != pool.ID || pool.Validate() != nil {
+			return errors.New("glivela: invalid relay pool inventory")
+		}
+	}
+	for nodeID, key := range m.EIHNodeKeys {
+		if nodeID != key.NodeID || key.Validate() != nil {
+			return errors.New("glivela: invalid EIH node key inventory")
+		}
+	}
+	for credID, secret := range m.RelayPoolCredentials {
+		if !ValidIdentifier(credID) || !ValidSS2022Key16(secret) {
+			return errors.New("glivela: invalid relay pool credential")
+		}
+	}
+	for id, binding := range m.TwoHopEIHBindings {
+		if id != binding.ID || binding.Validate() != nil || m.RelayPoolCredentials[binding.CredentialID] == "" || m.EIHNodeKeys[binding.EgressID].ServerKey == "" {
+			return errors.New("glivela: invalid two-hop EIH binding inventory")
+		}
+	}
+	for grantID, route := range m.PooledRoutes {
+		if grantID != route.GrantID || route.Validate() != nil {
+			return errors.New("glivela: invalid pooled route inventory")
+		}
+		if _, hasPool := m.RelayPools[route.RelayPoolID]; !hasPool {
+			return errors.New("glivela: pooled route references unknown relay pool")
+		}
+		if route.PendingLegacyCutover {
+			legacyRes, hasLegacy := m.ServerTransports[route.LegacyTransportID]
+			if !hasLegacy || legacyRes.Peer.Relay == nil || legacyRes.RelayListener == nil || legacyRes.AccountID != route.AccountID || legacyRes.EntryID != route.EntryID || legacyRes.EgressID != route.EgressID {
+				return errors.New("glivela: pending legacy pooled route missing server transport")
+			}
+		}
+		found := false
+		for _, account := range m.Plan.Accounts {
+			if account.Account.ID != route.AccountID {
+				continue
+			}
+			for _, g := range account.Grants {
+				if g.ID != grantID || m.DeletedRoutes[g.ID] || g.EntryID != route.EntryID || g.EgressID != route.EgressID {
+					continue
+				}
+				if route.PendingLegacyCutover {
+					if g.ClientChainID == route.LegacyTransportID && g.RelayPoolID == "" {
+						found = true
+					}
+				} else if g.RelayPoolID == route.RelayPoolID && g.ClientChainID == "" {
+					found = true
+				}
+			}
+		}
+		if !found {
+			return errors.New("glivela: pooled route grant missing or mismatched")
+		}
+	}
 
 	if len(m.RetiredLandings) > 10000 {
 		return errors.New("glivela: too many retired landings")
@@ -97,8 +181,27 @@ func (m ImportMaterial) validateWithSource(source importSourceHeader) error {
 	for id, retired := range m.RetiredLandings {
 		_, referenced := m.References.Nodes[id]
 		_, shared := m.ClientLandings[id]
-		if !ValidIdentifier(id) || !ValidIdentity(retired.CertificateID) || retired.Revision == 0 || retired.HostID != "" && !ValidIdentifier(retired.HostID) || referenced || shared {
+		_, hasEIHKey := m.EIHNodeKeys[id]
+		_, hasEntryCfg := m.EntryRelayConfigs[id]
+		if !ValidIdentifier(id) || !ValidIdentity(retired.CertificateID) || retired.Revision == 0 || retired.HostID != "" && !ValidIdentifier(retired.HostID) || referenced || shared || hasEIHKey || hasEntryCfg {
 			return errors.New("glivela: invalid retired landing")
+		}
+		for _, pool := range m.RelayPools {
+			for _, member := range pool.Members {
+				if member.NodeID == id || member.CertificateID == retired.CertificateID {
+					return errors.New("glivela: retired landing still in relay pool")
+				}
+			}
+		}
+		for _, route := range m.PooledRoutes {
+			if route.EntryID == id || route.EgressID == id || route.LandingCertificateID == retired.CertificateID {
+				return errors.New("glivela: retired landing still in pooled route")
+			}
+		}
+		for _, b := range m.TwoHopEIHBindings {
+			if b.EntryID == id || b.EgressID == id {
+				return errors.New("glivela: retired landing still in two-hop EIH binding")
+			}
 		}
 		for _, resource := range m.ServerTransports {
 			if resource.EntryID == id || resource.EgressID == id || resource.Peer.Relay != nil && resource.Peer.Relay.NodeID == id {
@@ -229,6 +332,11 @@ func (m ImportMaterial) validateWithSource(source importSourceHeader) error {
 					return errors.New("glivela: deleted route is enabled")
 				}
 				seenDeletedRoutes[grant.ID] = true
+			} else if m.ServerTransportVersion == CurrentServerTransportVersion && grant.ClientChainID != "" {
+				pr, ok := m.PooledRoutes[grant.ID]
+				if !ok || !pr.PendingLegacyCutover || pr.LegacyTransportID != grant.ClientChainID {
+					return errors.New("glivela: active legacy three-hop grant requires pending relay pool migration")
+				}
 			}
 		}
 		for _, credential := range item.Credentials {

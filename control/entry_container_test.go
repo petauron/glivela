@@ -50,7 +50,7 @@ func entryContainerFixture(t *testing.T, host bool) (EntryContainer, Desired, en
 
 func TestEntryContainerReadbackRejectsOwnershipAndSecurityDrift(t *testing.T) {
 	for _, host := range []bool{false, true} {
-		for _, fault := range []string{"none", "id", "image-id", "floating-image", "label", "old-owner", "entrypoint", "command", "environment", "workdir", "privileged", "writable-root", "autoremove", "restart", "pid", "ipc", "cap", "missing-cap-drop", "security-opt", "group", "ports", "sysctl", "tmpfs", "device", "gpu", "mount-source", "mount-rw", "mount-shadow", "propagation", "user", "network-mode", "userns", "extra-network", "network-id"} {
+		for _, fault := range []string{"none", "previous-image", "id", "image-id", "floating-image", "label", "old-owner", "entrypoint", "command", "environment", "workdir", "privileged", "writable-root", "autoremove", "restart", "pid", "ipc", "cap", "missing-cap-drop", "security-opt", "group", "ports", "sysctl", "tmpfs", "device", "gpu", "mount-source", "mount-rw", "mount-shadow", "propagation", "user", "network-mode", "userns", "extra-network", "network-id"} {
 			t.Run(strings.Join([]string{map[bool]string{true: "host", false: "bridge"}[host], fault}, "/"), func(t *testing.T) {
 				c, d, state := entryContainerFixture(t, host)
 				switch fault {
@@ -58,6 +58,8 @@ func TestEntryContainerReadbackRejectsOwnershipAndSecurityDrift(t *testing.T) {
 					state.ID = strings.Repeat("d", 64)
 				case "image-id":
 					state.Image = "sha256:" + strings.Repeat("d", 64)
+				case "previous-image":
+					state.Config.Image = previousEntryImageReference
 				case "floating-image":
 					state.Config.Image = "ghcr.io/xtls/xray-core:latest"
 				case "label":
@@ -129,7 +131,7 @@ func TestEntryContainerReadbackRejectsOwnershipAndSecurityDrift(t *testing.T) {
 					}
 				}
 				err := c.verifyState(d, state)
-				if (err == nil) != (fault == "none") {
+				if (err == nil) != (fault == "none" || fault == "previous-image") {
 					t.Fatalf("read-back accepted=%v, fault=%s", err == nil, fault)
 				}
 			})

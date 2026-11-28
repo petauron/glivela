@@ -76,7 +76,7 @@ func InitializeBusiness(directory string, topology FreshBusiness, storageKey []b
 		return err
 	}
 	material := glivela.ImportMaterial{
-		ServerTransportVersion: 1,
+		ServerTransportVersion: glivela.CurrentServerTransportVersion,
 		SourceSHA256:           origin, RetainedSource: header, Endpoints: topology.Endpoints,
 		References: topology.References, Plan: plan,
 		SubscriptionTokens: map[string]string{}, ProtocolSecrets: map[string]string{}, HysteriaSecrets: map[string]string{},

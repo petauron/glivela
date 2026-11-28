@@ -187,7 +187,7 @@ func (s *Store) ChangeNodeEgress(ctx context.Context, input NodeEgressChange) (N
 	if node.Desired.Entry != nil {
 		invalidateEntryChecks(next, node.ID)
 	}
-	projected, changed, err := projectBusinessEntries(next, s.business.material, time.Now())
+	projected, changed, err := s.projectBusinessLocked(next, s.business.material, time.Now().UTC())
 	if err != nil || changed {
 		return view, nodeEgressError("egress_projection_pending")
 	}

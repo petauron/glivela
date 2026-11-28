@@ -20,19 +20,21 @@ type Node struct {
 	Network             *NetworkSettings `json:"network,omitempty"`
 	PrivateListenerPort int              `json:"privateListenerPort,omitempty"`
 	// Execution configuration only: never a quota or accounting rollback.
-	TransportPrevious    *Desired              `json:"transportPrevious,omitempty"`
-	TransportTail        *TransportTail        `json:"transportTail,omitempty"`
-	PublicationSuspended bool                  `json:"publicationSuspended,omitempty"`
-	AvailabilityRevision uint64                `json:"availabilityRevision,omitempty"`
-	EntryQuota           *EntryQuota           `json:"entryQuota,omitempty"`
-	RouteEntries         map[string]RouteEntry `json:"routeEntries,omitempty"`
-	Checks               map[string]RouteCheck `json:"checks,omitempty"`
-	ID                   string                `json:"id"`
-	CertificateID        string                `json:"certificateId"`
-	Desired              Desired               `json:"desired"`
-	Receipt              *Observation          `json:"receipt,omitempty"`
-	ReportedAt           time.Time             `json:"reportedAt,omitempty"`
-	EntryHealthBarrierAt time.Time             `json:"entryHealthBarrierAt,omitempty"`
+	TransportPrevious       *Desired              `json:"transportPrevious,omitempty"`
+	TransportTail           *TransportTail        `json:"transportTail,omitempty"`
+	PublicationSuspended    bool                  `json:"publicationSuspended,omitempty"`
+	AvailabilityRevision    uint64                `json:"availabilityRevision,omitempty"`
+	EntryQuota              *EntryQuota           `json:"entryQuota,omitempty"`
+	RouteEntries            map[string]RouteEntry `json:"routeEntries,omitempty"`
+	Checks                  map[string]RouteCheck `json:"checks,omitempty"`
+	ID                      string                `json:"id"`
+	CertificateID           string                `json:"certificateId"`
+	Desired                 Desired               `json:"desired"`
+	Receipt                 *Observation          `json:"receipt,omitempty"`
+	ReportedAt              time.Time             `json:"reportedAt,omitempty"`
+	EntryHealthBarrierAt    time.Time             `json:"entryHealthBarrierAt,omitempty"`
+	MaxLandingRenderVersion uint8                 `json:"maxLandingRenderVersion,omitempty"`
+	MaxEntryRenderVersion   uint8                 `json:"maxEntryRenderVersion,omitempty"`
 }
 
 const nodesHeartbeatFlushInterval = 30 * time.Second
@@ -71,6 +73,8 @@ type Store struct {
 	subscriptionNames    map[string]string
 	subscriptionLandings map[string]SubscriptionLanding
 	hostBindings         map[string]string
+	socketCutovers       map[string]SocketCutover
+	cutoverFaultHook     func(step string) error
 	subscriptionOrigin   string
 }
 
@@ -89,6 +93,9 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := s.loadAvailability(); err != nil {
+		return nil, err
+	}
+	if err := s.loadSocketCutovers(); err != nil {
 		return nil, err
 	}
 	info, err := os.Lstat(path)
@@ -144,6 +151,9 @@ func OpenStore(path string) (*Store, error) {
 		}
 		if node.Receipt != nil && validateEntryTraffic(node.Desired, node.Receipt.Traffic) != nil {
 			return nil, errors.New("control: invalid stored traffic observation")
+		}
+		if node.Receipt != nil && validateEntryObservatory(node.Desired, node.Receipt.Observatory) != nil {
+			return nil, errors.New("control: invalid stored observatory observation")
 		}
 		var checksErr error
 		node, checksErr = normalizeStoredRouteChecks(node)
@@ -301,7 +311,8 @@ func (s *Store) put(node Node, previousVerifierCertificate string) error {
 		if s.business.faulted {
 			return errors.New("control: owned business storage requires recovery")
 		}
-		projected, _, err := projectBusinessEntries(next, s.business.material, time.Now())
+		now := time.Now().UTC()
+		projected, _, err := projectBusinessEntriesWithOptions(next, s.business.material, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
 		if err != nil {
 			return err
 		}
@@ -334,7 +345,8 @@ func (s *Store) currentDesired(ctx context.Context, certificate string) (Desired
 	if s.business == nil || s.business.faulted || s.business.material.Ownership == nil {
 		return Desired{}, errors.New("control: owned business unavailable")
 	}
-	projected, _, err := projectBusinessEntries(s.nodes, s.business.material, time.Now())
+	now := time.Now().UTC()
+	projected, _, err := projectBusinessEntriesWithOptions(s.nodes, s.business.material, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
 	if err != nil || !reflect.DeepEqual(projected[certificate].Desired, node.Desired) {
 		return Desired{}, errors.New("control: policy requires reconciliation")
 	}
@@ -396,7 +408,18 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 			if validateEntryTraffic(node.Desired, copyReceipt.Traffic) != nil || copyReceipt.Traffic != nil && copyReceipt.Traffic.SampledAt.After(now) {
 				copyReceipt.Traffic = nil
 			}
+			// Observatory snapshots are display-only telemetry. Reject bad/future
+			// payloads without blocking config delivery or triggering reloads.
+			if validateEntryObservatory(node.Desired, copyReceipt.Observatory) != nil || copyReceipt.Observatory != nil && copyReceipt.Observatory.SampledAt.After(now) {
+				copyReceipt.Observatory = nil
+			}
 			node.Receipt = &copyReceipt
+			if node.Desired.Landing != nil {
+				node.MaxLandingRenderVersion = copyReceipt.MaxLandingRenderVersion
+			}
+			if node.Desired.Entry != nil {
+				node.MaxEntryRenderVersion = copyReceipt.MaxEntryRenderVersion
+			}
 		}
 	}
 	if node.Desired.Entry != nil {
@@ -418,7 +441,51 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 	if err := reconcileOwnedRouteChecks(next, s.business, now, s.effectiveAvailabilities()); err != nil {
 		return Desired{}, err
 	}
-	if s.exchangeRequiresCommitLocked(certificate, old, node, next, now) {
+	poolChanged := false
+	if s.business != nil && !s.business.faulted && s.business.material.Ownership != nil && runtimeFresh(node, now) {
+		if node.Desired.Landing != nil && len(s.business.material.PooledRoutes) > 0 {
+			receiptChanged := !runtimeFresh(old, now) || old.Receipt == nil || node.Receipt == nil || old.Receipt.AppliedReceipt != node.Receipt.AppliedReceipt || old.MaxLandingRenderVersion != node.MaxLandingRenderVersion || !samePeerIdentityPtr(old.Receipt.ManagementIdentity, node.Receipt.ManagementIdentity)
+			if receiptChanged {
+				var err error
+				poolChanged, err = projectRelayPools(next, s.business.material, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
+				if err != nil {
+					return Desired{}, err
+				}
+			}
+		}
+		if node.Desired.Landing != nil && len(s.business.material.TwoHopEIHBindings) > 0 {
+			prunedMat := s.business.material
+			pruneUnreferencedTwoHopEIHBindings(&prunedMat, next, s.socketCutovers, now)
+			if len(prunedMat.TwoHopEIHBindings) != len(s.business.material.TwoHopEIHBindings) {
+				gcUnreferencedRelayPoolCredentials(&prunedMat, next, s.socketCutovers)
+				if err := s.saveOwnedBusinessLocked(prunedMat); err != nil {
+					return Desired{}, err
+				}
+			}
+		}
+		if node.Desired.Entry != nil && len(s.business.material.PooledRoutes) > 0 {
+			retiredMat := s.business.material
+			if retireCompletedLegacyThreeHops(&retiredMat, next, now) {
+				gcUnreferencedRelayPoolCredentials(&retiredMat, next, s.socketCutovers)
+				landingChanged, err := projectServerLandings(next, retiredMat, now, s.socketCutovers)
+				if err != nil {
+					return Desired{}, err
+				}
+				var eihChanged bool
+				if len(retiredMat.TwoHopEIHBindings) > 0 {
+					eihChanged, err = projectRelayPools(next, retiredMat, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
+					if err != nil {
+						return Desired{}, err
+					}
+				}
+				if err := s.saveOwnedBusinessLocked(retiredMat); err != nil {
+					return Desired{}, err
+				}
+				poolChanged = poolChanged || landingChanged || eihChanged
+			}
+		}
+	}
+	if poolChanged || s.exchangeRequiresCommitLocked(certificate, old, node, next, now) {
 		if err := s.commit(next); err != nil {
 			return Desired{}, err
 		}
@@ -428,9 +495,12 @@ func (s *Store) Exchange(ctx context.Context, certificate string, receipt *Obser
 		s.nodesDirty = true
 		s.publishSpeedNodesLocked()
 	}
+	if err := s.finalizeRollingBackCutoversLocked(s.nodes, now); err != nil {
+		return Desired{}, err
+	}
 	// A stale report is not accepted as healthy, but must not prevent the node
 	// from receiving a newer desired revision after an interrupted update.
-	result := node.Desired.clone()
+	result := s.nodes[certificate].Desired.clone()
 	return result, nil
 }
 
@@ -480,6 +550,8 @@ func (s *Store) exchangeRequiresCommitLocked(certificate string, old, current No
 	if old.PublicationSuspended != current.PublicationSuspended ||
 		old.Desired.Revision != current.Desired.Revision ||
 		old.Desired.ConfigSHA256 != current.Desired.ConfigSHA256 ||
+		old.MaxLandingRenderVersion != current.MaxLandingRenderVersion ||
+		old.MaxEntryRenderVersion != current.MaxEntryRenderVersion ||
 		!reflect.DeepEqual(old.EntryQuota, current.EntryQuota) {
 		return true
 	}
@@ -490,6 +562,8 @@ func (s *Store) exchangeRequiresCommitLocked(certificate string, old, current No
 		return true
 	}
 	if old.Receipt.AppliedReceipt != current.Receipt.AppliedReceipt ||
+		old.Receipt.MaxLandingRenderVersion != current.Receipt.MaxLandingRenderVersion ||
+		old.Receipt.MaxEntryRenderVersion != current.Receipt.MaxEntryRenderVersion ||
 		!samePeerIdentityPtr(old.Receipt.ManagementIdentity, current.Receipt.ManagementIdentity) ||
 		!sameSteadyEntryHealth(old.Receipt.EntryHealth, current.Receipt.EntryHealth) {
 		return true

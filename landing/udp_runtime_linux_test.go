@@ -24,7 +24,7 @@ import (
 const udpRuntimeWorkerUID = 12345
 
 // Opt-in packet acceptance for the complete landing plan and UID firewall,
-// using the verified official 26.10.31 core provided by the native-package job.
+// using the verified official 26.11.9 core provided by the native-package job.
 // All addresses are local aliases in one fresh, unrouted network namespace.
 // This exercises SOCKS5 UDP ASSOCIATE request/reply, NOT FullCone/NAT traversal,
 // QUIC/Hysteria, unsolicited inbound packets, IPv6 UDP or UDP domain resolution.
@@ -44,8 +44,8 @@ func TestRenderedLandingUDP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 	version, err := exec.CommandContext(ctx, binaryPath, "version").CombinedOutput()
-	if err != nil || !strings.HasPrefix(string(version), "Xray 26.10.31 ") {
-		t.Fatal("UDP acceptance requires the packaged Xray 26.10.31 core", err)
+	if err != nil || !strings.HasPrefix(string(version), "Xray 26.11.9 ") {
+		t.Fatal("UDP acceptance requires the packaged Xray 26.11.9 core", err)
 	}
 	ip := func(args ...string) {
 		t.Helper()

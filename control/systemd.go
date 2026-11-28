@@ -284,7 +284,45 @@ func (d SystemdDriver) policy(desired Desired) (landing.ServerFirewall, error) {
 			return landing.ServerFirewall{}, errors.New("control: egress source is not locally assigned")
 		}
 	}
-	return desired.Landing.Firewall(d.WorkerUID, ifaceName)
+	fw, err := desired.Landing.Firewall(d.WorkerUID, ifaceName)
+	if err != nil {
+		return landing.ServerFirewall{}, err
+	}
+	for i := range fw.EIHListeners {
+		eihIface, err := localAddressInterface(fw.EIHListeners[i].Address)
+		if err != nil {
+			return landing.ServerFirewall{}, err
+		}
+		fw.EIHListeners[i].Interface = eihIface
+	}
+	return fw, nil
+}
+
+func localAddressInterface(want string) (string, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+	found := ""
+	for _, iface := range interfaces {
+		addresses, err := iface.Addrs()
+		if err != nil {
+			return "", err
+		}
+		for _, address := range addresses {
+			prefix, err := netip.ParsePrefix(address.String())
+			if err == nil && prefix.Addr().String() == want {
+				if found != "" || iface.Flags&net.FlagUp == 0 {
+					return "", errors.New("control: EIH listener interface is ambiguous or down")
+				}
+				found = iface.Name
+			}
+		}
+	}
+	if found == "" {
+		return "", errors.New("control: EIH listener address is not locally assigned")
+	}
+	return found, nil
 }
 
 // Public listeners bind an exact locally assigned address. Discover its
@@ -335,7 +373,7 @@ func (d SystemdDriver) removeLandingFirewall(ctx context.Context, plan landing.P
 		return err
 	}
 	interfaces := []string{d.Interface}
-	if plan.Transport.PublicAddress != "" || plan.IPv6OnlyAddress != "" {
+	if plan.Transport.PublicAddress != "" || plan.IPv6OnlyAddress != "" || len(plan.EIHListeners) != 0 {
 		local, err := net.Interfaces()
 		if err != nil {
 			return err
@@ -350,6 +388,12 @@ func (d SystemdDriver) removeLandingFirewall(ctx context.Context, plan landing.P
 		policy, err := plan.Firewall(d.WorkerUID, iface)
 		if err != nil {
 			return err
+		}
+		if len(policy.EIHListeners) > 0 {
+			if err := policy.RemoveMatchingEIH(ctx); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := policy.Remove(ctx); err != nil {
 			return err
@@ -450,6 +494,11 @@ func (d SystemdDriver) Healthy(ctx context.Context, desired Desired) error {
 			address = listener.Address
 		}
 		if err := verifyOwnedListener(address, uint16(listener.Port), d.WorkerUID); err != nil {
+			return err
+		}
+	}
+	for _, listener := range desired.Landing.ActiveEIHListeners() {
+		if err := verifyOwnedListener(listener.Address, uint16(listener.Port), d.WorkerUID); err != nil {
 			return err
 		}
 	}

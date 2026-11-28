@@ -64,7 +64,7 @@ func (s *Store) UpdateAccountPlan(ctx context.Context, id string, expected uint6
 			return AccountChangeResult{}, invalid
 		}
 	}
-	projected, changed, err := projectBusinessEntries(s.nodes, next, time.Now())
+	projected, changed, err := s.projectBusinessLocked(s.nodes, next, time.Now().UTC())
 	if err != nil {
 		return AccountChangeResult{}, err
 	}
@@ -93,7 +93,7 @@ func (s *Store) saveOwnedBusinessTrafficLocked(next glivela.ImportMaterial, now 
 func (s *Store) saveOwnedBusiness(next glivela.ImportMaterial, allowArchiveCache bool, now time.Time) error {
 	business := s.business
 	invalid := errors.New("control: owned business write refused")
-	if business == nil || business.faulted || next.Ownership == nil || next.ServerTransportVersion != 1 {
+	if business == nil || business.faulted || next.Ownership == nil || next.ServerTransportVersion != glivela.CurrentServerTransportVersion {
 		return invalid
 	}
 	key, err := readBusinessKey(business.keyPath)
@@ -241,6 +241,25 @@ func sameConfiguredGrant(a, b glivela.RouteGrant) bool {
 	return sameGrantPolicy(a, b)
 }
 
+func sameMigratedConfiguredGrant(m glivela.ImportMaterial, current, expected glivela.RouteGrant) bool {
+	if sameConfiguredGrant(current, expected) {
+		return true
+	}
+	if m.ServerTransportVersion != glivela.CurrentServerTransportVersion || current.ClientChainID == "" || expected.RelayPoolID == "" || current.RelayPoolID != "" || expected.ClientChainID != "" {
+		return false
+	}
+	pr, ok := m.PooledRoutes[expected.ID]
+	if !ok || pr.PendingLegacyCutover || pr.LegacyTransportID != current.ClientChainID || expected.RelayPoolID != pr.RelayPoolID {
+		return false
+	}
+	if expected.DesiredRev != current.DesiredRev+1 {
+		return false
+	}
+	current.ClientChainID, expected.RelayPoolID = "", ""
+	current.DesiredRev = expected.DesiredRev
+	return sameConfiguredGrant(current, expected)
+}
+
 // Preserve the source hostname as business/history data, but retain its
 // previously reviewed fixed IP in the executable configuration when present.
 // Native imports without a pin retain their configured DNS target. This does not
@@ -263,6 +282,14 @@ func pinnedRealityTarget(target, pin string) string {
 // inventory. This does not create/adopt containers, infer peer identities or
 // recover missing transport configuration from an old source archive.
 func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now time.Time) (map[string]Node, bool, error) {
+	return projectBusinessEntriesWithOptions(nodes, m, now, nil, nil)
+}
+
+func (s *Store) projectBusinessLocked(nodes map[string]Node, m glivela.ImportMaterial, now time.Time) (map[string]Node, bool, error) {
+	return projectBusinessEntriesWithOptions(nodes, m, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
+}
+
+func projectBusinessEntriesWithOptions(nodes map[string]Node, m glivela.ImportMaterial, now time.Time, isSuspended func(string) bool, cutovers map[string]SocketCutover) (map[string]Node, bool, error) {
 	if err := validateServerTransportBindings(nodes, m); err != nil {
 		return nil, false, err
 	}
@@ -282,6 +309,7 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 	}
 	changed = changed || pruned
 	nodes = next
+	pendingPoolEntries := map[string]Desired{}
 	for cert, node := range nodes {
 		if node.Desired.Entry == nil || entryRetired(m, node.ID) {
 			continue
@@ -313,15 +341,19 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 			}
 			plan.Credentials[i] = expected
 		}
+		hasPooledGrants := false
 		for i, current := range plan.Grants {
 			expected, found := grants[current.ID]
-			if !found || !sameConfiguredGrant(current, expected) {
+			if !found || !sameMigratedConfiguredGrant(m, current, expected) {
 				return nil, false, errors.New("control: entry grant differs from owned business")
 			}
 			// Applied observations are not execution policy. Preserve them when
 			// adopting an already-matching plan instead of issuing a new revision.
 			expected.AppliedRev, expected.RuntimeGood = current.AppliedRev, current.RuntimeGood
 			plan.Grants[i] = expected
+			if expected.RelayPoolID != "" {
+				hasPooledGrants = true
+			}
 		}
 		plan.ClientLinks = nil
 		speedPeersChanged := desired.EntryNetwork != nil && len(desired.EntryNetwork.SpeedPeers) != 0
@@ -329,6 +361,12 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 			desired.EntryNetwork.SpeedPeers = nil
 		}
 		if !speedPeersChanged && reflect.DeepEqual(plan, node.Desired.Entry) {
+			continue
+		}
+		if hasPooledGrants {
+			// Apply pooled grant updates together with RelayPool projection so
+			// EntryRelayPools/RelayEdges and Grants stay consistent in one revision.
+			pendingPoolEntries[cert] = desired
 			continue
 		}
 		if plan.Revision == math.MaxUint64 {
@@ -344,11 +382,40 @@ func projectBusinessEntries(nodes map[string]Node, m glivela.ImportMaterial, now
 		invalidateEntryChecks(next, node.ID)
 		changed = true
 	}
-	landingChanged, err := projectServerLandings(next, m, now)
+	landingChanged, err := projectServerLandings(next, m, now, cutovers)
 	if err != nil {
 		return nil, false, err
 	}
-	return next, changed || landingChanged, nil
+	for cert, staged := range pendingPoolEntries {
+		node := next[cert]
+		node.Desired.Entry = staged.Entry
+		node.Desired.EntryNetwork = staged.EntryNetwork
+		next[cert] = node
+	}
+	poolChanged, err := projectRelayPools(next, m, now, isSuspended, cutovers)
+	if err != nil {
+		return nil, false, err
+	}
+	for cert := range pendingPoolEntries {
+		// Ensure any entry that had grant/credential changes committed a valid artifact.
+		if next[cert].Desired.Validate() != nil || next[cert].Desired.Revision == nodes[cert].Desired.Revision {
+			node := next[cert]
+			plan := node.Desired.Entry
+			if plan.Revision == math.MaxUint64 {
+				return nil, false, errors.New("control: entry revision exhausted")
+			}
+			plan.Revision++
+			updated, err := newEntryDesiredVersion(*plan, *node.Desired.EntryNetwork, glivela.XrayRenderVersion)
+			if err != nil {
+				return nil, false, err
+			}
+			node.Desired, node.Receipt, node.ReportedAt, node.EntryHealthBarrierAt = updated, nil, time.Time{}, time.Time{}
+			next[cert] = node
+			invalidateEntryChecks(next, node.ID)
+			changed = true
+		}
+	}
+	return next, changed || landingChanged || poolChanged, nil
 }
 
 func (s *Store) reconcileOwnedEntriesLocked(now time.Time) error {
@@ -358,7 +425,7 @@ func (s *Store) reconcileOwnedEntriesLocked(now time.Time) error {
 	if s.business.faulted {
 		return errors.New("control: owned business storage requires recovery")
 	}
-	next, changed, err := projectBusinessEntries(s.nodes, s.business.material, now)
+	next, changed, err := projectBusinessEntriesWithOptions(s.nodes, s.business.material, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
 	if err != nil {
 		return err
 	}

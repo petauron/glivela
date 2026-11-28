@@ -248,7 +248,11 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 		if !baseOK || !routeOK || !entryOK || !grant.Deployable() || base.Credential != grant.Base || route.Credential != grant.Route {
 			continue
 		}
-		if !slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grant) }) || !s.subscriptionPeerAuthorized(entry, grant.EgressID, now, grant.PeerKey()) || grant.IPv4EgressID != "" && !s.subscriptionPeerAuthorized(entry, grant.IPv4EgressID, now) {
+		if grant.RelayPoolID != "" {
+			if !slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grant) }) || !s.subscriptionPooledAuthorizedLocked(entry, grant, now) {
+				continue
+			}
+		} else if !slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, grant) }) || !s.subscriptionPeerAuthorized(entry, grant.EgressID, now, grant.PeerKey()) || grant.IPv4EgressID != "" && !s.subscriptionPeerAuthorized(entry, grant.IPv4EgressID, now) {
 			continue
 		}
 		published := glivela.PublishedRoute{Grant: grant, Protocol: glivela.VLESSReality, EntryName: names[grant.Base.ID], BaseLink: links[grant.Base.ID], RouteLink: links[grant.Route.ID], BaseProtocolIdentity: base.Credential.Identity, RouteProtocolIdentity: route.Credential.Identity}
@@ -256,7 +260,21 @@ func (s *Store) subscriptionAccountLocked(ctx context.Context, accountID string,
 			published.Grant.HideNative = true
 		}
 		published.UDP = s.routeUDPApplied(entry, grant)
-		if grant.ClientChainID != "" {
+		if grant.RelayPoolID != "" {
+			pr, ok := m.PooledRoutes[grant.ID]
+			if !ok || pr.AccountID != grant.AccountID {
+				return subscriptionContent{}, errSubscriptionUnverified
+			}
+			published.Name = pr.Name
+			if pr.LegacyTransportID != "" {
+				if issued := s.subscriptionNames[pr.LegacyTransportID]; issued != "" {
+					published.Name = issued
+				}
+			}
+			if issued := s.subscriptionNames[grant.ID]; issued != "" {
+				published.Name = issued
+			}
+		} else if grant.ClientChainID != "" {
 			resource, ok := m.ServerTransports[grant.ClientChainID]
 			if !ok || resource.AccountID != grant.AccountID {
 				return subscriptionContent{}, errSubscriptionUnverified
@@ -311,6 +329,54 @@ func (s *Store) routeUDPApplied(entry Node, grant glivela.RouteGrant) bool {
 	if !grant.UDP || entry.Desired.Entry == nil || entry.Desired.EntryNetwork == nil || !udpConfigurationApplied(entry) {
 		return false
 	}
+	if grant.RelayPoolID != "" {
+		var pool *glivela.EntryRelayPool
+		for i := range entry.Desired.Entry.RelayPools {
+			if entry.Desired.Entry.RelayPools[i].Key == grant.PoolKey() {
+				pool = &entry.Desired.Entry.RelayPools[i]
+				break
+			}
+		}
+		if pool == nil || !pool.UDP || len(pool.Candidates) == 0 {
+			return false
+		}
+		var target Node
+		for _, n := range s.nodes {
+			if n.ID == grant.EgressID && n.Desired.Landing != nil {
+				target = n
+				break
+			}
+		}
+		if target.Desired.Landing == nil || !udpConfigurationApplied(target) {
+			return false
+		}
+		for _, cand := range pool.Candidates {
+			serverKey, userKey, ok := strings.Cut(cand.LandingKey, ":")
+			if !ok {
+				continue
+			}
+			landingOK := false
+			for _, l := range target.Desired.Landing.EIHListeners {
+				if l.Address == cand.LandingAddress && l.Port == cand.LandingPort && l.ServerKey == serverKey {
+					for _, u := range l.Users {
+						if u.Role == "landing" && u.Key == userKey && u.UDP {
+							landingOK = true
+							break
+						}
+					}
+				}
+			}
+			if !landingOK {
+				continue
+			}
+			for _, n := range s.nodes {
+				if n.ID == cand.RelayNodeID && n.Desired.Landing != nil && udpConfigurationApplied(n) {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	ids := []string{grant.EgressID}
 	if grant.IPv4EgressID != "" {
 		ids = append(ids, grant.IPv4EgressID)
@@ -328,6 +394,21 @@ func (s *Store) routeUDPApplied(entry Node, grant glivela.RouteGrant) bool {
 				if p.EgressID != id || p.PeerKey() != grant.PeerKey() && p.PeerKey() != grant.IPv4EgressID || p.Transport.Protocol != "ss2022" {
 					continue
 				}
+				if strings.Contains(p.Transport.Key, ":") {
+					serverKey, userKey, ok := strings.Cut(p.Transport.Key, ":")
+					if ok {
+						for _, l := range n.Desired.Landing.EIHListeners {
+							if l.Address == p.Transport.PublicAddress && l.Port == glivela.RelayPoolPort && l.ServerKey == serverKey {
+								for _, u := range l.Users {
+									if u.Role == "landing" && u.Key == userKey && u.UDP {
+										found = true
+									}
+								}
+							}
+						}
+					}
+					continue
+				}
 				if p.Transport.ClientListenerID != "" {
 					found = slices.Contains(n.Desired.Landing.UDPOverTCPListeners, p.Transport.ClientListenerID)
 				} else if entry.Desired.EntryNetwork.Source != nil {
@@ -340,17 +421,6 @@ func (s *Store) routeUDPApplied(entry Node, grant glivela.RouteGrant) bool {
 		if !found {
 			return false
 		}
-	}
-	for _, p := range entry.Desired.Entry.Peers {
-		if p.PeerKey() != grant.PeerKey() || p.Relay == nil {
-			continue
-		}
-		for _, n := range s.nodes {
-			if n.ID == p.Relay.NodeID {
-				return udpConfigurationApplied(n)
-			}
-		}
-		return false
 	}
 	return true
 }
@@ -365,6 +435,67 @@ func (s *Store) subscriptionNodeEnabled(node Node, now time.Time) bool {
 	return !s.suspended(node.ID, now) && node.TransportTail == nil && node.Desired.Validate() == nil && validateNodeRole(node) == nil
 }
 
+// subscriptionPooledAuthorizedLocked authorizes a pooled three-hop route by
+// checking entry, fixed landing, and pool configuration. Draining a member in
+// a RelayPool never suspends a dual-role host's fixed-landing subscription, and
+// an empty authorized pool preserves the subscription while routing to blocked.
+func (s *Store) subscriptionPooledAuthorizedLocked(entry Node, grant glivela.RouteGrant, now time.Time) bool {
+	if s.business == nil || grant.RelayPoolID == "" || entry.Desired.Entry == nil {
+		return false
+	}
+	m := s.business.material
+	if _, hasPool := m.RelayPools[grant.RelayPoolID]; !hasPool {
+		return false
+	}
+	pr, hasPR := m.PooledRoutes[grant.ID]
+	if !hasPR || pr.AccountID != grant.AccountID || pr.EntryID != grant.EntryID || pr.EgressID != grant.EgressID || pr.RelayPoolID != grant.RelayPoolID {
+		return false
+	}
+	if !slices.ContainsFunc(entry.Desired.Entry.RelayPools, func(ep glivela.EntryRelayPool) bool { return ep.Key == grant.PoolKey() }) {
+		return false
+	}
+	for _, node := range s.nodes {
+		if node.ID == grant.EgressID && node.CertificateID == pr.LandingCertificateID && node.Desired.Landing != nil {
+			return s.subscriptionNodeEnabled(node, now)
+		}
+	}
+	return false
+}
+
+func (s *Store) subscriptionPooledReadyLocked(entry Node, grant glivela.RouteGrant, now time.Time) bool {
+	if !s.subscriptionPooledAuthorizedLocked(entry, grant, now) || !s.availableRuntime(entry, now) {
+		return false
+	}
+	var pool *glivela.EntryRelayPool
+	for i := range entry.Desired.Entry.RelayPools {
+		if entry.Desired.Entry.RelayPools[i].Key == grant.PoolKey() {
+			pool = &entry.Desired.Entry.RelayPools[i]
+			break
+		}
+	}
+	if pool == nil || len(pool.Candidates) == 0 {
+		return false
+	}
+	var target Node
+	for _, n := range s.nodes {
+		if n.ID == grant.EgressID && n.Desired.Landing != nil {
+			target = n
+			break
+		}
+	}
+	if !s.availableRuntime(target, now) {
+		return false
+	}
+	for _, cand := range pool.Candidates {
+		for _, n := range s.nodes {
+			if n.ID == cand.RelayNodeID && s.availableRuntime(n, now) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now time.Time, path ...string) bool {
 	key := landingID
 	if len(path) == 1 {
@@ -376,32 +507,47 @@ func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now tim
 		}
 		for _, peer := range entry.Desired.Entry.Peers {
 			if peer.PeerKey() == key && peer.EgressID == landingID && peer.Transport.ClientListenerID != "" {
-				chain, authorized := s.boundServerTransport(entry, node, peer)
-				if authorized && chain.Peer.Relay != nil {
-					for _, relay := range s.nodes {
-						if relay.ID == chain.Peer.Relay.NodeID {
-							return s.subscriptionNodeEnabled(relay, now)
-						}
-					}
-					return false
-				}
+				_, authorized := s.boundServerTransport(entry, node, peer)
 				return authorized
 			}
 		}
-		if key != landingID || !node.Desired.Landing.HasServerListener() {
+		if key != landingID {
 			return false
 		}
 		authorized, ok := node.RouteEntries[entry.ID]
 		if !ok || authorized.CertificateID != entry.CertificateID || s.nodes[authorized.CertificateID].ID != entry.ID || entry.Desired.EntryNetwork.Source == nil || authorized.Address != entry.Desired.EntryNetwork.Source.Address {
 			return false
 		}
-		// Retain enrolled peer/source and transport identity. Expected exit IP,
-		// probe target and probe results remain diagnostic observations.
-		return slices.ContainsFunc(entry.Desired.EntryNetwork.Peers, func(peer EntryPeer) bool {
+		if !slices.ContainsFunc(entry.Desired.EntryNetwork.Peers, func(peer EntryPeer) bool {
 			return peer.EgressID == landingID && peer.Identity.Address == node.Desired.Landing.Address
-		}) && slices.ContainsFunc(entry.Desired.Entry.Peers, func(peer glivela.RoutePeer) bool {
-			return peer.EgressID == landingID && peer.Address == node.Desired.Landing.Address && peer.Port == node.Desired.Landing.Transport.ListenerPort() && peer.Transport == node.Desired.Landing.Transport
-		})
+		}) {
+			return false
+		}
+		for _, peer := range entry.Desired.Entry.Peers {
+			if peer.EgressID != landingID || peer.Address != node.Desired.Landing.Address {
+				continue
+			}
+			if strings.Contains(peer.Transport.Key, ":") {
+				serverKey, userKey, cut := strings.Cut(peer.Transport.Key, ":")
+				if !cut || peer.Port != glivela.RelayPoolPort || authorized.EIHAddress != peer.Transport.PublicAddress {
+					continue
+				}
+				for _, l := range node.Desired.Landing.EIHListeners {
+					if l.Address == peer.Transport.PublicAddress && l.Port == glivela.RelayPoolPort && l.ServerKey == serverKey {
+						for _, u := range l.Users {
+							if u.Role == "landing" && u.Key == userKey {
+								return true
+							}
+						}
+					}
+				}
+				continue
+			}
+			if node.Desired.Landing.HasServerListener() && peer.Port == node.Desired.Landing.Transport.ListenerPort() && peer.Transport == node.Desired.Landing.Transport {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }

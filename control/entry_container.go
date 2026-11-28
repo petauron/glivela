@@ -20,7 +20,14 @@ import (
 	glivela "github.com/petauron/glivela"
 )
 
-const entryImageReference = "ghcr.io/xtls/xray-core:26.10.31@sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9"
+const entryImageReference = "ghcr.io/xtls/xray-core:26.11.9@sha256:9812e382e229e9ed63fd179bf1a4e3fe244c12ff3ae4fd8128745d79c87575ab"
+
+// Already-owned workers retain their exact image and image ID until replaced.
+const previousEntryImageReference = "ghcr.io/xtls/xray-core:26.10.31@sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9"
+
+func isPinnedEntryImageReference(reference string) bool {
+	return reference == entryImageReference || reference == previousEntryImageReference
+}
 
 // EntryContainer is a local ownership record, not a field of the remote node
 // protocol. Importing a legacy container requires separate offline handover;
@@ -154,7 +161,7 @@ func (c EntryContainer) verifyState(d Desired, state entryContainerState) error 
 		return invalid
 	}
 	id, err := entryPlanIdentity(*d.Entry)
-	if err != nil || id != c.ApplicationID || state.ID != c.ContainerID || state.Image != c.ImageID || state.Config.Image != entryImageReference ||
+	if err != nil || id != c.ApplicationID || state.ID != c.ContainerID || state.Image != c.ImageID || !isPinnedEntryImageReference(state.Config.Image) ||
 		state.Config.Labels["io.glivela.managed"] != "true" || state.Config.Labels["io.glivela.entry"] != id ||
 		!slices.Equal(state.Config.Entrypoint, []string{"/usr/local/bin/xray"}) || !slices.Equal(state.Config.Cmd, []string{"run", "-format", "json", "-config", "/etc/glivela/config.json"}) ||
 		state.Config.WorkingDir != "/" || !slices.Equal(state.Config.Env, c.Environment) {

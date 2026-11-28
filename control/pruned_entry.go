@@ -62,7 +62,7 @@ func (s *Store) PruneRetiredEntry(ctx context.Context, change PruneRetiredEntryC
 	if next.Validate() != nil {
 		return bad
 	}
-	projected, changed, err := projectBusinessEntries(s.nodes, next, time.Now())
+	projected, changed, err := s.projectBusinessLocked(s.nodes, next, time.Now().UTC())
 	if err != nil {
 		return err
 	}

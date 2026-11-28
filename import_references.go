@@ -161,7 +161,13 @@ func (m ImportMaterial) validateReferences() error {
 	for _, a := range m.Plan.Accounts {
 		for _, g := range a.Grants {
 			if g.ClientChainID != "" && !m.DeletedRoutes[g.ID] {
-				if m.ServerTransportVersion == 1 {
+				if m.ServerTransportVersion == CurrentServerTransportVersion {
+					pr, hasPR := m.PooledRoutes[g.ID]
+					owner, ok := m.ServerTransports[g.ClientChainID]
+					if !hasPR || !pr.PendingLegacyCutover || pr.LegacyTransportID != g.ClientChainID || pr.AccountID != a.Account.ID || pr.EntryID != g.EntryID || pr.EgressID != g.EgressID || !ok || owner.AccountID != a.Account.ID || owner.EntryID != g.EntryID || owner.EgressID != g.EgressID || owner.Peer.Relay == nil || owner.Peer.ClientChainID != g.ClientChainID {
+						return invalid
+					}
+				} else if m.ServerTransportVersion == 1 {
 					owner, ok := m.ServerTransports[g.ClientChainID]
 					if !ok || owner.AccountID != a.Account.ID || owner.EntryID != g.EntryID || owner.EgressID != g.EgressID || owner.Peer.Relay == nil || owner.Peer.ClientChainID != g.ClientChainID {
 						return invalid
@@ -169,6 +175,15 @@ func (m ImportMaterial) validateReferences() error {
 				} else if !slices.ContainsFunc(m.ClientChains, func(c ClientChain) bool {
 					return c.ID == g.ClientChainID && c.Relay != nil && c.AccountID == a.Account.ID && c.EntryID == g.EntryID && c.EgressID == g.EgressID && !m.DeletedClientChains[c.ID]
 				}) {
+					return invalid
+				}
+			}
+			if g.RelayPoolID != "" && !m.DeletedRoutes[g.ID] {
+				if m.ServerTransportVersion != CurrentServerTransportVersion {
+					return invalid
+				}
+				pr, ok := m.PooledRoutes[g.ID]
+				if !ok || pr.AccountID != a.Account.ID || pr.EntryID != g.EntryID || pr.EgressID != g.EgressID || pr.RelayPoolID != g.RelayPoolID {
 					return invalid
 				}
 			}
@@ -189,7 +204,11 @@ func (m ImportMaterial) validateReferences() error {
 				if managed[g.ID] && id == g.EgressID {
 					return true
 				}
-				if m.ServerTransportVersion == 1 {
+				if g.RelayPoolID != "" && m.ServerTransportVersion == CurrentServerTransportVersion {
+					pr, ok := m.PooledRoutes[g.ID]
+					return ok && pr.EgressID == id
+				}
+				if m.ServerTransportVersion >= 1 {
 					for _, owner := range m.ServerTransports {
 						if owner.AccountID == a.Account.ID && owner.EntryID == g.EntryID && owner.EgressID == id && owner.Peer.ClientChainID == g.ClientChainID {
 							return true

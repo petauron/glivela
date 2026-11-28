@@ -318,7 +318,7 @@ func composeLinks(native []byte, accountID string, mode PublishingMode, routes [
 }
 
 func validatePublishedRouteScope(item PublishedRoute, accountID string) error {
-	if item.Name != "" && (item.Grant.ClientChainID == "" || !validDisplayName(item.Name)) {
+	if item.Name != "" && (item.Grant.ClientChainID == "" && item.Grant.RelayPoolID == "" || !validDisplayName(item.Name)) {
 		return errors.New("glivela: invalid server chain name")
 	}
 	if item.EgressNameSuffix != "" && (!validDisplayName(item.EgressNameSuffix) || strings.ContainsAny(item.EgressNameSuffix, "|｜")) {

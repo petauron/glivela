@@ -35,7 +35,7 @@ func TestRenderedLandingUDPOverTCP(t *testing.T) {
 	defer cancel()
 	core := os.Getenv("GLIVELA_XRAY_BINARY")
 	version, err := exec.CommandContext(ctx, core, "version").CombinedOutput()
-	if err != nil || !strings.HasPrefix(string(version), "Xray 26.10.31 ") {
+	if err != nil || !strings.HasPrefix(string(version), "Xray 26.11.9 ") {
 		t.Fatal("packaged verified core required", err)
 	}
 	ip := func(args ...string) {

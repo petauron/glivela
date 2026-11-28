@@ -15,12 +15,32 @@ import (
 // This is a one-way ownership migration, not a runtime lookup fallback. Only
 // authenticated, exactly matched policies may cross the ownership boundary.
 func migrateServerTransports(nodes map[string]Node, original glivela.ImportMaterial) (glivela.ImportMaterial, bool, error) {
-	if original.ServerTransportVersion == 1 {
+	if original.ServerTransportVersion == glivela.CurrentServerTransportVersion {
 		return original, false, nil
 	}
-	if original.ServerTransportVersion != 0 {
+	if original.ServerTransportVersion > glivela.CurrentServerTransportVersion {
 		return original, false, errors.New("control: unknown server transport schema")
 	}
+	current := original
+	changed := false
+	if current.ServerTransportVersion == 0 {
+		v1, v1Changed, err := migrateServerTransportsV0ToV1(nodes, current)
+		if err != nil {
+			return original, false, err
+		}
+		current, changed = v1, changed || v1Changed
+	}
+	if current.ServerTransportVersion == 1 {
+		v2, v2Changed, err := migrateServerTransportsV1ToV2(nodes, current)
+		if err != nil {
+			return original, false, err
+		}
+		current, changed = v2, changed || v2Changed
+	}
+	return current, changed, nil
+}
+
+func migrateServerTransportsV0ToV1(nodes map[string]Node, original glivela.ImportMaterial) (glivela.ImportMaterial, bool, error) {
 	_, grants, err := effectiveBusinessCredentials(original, time.Now())
 	if err != nil {
 		return original, false, err
@@ -81,6 +101,168 @@ func migrateServerTransports(nodes map[string]Node, original glivela.ImportMater
 		}
 	}
 	if err := migrateNativeServerLandings(nodes, original, &next); err != nil {
+		return original, false, err
+	}
+	if err := next.Validate(); err != nil {
+		return original, false, err
+	}
+	return next, true, nil
+}
+
+// migrateServerTransportsV1ToV2 performs a forward-only schema upgrade that
+// creates size=1 RelayPools and PendingLegacyCutover PooledRoutes for legacy
+// single-relay three-hop ServerTransports WITHOUT withdrawing the running old
+// three-hop path at controller startup. Switching the live entry grant happens
+// only via explicit CutoverLegacyPooledRoute once downstream EIH 24000 receipts
+// confirm readiness, keeping existing traffic live if a relay is offline or
+// port 24000 is still occupied.
+func migrateServerTransportsV1ToV2(nodes map[string]Node, original glivela.ImportMaterial) (glivela.ImportMaterial, bool, error) {
+	next := original
+	next.ServerTransportVersion = glivela.CurrentServerTransportVersion
+	next.ServerTransports = maps.Clone(original.ServerTransports)
+	legacyThreeHop := map[string]glivela.ServerTransport{}
+	legacyIDs := []string{}
+	for id, r := range original.ServerTransports {
+		if r.Peer.Relay != nil || r.RelayListener != nil {
+			legacyThreeHop[id] = r
+			legacyIDs = append(legacyIDs, id)
+		}
+	}
+	if len(legacyIDs) == 0 {
+		if err := next.Validate(); err != nil {
+			return original, false, err
+		}
+		return next, true, nil
+	}
+	slices.Sort(legacyIDs)
+	byID := make(map[string]Node, len(nodes))
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+
+	next.RelayPools = maps.Clone(original.RelayPools)
+	if next.RelayPools == nil {
+		next.RelayPools = map[string]glivela.RelayPool{}
+	}
+	next.PooledRoutes = maps.Clone(original.PooledRoutes)
+	if next.PooledRoutes == nil {
+		next.PooledRoutes = map[string]glivela.PooledRoute{}
+	}
+	next.EntryRelayConfigs = maps.Clone(original.EntryRelayConfigs)
+	if next.EntryRelayConfigs == nil {
+		next.EntryRelayConfigs = map[string]glivela.EntryRelayConfig{}
+	}
+
+	// Build one size=1 RelayPool per distinct legacy relay node.
+	poolByRelay := map[string]string{}
+	for _, id := range legacyIDs {
+		r := legacyThreeHop[id]
+		if r.Peer.Relay == nil {
+			continue
+		}
+		relay := r.Peer.Relay
+		poolID := "pool-" + relay.NodeID
+		pool, exists := next.RelayPools[poolID]
+		if !exists {
+			pool = glivela.RelayPool{
+				ID:       poolID,
+				Name:     relay.NodeID,
+				Revision: 1,
+				Strategy: glivela.DefaultRelayPoolStrategy(1),
+				Members: []glivela.RelayPoolMember{{
+					NodeID:        relay.NodeID,
+					CertificateID: relay.CertificateID,
+				}},
+			}
+		}
+		member := &pool.Members[0]
+		if member.CertificateID != relay.CertificateID {
+			return original, false, errors.New("control: conflicting relay certificate during v2 migration")
+		}
+		if relay.Transport == glivela.IPv4RelaySS2022 {
+			member.IngressIPv4 = relay.ServerIPv4
+		} else {
+			member.IngressIPv6 = relay.ServerIPv6
+		}
+		if r.Listener.Transport == "ipv6-ss2022" {
+			member.EgressIPv6 = r.Listener.Source
+		} else if glivela.PublicTransportIPv4(r.Listener.Source) {
+			member.EgressIPv4 = r.Listener.Source
+		}
+		if relayNode, ok := byID[relay.NodeID]; ok && relayNode.Desired.Landing != nil {
+			if member.EgressIPv6 == "" && glivela.PublicTransportIPv6(relayNode.Desired.Landing.EgressIP) {
+				member.EgressIPv6 = relayNode.Desired.Landing.EgressIP
+			}
+			if member.EgressIPv4 == "" && glivela.PublicTransportIPv4(relayNode.Desired.Landing.EgressIP) {
+				member.EgressIPv4 = relayNode.Desired.Landing.EgressIP
+			}
+		}
+		next.RelayPools[poolID] = pool
+		poolByRelay[relay.NodeID] = poolID
+
+		cfg := next.EntryRelayConfigs[r.EntryID]
+		if relay.Transport == glivela.IPv4RelaySS2022 && relay.SourceIPv4 != "" {
+			cfg.SourceIPv4 = relay.SourceIPv4
+		} else if relay.SourceIPv6 != "" {
+			cfg.SourceIPv6 = relay.SourceIPv6
+		}
+		if cfg.Observatory == nil {
+			obs := glivela.DefaultObservatoryConfig()
+			cfg.Observatory = &obs
+		}
+		next.EntryRelayConfigs[r.EntryID] = cfg
+	}
+
+	// Stage a PendingLegacyCutover PooledRoute for every active legacy three-hop
+	// grant while retaining its live ClientChainID and ServerTransport until
+	// explicit cutover confirms downstream EIH 24000 receipts.
+	usedLegacy := map[string]bool{}
+	for _, account := range next.Plan.Accounts {
+		for _, g := range account.Grants {
+			if next.DeletedRoutes[g.ID] || g.ClientChainID == "" {
+				continue
+			}
+			r, ok := legacyThreeHop[g.ClientChainID]
+			if !ok || r.Peer.Relay == nil {
+				return original, false, errors.New("control: legacy three-hop grant missing server transport during v2 migration")
+			}
+			usedLegacy[r.ID] = true
+			poolID := poolByRelay[r.Peer.Relay.NodeID]
+			landingAddr := r.Peer.Transport.PublicAddress
+			if landingAddr == "" {
+				landingAddr = r.Listener.Address
+			}
+			ingressFamily := "ipv6"
+			if r.Peer.Relay.Transport == glivela.IPv4RelaySS2022 {
+				ingressFamily = "ipv4"
+			}
+			next.PooledRoutes[g.ID] = glivela.PooledRoute{
+				GrantID:              g.ID,
+				AccountID:            g.AccountID,
+				EntryID:              g.EntryID,
+				EgressID:             g.EgressID,
+				RelayPoolID:          poolID,
+				LandingCertificateID: r.LandingCertificateID,
+				LandingAddress:       landingAddr,
+				ExpectedExit:         r.ExpectedExit,
+				EgressIP:             r.Listener.EgressIP,
+				IngressFamily:        ingressFamily,
+				Name:                 r.Name,
+				LegacyTransportID:    r.ID,
+				PendingLegacyCutover: true,
+			}
+		}
+	}
+	// Remove idle legacy three-hop transports that have no active grant referencing them.
+	for _, id := range legacyIDs {
+		if !usedLegacy[id] {
+			delete(next.ServerTransports, id)
+		}
+	}
+	if len(next.ServerTransports) == 0 {
+		next.ServerTransports = nil
+	}
+	if err := ensurePooledRouteCredentials(nodes, &next); err != nil {
 		return original, false, err
 	}
 	if err := next.Validate(); err != nil {

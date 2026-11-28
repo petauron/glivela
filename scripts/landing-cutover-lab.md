@@ -8,7 +8,7 @@ No production enrollment, configuration or credentials are used.
 Prepare `/opt/glivela-cutover-lab/` with:
 
 - `glivela-bundle/glivela`: Linux amd64 build of the PR being tested.
-- `xray.zip`: official 26.10.31 `Xray-linux-64.zip`; the script enforces the
+- `xray.zip`: official 26.11.9 `Xray-linux-64.zip`; the script enforces the
   same archive SHA-256 as `build-native-release.sh`.
 - `legacy-fixture`: build `landing-cutover-fixture.go.txt` as a temporary command
   within the retained legacy Vastora source tree, with its original Dante bundle.

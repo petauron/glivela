@@ -205,7 +205,7 @@ func (s *Store) ChangeRealityTarget(ctx context.Context, input RealityChangeInpu
 	node.EntryHealthBarrierAt = time.Time{}
 	nodes[certificate] = node
 	invalidateEntryChecks(nodes, node.ID)
-	projected, _, err := projectBusinessEntries(nodes, material, now)
+	projected, _, err := s.projectBusinessLocked(nodes, material, now)
 	if err != nil {
 		return RealityChangeView{}, err
 	}

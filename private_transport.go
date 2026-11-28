@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/netip"
+	"strings"
 )
 
 const SS2022Method = "2022-blake3-aes-128-gcm"
@@ -27,6 +28,12 @@ type PrivateTransport struct {
 
 func (t PrivateTransport) Validate() error {
 	if t.Protocol == "" && t.Key == "" && t.PublicAddress == "" && t.Port == 0 && t.ClientListenerID == "" && t.PrivateLink == nil {
+		return nil
+	}
+	if strings.Contains(t.Key, ":") {
+		if t.Protocol != "ss2022" || t.Port != RelayPoolPort || t.PrivateLink != nil || !ValidEIHKey(t.Key) || !(PublicTransportIPv4(t.PublicAddress) || PublicTransportIPv6(t.PublicAddress)) || t.ClientListenerID != "" && !ValidIdentifier(t.ClientListenerID) {
+			return errors.New("glivela: invalid EIH private transport")
+		}
 		return nil
 	}
 	key, err := base64.StdEncoding.Strict().DecodeString(t.Key)

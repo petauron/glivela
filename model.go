@@ -87,8 +87,10 @@ func (c Credential) Validate() error {
 
 type RouteGrant struct {
 	UDP bool `json:"udp,omitempty"`
-	// ClientChainID selects one retained three-hop path without replacing a direct peer.
+	// ClientChainID is retained only for historical snapshot validation and
+	// deleted accounting records. Active three-hop routes use RelayPoolID.
 	ClientChainID string         `json:"clientChainId,omitempty"`
+	RelayPoolID   string         `json:"relayPoolId,omitempty"`
 	ID            string         `json:"id"`
 	AccountID     string         `json:"accountId"`
 	EntryID       string         `json:"entryId"`
@@ -106,15 +108,31 @@ type RouteGrant struct {
 }
 
 func (g RouteGrant) PeerKey() string {
+	if g.RelayPoolID != "" {
+		return g.PoolKey()
+	}
 	if g.ClientChainID != "" {
 		return g.ClientChainID
 	}
 	return g.EgressID
 }
 
+func (g RouteGrant) PoolKey() string {
+	if g.RelayPoolID == "" {
+		return ""
+	}
+	return PooledRouteKey(g.ID)
+}
+
 func (g RouteGrant) Validate() error {
+	if g.ClientChainID != "" && g.RelayPoolID != "" {
+		return errors.New("glivela: grant cannot combine legacy client chain and relay pool")
+	}
 	if g.ClientChainID != "" && (!ValidIdentifier(g.ClientChainID) || g.ClientChainID == g.EgressID || g.IPv4EgressID != "") {
 		return errors.New("glivela: invalid three-hop route selection")
+	}
+	if g.RelayPoolID != "" && (!ValidIdentifier(g.RelayPoolID) || g.RelayPoolID == g.EgressID || g.IPv4EgressID != "") {
+		return errors.New("glivela: invalid relay pool route selection")
 	}
 	if !ValidIdentifier(g.ID) || !ValidIdentifier(g.AccountID) || !ValidIdentifier(g.EntryID) || !ValidIdentifier(g.EgressID) || !g.Mode.Valid() || !validInboundTag(g.InboundTag) || g.DesiredRev == 0 || g.AppliedRev > g.DesiredRev {
 		return errors.New("glivela: invalid route grant")

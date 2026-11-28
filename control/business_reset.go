@@ -48,7 +48,7 @@ func (s *Store) ResetAccountUsage(ctx context.Context, id string, expected uint6
 	schedule := next.ResetSchedules[id]
 	schedule.LastResetAt = time.Now().UTC().Format(time.RFC3339Nano)
 	next.ResetSchedules[id] = schedule
-	projected, changed, err := projectBusinessEntries(s.nodes, next, time.Now())
+	projected, changed, err := s.projectBusinessLocked(s.nodes, next, time.Now().UTC())
 	if err != nil {
 		return AccountChangeResult{}, err
 	}

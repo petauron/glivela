@@ -20,7 +20,7 @@ STATE = Path("/var/lib/glivela-cutover-lab")
 BACKUPS = Path("/var/lib/glivela-cutover-lab-backups")
 WORKER = "glivela-lab-xray.service"
 UNIT = Path("/etc/systemd/system") / WORKER
-SOURCE_HASH = "e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214"
+SOURCE_HASH = "b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82"
 
 
 def command(*args, check=True, timeout=40):
@@ -124,7 +124,7 @@ def main():
     (bundle / "xray").chmod(0o755)
     xray_hash = hashlib.sha256((bundle / "xray").read_bytes()).hexdigest()
     document(bundle / "runtime.json", {"version": "isolated-test", "commit": os.environ["GLIVELA_TEST_COMMIT"],
-        "os": "linux", "architecture": "amd64", "xray": {"version": "26.10.31",
+        "os": "linux", "architecture": "amd64", "xray": {"version": "26.11.9",
         "sha256": xray_hash, "sourceArchiveSHA256": SOURCE_HASH}})
     for path in [STATE, BACKUPS]:
         path.mkdir(mode=0o700)
