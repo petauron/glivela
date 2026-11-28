@@ -491,7 +491,7 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 		landing1IPSK  = "QEFCQ0RFRkdISUpLTE1OTw=="
 		landing1UPSK  = "UFFSU1RVVldYWVpbXF1eXw=="
 		landing2IPSK  = "YGFhYmNkZWZnaGlqa2xtbg=="
-		landing2UPSK  = "b3BxcnN0dXZ3eHl6e3x9fn8="
+		landing2UPSK  = "b3BxcnN0dXZ3eHl6e3x9fg=="
 	)
 
 	landing1 := startManagedXray(t, ctx, xrayBin, dir, "landing-1",
