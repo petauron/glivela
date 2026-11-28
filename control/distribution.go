@@ -68,7 +68,7 @@ func (d SystemdDriver) resolveDistribution(targetOS, targetArch string) (Systemd
 	decoder.DisallowUnknownFields()
 	var extra any
 	if decoder.Decode(&metadata) != nil || decoder.Decode(&extra) != io.EOF || metadata.Version == "" ||
-		metadata.OS != targetOS || metadata.Architecture != targetArch || metadata.Xray.Version != "26.10.31" {
+		metadata.OS != targetOS || metadata.Architecture != targetArch || metadata.Xray.Version != "26.11.9" {
 		return SystemdDriver{}, errors.New("control: unsupported distribution metadata")
 	}
 	commit, commitErr := hex.DecodeString(metadata.Commit)

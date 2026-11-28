@@ -251,7 +251,7 @@ jobs:
           cache: true
       - name: Validate generated composite configuration with official Xray
         env:
-          GLIVELA_XRAY_IMAGE: ghcr.io/xtls/xray-core:26.10.31@sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9
+          GLIVELA_XRAY_IMAGE: ghcr.io/xtls/xray-core:26.11.9@sha256:9812e382e229e9ed63fd179bf1a4e3fe244c12ff3ae4fd8128745d79c87575ab
         run: |
           docker pull "$GLIVELA_XRAY_IMAGE"
           go test -run '^TestCompositeOfficialCoreConfiguration$' -count=1 .

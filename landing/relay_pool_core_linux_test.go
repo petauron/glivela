@@ -175,7 +175,7 @@ func startRelayPoolTopologyA(t *testing.T, ctx context.Context, holdInitialProbe
 // TestOfficialCoreRelayPoolFailover verifies Phase 0 Topology A cold-start,
 // empty-pool blocking, healthy leastLoad spreading, and live hard-failure
 // (connection-refused and hang/timeout) TCP & XUDP recovery and rejoin on the
-// pinned official Xray 26.10.31 core inside an isolated Linux netns.
+// pinned official Xray 26.11.9 core inside an isolated Linux netns.
 func TestOfficialCoreRelayPoolFailover(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 125*time.Second)
 	defer cancel()
@@ -409,7 +409,7 @@ func TestOfficialCoreRelayPoolDegradedAndOutage(t *testing.T) {
 }
 
 // TestOfficialCoreSinglePortEIHAndIsolation verifies Phase 0 Topology B on the
-// pinned official Xray 26.10.31 core inside an isolated loopback-only Linux netns:
+// pinned official Xray 26.11.9 core inside an isolated loopback-only Linux netns:
 // 1 entry -> 1 dual-role single-port 24000 EIH node -> 2 fixed 24000 EIH landings.
 //
 // It validates:
@@ -955,8 +955,8 @@ func requireRelayPoolNamespace(t *testing.T) string {
 	checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	version, err := exec.CommandContext(checkCtx, core, "version").CombinedOutput()
-	if err != nil || !strings.HasPrefix(string(version), "Xray 26.10.31 ") {
-		t.Fatalf("packaged Xray 26.10.31 required, got %q %v", string(version), err)
+	if err != nil || !strings.HasPrefix(string(version), "Xray 26.11.9 ") {
+		t.Fatalf("packaged Xray 26.11.9 required, got %q %v", string(version), err)
 	}
 	return core
 }

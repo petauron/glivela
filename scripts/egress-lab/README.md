@@ -1,7 +1,7 @@
 # Isolated native egress lab
 
 This focused test runs the `direct` outbound produced by Glivela against the
-Xray 26.9.30 image pinned in the script. It tests real TCP and SOCKS5 UDP
+Xray 26.11.9 image pinned in the script. It tests real TCP and SOCKS5 UDP
 traffic, including different families within one UDP association, IPv4-mapped
 IPv6 literals, single-family DNS records and dual-stack DNS records. Peer-side
 nonce receipts independently detect forbidden traffic even if its reply was lost.

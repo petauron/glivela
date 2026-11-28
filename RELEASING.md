@@ -121,7 +121,7 @@ See [controller safety](docs/controller-safety.md),
 
 ## Core security updates
 
-The baseline uses official Xray 26.10.31 and defaults Glivela's Go listeners to
+The baseline uses official Xray 26.11.9 and defaults Glivela's Go listeners to
 MPTCP disabled. This mitigation does not fix CVE-2026-98432 in a host kernel.
 Operators need a vendor-confirmed fixed running kernel; a container update does
 not update the host kernel. Inspect applicable network namespaces and preserve

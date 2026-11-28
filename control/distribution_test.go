@@ -20,7 +20,7 @@ func TestDistributionResolvesPinnedCoreAndRejectsChangedMetadata(t *testing.T) {
 			binary := []byte("synthetic executable fixture")
 			hash := sha256.Sum256(binary)
 			metadata := distributionMetadata{Version: "0.1.0-alpha.1", Commit: strings.Repeat("a", 40), OS: "linux", Architecture: "amd64"}
-			metadata.Xray.Version = "26.10.31"
+			metadata.Xray.Version = "26.11.9"
 			metadata.Xray.SHA256 = hex.EncodeToString(hash[:])
 			metadata.Xray.SourceArchiveSHA256 = strings.Repeat("b", 64)
 			metadata.Iperf3.Version = "3.22"

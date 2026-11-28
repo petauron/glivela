@@ -145,7 +145,7 @@ func (p Plan) Validate() error {
 // Exact historical rule shape, only for snapshot verification and owned cleanup.
 const legacyManagementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3306,3389,5432,5900,6379,6443,8006,9000,9090,9100,10000"
 
-// Render targets official Xray 26.10.31. SOCKS does not receive the core's
+// Render targets official Xray 26.11.9. SOCKS does not receive the core's
 // default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
 // remains mandatory for post-resolution targets and address-family limits.
 // Bit four disables Xray access logging while retaining warning/error logs;
