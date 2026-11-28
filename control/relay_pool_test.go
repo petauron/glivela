@@ -671,7 +671,23 @@ func TestForwardMigrationV1ThreeHopToV2RelayPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v1Checkpoint, err := json.Marshal(stagedImport{Version: 1, SnapshotID: s.business.snapshotID, Sealed: v1Sealed})
+	origRaw, err := readBusinessCheckpointFile(dir, "business.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origEnv, err := checkpointEnvelope(origRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1Env := stagedImport{Version: 1, SnapshotID: s.business.snapshotID, Sealed: v1Sealed}
+	if origEnv.Version == 2 {
+		v1Ledger, err := glivela.SealImportLedger(v1Mat, storageKey, s.business.snapshotID, origEnv.ArchiveSHA256)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v1Env = stagedImport{Version: 2, SnapshotID: s.business.snapshotID, Sealed: v1Ledger, ArchiveSHA256: origEnv.ArchiveSHA256}
+	}
+	v1Checkpoint, err := json.Marshal(v1Env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -970,12 +986,19 @@ func TestControlledSocketCutoverOptionAAndRollback(t *testing.T) {
 	if s.nodes[targetCert].Desired.Landing.Sources[0].UDPOverTCP {
 		t.Fatal("rollback restored stale UDPOverTCP=true instead of projecting live UDP=false")
 	}
-	// Legitimate post-rollback UDP re-enable bumps target revision above RollbackListener.Revision;
-	// reporting the new exact receipt MUST still complete rollback (not wedge!).
-	grant.UDP = true
-	grant.ExpectedRevision = revision()
-	if _, err := s.ChangeRoute(context.Background(), grant); err != nil {
-		t.Fatalf("re-enable UDP during rollback-pending failed: %v", err)
+	// Legitimate post-rollback target change on an unrelated unoccupied socket bumps
+	// target revision above RollbackListener.Revision; reporting the new exact receipt
+	// MUST still complete rollback (not wedge!).
+	pooledBump := pooled
+	pooledBump.ID = "pooled-v4-bump"
+	pooledBump.LandingAddress = "9.9.9.19"
+	pooledBump.Name = "Pooled Bump"
+	pooledBump.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), pooledBump); err != nil {
+		t.Fatalf("unrelated pooled change during rollback-pending failed: %v", err)
+	}
+	if s.nodes[targetCert].Desired.Revision <= rolled.ListenerRevision {
+		t.Fatal("unrelated pooled change did not advance target revision above RollbackListener.Revision")
 	}
 	// P1 #4: Cutover record MUST remain persisted in rollback-pending until target confirms rollback receipt!
 	if _, err := os.Stat(filepath.Join(filepath.Dir(s.path), socketCutoversFile)); err != nil {
@@ -985,9 +1008,23 @@ func TestControlledSocketCutoverOptionAAndRollback(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(filepath.Dir(s.path), socketCutoversFile)); !os.IsNotExist(err) {
 		t.Fatal("socket-cutovers.json did not auto-clear after rollback receipt confirmation")
 	}
-	if len(s.nodes[targetCert].Desired.Landing.EIHListeners) != 0 || !socketOccupiedBySingleUser(*s.nodes[targetCert].Desired.Landing, "9.9.9.9") {
+	if slices.ContainsFunc(s.nodes[targetCert].Desired.Landing.EIHListeners, func(l landing.EIHListener) bool { return l.Address == "9.9.9.9" }) || !socketOccupiedBySingleUser(*s.nodes[targetCert].Desired.Landing, "9.9.9.9") {
 		t.Fatal("RollbackSocketCutover did not restore pre-cutover single-user socket")
 	}
+	pooledBump.Enabled = false
+	pooledBump.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), pooledBump); err != nil {
+		t.Fatal(err)
+	}
+	reportFreshLanding(t, s, targetCert, targetID)
+	reportFreshLanding(t, s, relayCert, relayID)
+	reportFreshEntry(t, s, entryCert)
+	grant.UDP = true
+	grant.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatalf("re-enable UDP after rollback completion failed: %v", err)
+	}
+	reportFreshLanding(t, s, targetCert, targetID)
 
 	// Subtest B: Full Stage 1 -> mid-cutover UDP revocation (P1 #7!) -> updated listener receipt -> Stage 2 -> final receipts -> complete.
 	reportFreshEntry(t, s, entryCert)
@@ -1016,12 +1053,6 @@ func TestControlledSocketCutoverOptionAAndRollback(t *testing.T) {
 	}
 	if _, err := s.AdvanceSocketCutover(context.Background(), started.ID); err == nil {
 		t.Fatal("AdvanceSocketCutover advanced on stale pre-revocation listener receipt")
-	}
-	// Re-enable UDP so we also exercise post-cutover UDP revocation below, then report fresh receipt.
-	grant.UDP = true
-	grant.ExpectedRevision = revision()
-	if _, err := s.ChangeRoute(context.Background(), grant); err != nil {
-		t.Fatal(err)
 	}
 	reportFreshLanding(t, s, targetCert, targetID)
 
@@ -1066,14 +1097,29 @@ func TestControlledSocketCutoverOptionAAndRollback(t *testing.T) {
 		t.Fatal("subscriptionPeerAuthorized rejected cut-over two-hop EIH peer")
 	}
 
-	// P1 #7 regression: Toggling UDP false, disabling, and deleting the cut-over two-hop grant
-	// must revoke its landing EIH UDP flag, withdraw its landing EIH user, and GC its uPSK after receipts!
+	// P1 #7 regression: Re-enabling UDP, revoking UDP, disabling, and deleting the cut-over
+	// two-hop grant must toggle its landing EIH UDP flag, withdraw its landing EIH user, and
+	// GC its uPSK after receipts!
 	var twoHopCredID string
 	for _, b := range s.business.material.TwoHopEIHBindings {
 		twoHopCredID = b.CredentialID
 	}
 	if twoHopCredID == "" {
 		t.Fatal("missing TwoHopEIHBinding after cutover")
+	}
+	grant.UDP = true
+	grant.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatalf("re-enable UDP on cut-over two-hop grant failed: %v", err)
+	}
+	udpEnabled := false
+	for _, u := range s.nodes[targetCert].Desired.Landing.EIHListeners[0].Users {
+		if u.ID == twoHopCredID && u.UDP {
+			udpEnabled = true
+		}
+	}
+	if !udpEnabled {
+		t.Fatal("re-enabling UDP on cut-over two-hop grant did not enable landing EIH UDP")
 	}
 	grant.UDP = false
 	grant.ExpectedRevision = revision()
@@ -1444,7 +1490,14 @@ func TestObservatoryLowFrequencyReportingAndCoalescing(t *testing.T) {
 	}
 
 	// 4. Malformed / future Observatory is discarded cleanly without failing Exchange or RuntimeReady.
-	badObs := obs2
+	t3 := t2.Add(500 * time.Millisecond)
+	badObs := obs2.clone()
+	badObs.EntryHealth.SampledAt = t3
+	for id, peer := range badObs.EntryHealth.Peers {
+		peer.Status.CheckedAt = t3
+		peer.Status.LastHealthyAt = t3
+		badObs.EntryHealth.Peers[id] = peer
+	}
 	badObs.Observatory = &EntryObservatoryReport{
 		SampledAt: time.Now().UTC().Add(time.Hour),
 		Paths:     []ObservatoryPathStatus{{PoolID: "pool-obs", RelayNodeID: "relay-obs", EgressID: "landing-example", OutboundTag: "unknown-tag", Alive: true, DelayMS: 10}},

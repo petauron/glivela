@@ -137,7 +137,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				return AccountChangeResult{}, invalid
 			}
 			if !change.Delete {
-				if change.RelayPoolID == "" && change.Enabled && (!grant.Enabled || change.UDP != grant.UDP) && next.ManagedRouteLandings[change.ID] != "" {
+				if change.RelayPoolID == "" && change.Enabled && (!grant.Enabled || !grant.UDP && change.UDP) && next.ManagedRouteLandings[change.ID] != "" {
 					cert, err := s.managedRouteReactivationCertificate(change)
 					if err != nil || cert != next.ManagedRouteLandings[change.ID] {
 						return AccountChangeResult{}, invalid
