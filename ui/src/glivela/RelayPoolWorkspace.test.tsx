@@ -544,7 +544,7 @@ it("prevents an older out-of-order refresh() from overwriting a newer pools back
       if (url.endsWith("/ip-quality")) return new Response(JSON.stringify({ targets: [], checks: [] }), { headers: { "Content-Type": "application/json" } });
       if (url.endsWith("/route-latencies")) return new Response(JSON.stringify({ latencies: [] }), { headers: { "Content-Type": "application/json" } });
       if (url.endsWith("/network-optimization")) return new Response(JSON.stringify({ nodes: [] }), { headers: { "Content-Type": "application/json" } });
-      if (url.endsWith("/link-speeds")) return new Response(JSON.stringify({ revision: "0", tests: [] }), { headers: { "Content-Type": "application/json" } });
+      if (url.endsWith("/link-speeds")) return new Response(JSON.stringify({ revision: "0", tests: [], channels: [] }), { headers: { "Content-Type": "application/json" } });
       if (url.endsWith("/node-egress")) {
         return new Response(
           JSON.stringify({ id: "landing-twohop", role: "landing", revision: "3", runtimeReady: true, egressIp: "203.0.113.20", linkedEntries: 0 }),
@@ -662,7 +662,7 @@ it("polls business on visible pools page for late Observatory/revocation updates
         return new Response(JSON.stringify({ nodes: [] }), { headers: { "Content-Type": "application/json" } });
       }
       if (url.endsWith("/link-speeds")) {
-        return new Response(JSON.stringify({ revision: "0", tests: [] }), { headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ revision: "0", tests: [], channels: [] }), { headers: { "Content-Type": "application/json" } });
       }
       if (url.endsWith("/relay-pools")) {
         return new Response(JSON.stringify({ poolId: "pool-ap", revision: "4", revocation: { pendingEntries: [], pendingLandings: [], complete: true } }), {
@@ -790,7 +790,7 @@ it("sends allowlisted RouteChange payloads when toggling a pooled route in Route
           disabled={false}
           save={save}
           latency={{ values: new Map(), now, busy: false, error: "", refresh: vi.fn(async () => {}) }}
-          loadSpeeds={vi.fn(async () => ({ revision: "0", tests: [] }))}
+          loadSpeeds={vi.fn(async () => ({ revision: "0", tests: [], channels: [] }))}
           active
         />,
       );
