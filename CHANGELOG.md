@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/petauron/glivela/compare/v0.3.0...v0.3.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **ui:** compact the relay topology on large deployments ([#246](https://github.com/petauron/glivela/issues/246)) ([88c91a3](https://github.com/petauron/glivela/commit/88c91a3e3b1b880d56e4c7fd7f524cb41053c67c)), closes [#245](https://github.com/petauron/glivela/issues/245)
+
 ## [0.3.0](https://github.com/petauron/glivela/compare/v0.2.1...v0.3.0) (2026-11-28)
 
 
