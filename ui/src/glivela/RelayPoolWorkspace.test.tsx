@@ -822,3 +822,333 @@ it("sends allowlisted RouteChange payloads when toggling a pooled route in Route
     div.remove();
   }
 });
+
+it("compacts dense two-hop corridors, resolves nearest centerline clicks, separates inactive counts, detects real canvas overflow, and clips wide titles", async () => {
+  const now = Date.parse("2026-11-28T12:00:00Z");
+  const wideEntryName = "W".repeat(28);
+  const widePoolName = "M".repeat(30);
+  const entryNodes = Array.from({ length: 5 }, (_, i) => ({
+    id: `entry-${i + 1}`,
+    name: i === 0 ? wideEntryName : `Entry Node ${i + 1}`,
+  }));
+  const landingNodes = Array.from({ length: 3 }, (_, i) => ({
+    id: `landing-${i + 1}`,
+    name: `Exit Node ${i + 1}`,
+  }));
+  const inv: Inventory = {
+    state: "owned",
+    accounts: [],
+    endpoints: [],
+    nodes: [...entryNodes, { id: "relay-1", name: "Relay Core One" }, ...landingNodes],
+    runtimes: [
+      ...entryNodes.map((n) => ({
+        id: n.id,
+        role: "entry",
+        revision: "5",
+        appliedRevision: "5",
+        runtimeReady: true,
+        relayPoolCapable: true,
+        reportedAt: new Date(now - 5_000).toISOString(),
+        peers: [],
+      })),
+      {
+        id: "relay-1",
+        certificateId: "a".repeat(64),
+        role: "landing",
+        revision: "3",
+        appliedRevision: "3",
+        runtimeReady: true,
+        relayPoolCapable: true,
+        reportedAt: new Date(now - 5_000).toISOString(),
+        peers: [],
+      },
+      ...landingNodes.map((n) => ({
+        id: n.id,
+        certificateId: "b".repeat(64),
+        role: "landing",
+        revision: "4",
+        appliedRevision: "4",
+        runtimeReady: true,
+        relayPoolCapable: true,
+        reportedAt: new Date(now - 5_000).toISOString(),
+        peers: [],
+      })),
+    ],
+    relayPools: [
+      {
+        id: "pool-long",
+        name: "synth-ap-relay-pool-2026",
+        revision: "2",
+        strategy: { expected: 1, maxRttMs: 500 },
+        members: [
+          {
+            nodeId: "relay-1",
+            certificateId: "a".repeat(64),
+            ingressIpv4: "198.51.100.11",
+            egressIpv4: "198.51.100.11",
+            drained: false,
+            nodeSuspended: false,
+            runtimeReady: true,
+          },
+        ],
+        routeIds: ["rt-pooled"],
+        revocation: { pendingEntries: [], pendingLandings: [], complete: true },
+      },
+      {
+        id: "pool-wide",
+        name: widePoolName,
+        revision: "123",
+        strategy: { expected: 1, maxRttMs: 500 },
+        members: [],
+        routeIds: [],
+        revocation: { pendingEntries: [], pendingLandings: [], complete: true },
+      },
+    ],
+    routes: [
+      // 5 two-hop routes (> 4 => dense corridor) with mixed states: 1 healthy, 2 no-sample, 2 disabled/unavailable (inactive)
+      ...Array.from({ length: 5 }, (_, i) => ({
+        id: `rt-twohop-${i + 1}`,
+        accountId: "acct-1",
+        entryId: entryNodes[i].id,
+        egressId: landingNodes[i % 2].id,
+        port: 1080,
+        enabled: i !== 4,
+        hideNative: false,
+        state: "verified",
+      })),
+      {
+        id: "rt-pooled",
+        accountId: "acct-1",
+        entryId: entryNodes[4].id,
+        egressId: landingNodes[2].id,
+        relayPoolId: "pool-long",
+        activeRelays: 1,
+        activeRelayIds: ["relay-1"],
+        port: 24000,
+        enabled: true,
+        hideNative: false,
+        state: "verified",
+      },
+    ],
+  };
+  const names = new Map(inv.nodes.map((n) => [n.id, n.name]));
+  const latencies = new Map<string, RouteLatency>([
+    [
+      latencyKey("entry-1", "landing-1", 1080),
+      { entryId: "entry-1", landingId: "landing-1", port: 1080, state: "ready", latencyMs: 3, samples: 3, checkedAt: new Date(now - 2_000).toISOString() },
+    ],
+    [
+      latencyKey("entry-4", "landing-2", 1080),
+      { entryId: "entry-4", landingId: "landing-2", port: 1080, state: "unavailable", samples: 0 },
+    ],
+  ]);
+
+  const div = document.createElement("div");
+  document.body.append(div);
+  const root = createRoot(div);
+  try {
+    await act(async () => {
+      root.render(
+        <RelayPoolWorkspace
+          inventory={inv}
+          names={names}
+          disabled={false}
+          save={vi.fn(async () => true)}
+          latency={{ values: latencies, now, error: "" }}
+        />,
+      );
+    });
+
+    const svg = div.querySelector("svg.gl-topology-svg") as SVGSVGElement;
+    expect(svg.getAttribute("data-dense-corridor")).toBe("true");
+    // Summary pill separates disabled/offline (停用/离线) from no-sample/stale (无样本/过期)
+    const summaryText = svg.querySelector('[data-corridor-summary="true"]')?.textContent ?? "";
+    expect(summaryText).toContain("两跳直连 5 条");
+    expect(summaryText).toContain("1 健康");
+    expect(summaryText).toContain("2 无样本/过期");
+    expect(summaryText).toContain("2 停用/离线");
+    expect(svg.querySelectorAll('[data-edge-pill="two-hop"]')).toHaveLength(0);
+
+    // Normal long ASCII pool name fits untruncated; wide W/M names are truncated + clipPath-protected with full <title>
+    const poolTitles = [...svg.querySelectorAll(".gl-topo-pool-group .gl-topo-card-title")];
+    expect(poolTitles[0].textContent).toBe("synth-ap-relay-pool-2026");
+    expect(poolTitles[1].textContent?.endsWith("…")).toBe(true);
+    expect(poolTitles[1].getAttribute("clip-path")).toMatch(/^url\(#/);
+    const wideEntryCard = svg.querySelector(`[data-node-kind="entry"][aria-label*="${wideEntryName}"]`) as SVGGElement;
+    expect(wideEntryCard.querySelector("title")?.textContent).toBe(wideEntryName);
+    expect(wideEntryCard.querySelector(".gl-topo-card-title")?.textContent?.endsWith("…")).toBe(true);
+    expect(wideEntryCard.querySelector(".gl-topo-card-title")?.getAttribute("clip-path")).toMatch(/^url\(#/);
+
+    // Clicking on the LAST painted dense two-hop edge at the FIRST edge's corridorY selects the FIRST edge (nearest centerline)
+    const twoHopGroups = [...svg.querySelectorAll('[data-edge-kind="two-hop"]')] as SVGGElement[];
+    expect(twoHopGroups).toHaveLength(5);
+    const viewBoxParts = (svg.getAttribute("viewBox") ?? "0 0 1040 506").split(" ").map(Number);
+    const vbWidth = viewBoxParts[2];
+    const vbHeight = viewBoxParts[3];
+    vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      width: vbWidth,
+      height: vbHeight,
+      right: vbWidth,
+      bottom: vbHeight,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    await act(async () => {
+      // Simulate clicking over lane #0's Y (58) while hit-testing lands on the last-painted edge
+      twoHopGroups[4].dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 520, clientY: 58 }));
+    });
+    expect(twoHopGroups[0].getAttribute("data-selected")).toBe("true");
+    expect(twoHopGroups[4].getAttribute("data-selected")).toBeNull();
+    expect(svg.querySelectorAll('[data-edge-pill="two-hop"]')).toHaveLength(1);
+
+    // Clicking inside edge #0's RTT pill at y=65 (closer to edge #1's y=69) targets edge #0 itself (toggles off, does NOT select edge #1)
+    const activePill = svg.querySelector('[data-edge-pill="two-hop"]') as SVGGElement;
+    await act(async () => {
+      activePill.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 396, clientY: 65 }));
+    });
+    expect(twoHopGroups[0].getAttribute("data-selected")).toBeNull();
+    expect(twoHopGroups[1].getAttribute("data-selected")).toBeNull();
+
+    // Clicking on edge #0's fanned transition curve (x=324, outside common horizontal span [332, 708]) at y=68 selects edge #0, NOT edge #1
+    await act(async () => {
+      twoHopGroups[0].dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 324, clientY: 68 }));
+    });
+    expect(twoHopGroups[0].getAttribute("data-selected")).toBe("true");
+    expect(twoHopGroups[1].getAttribute("data-selected")).toBeNull();
+
+    // Independent selection button in collapsible two-hop list selects the exact target route
+    const listButtons = [...div.querySelectorAll(".gl-topo-twohop-details button.gl-topo-twohop-chip")] as HTMLButtonElement[];
+    expect(listButtons).toHaveLength(5);
+    await act(async () => listButtons[3].click());
+    expect(twoHopGroups[3].getAttribute("data-selected")).toBe("true");
+    expect(div.querySelector(".gl-topology-focus-card")?.textContent).toContain("Entry Node 4");
+
+    // Selecting a landing with multiple two-hop routes provides independent buttons in focus card,
+    // and activating one moves keyboard focus to the new route detail heading instead of losing focus
+    const exitOneCard = svg.querySelector('[data-node-kind="landing"][aria-label*="Exit Node 1"]') as SVGGElement;
+    await act(async () => {
+      exitOneCard.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(div.querySelector(".gl-topology-focus-card")?.textContent).toContain("直连两跳来源（3 条");
+    const focusChips = [...div.querySelectorAll(".gl-topology-focus-card button.gl-topo-twohop-chip")] as HTMLButtonElement[];
+    expect(focusChips).toHaveLength(3);
+    focusChips[0].focus();
+    await act(async () => focusChips[0].click());
+    expect(document.activeElement?.tagName).toBe("H3");
+    expect(document.activeElement?.textContent).toContain("两跳直连：");
+
+    // Real canvas overflow detection works even when model.height <= 540 (e.g. 506px in an 800px viewport -> 464px clamp)
+    const canvas = div.querySelector(".gl-topology-canvas") as HTMLDivElement;
+    let clientH = 600;
+    const scrollH = 506;
+    Object.defineProperty(canvas, "clientHeight", { configurable: true, get: () => clientH });
+    Object.defineProperty(canvas, "scrollHeight", { configurable: true, get: () => scrollH });
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect([...div.querySelectorAll("button")].find((b) => b.textContent === "展开全高")).toBeUndefined();
+
+    // Shrinking viewport causes real overflow (464 < 506) -> button appears and toggles data-expanded
+    clientH = 464;
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    const expandBtn = [...div.querySelectorAll("button")].find((b) => b.textContent === "展开全高") as HTMLButtonElement;
+    expect(expandBtn).toBeDefined();
+    await act(async () => expandBtn.click());
+    expect(canvas.getAttribute("data-expanded")).toBe("true");
+    expect(expandBtn.textContent).toBe("收起高度");
+  } finally {
+    await act(async () => root.unmount());
+    div.remove();
+  }
+});
+
+it("disambiguates multiple two-hop grants sharing the same entry and landing across accounts", async () => {
+  const now = Date.parse("2026-11-28T12:00:00Z");
+  const inv: Inventory = {
+    state: "owned",
+    accounts: [
+      {
+        account: { id: "acct-alpha", displayName: "Alpha Plan", desiredRevision: "2", plan: { totalBytes: "0", expiryTime: "0", resetDays: 0, enabled: true } },
+        usage: [],
+        schedule: { nextResetAt: "" },
+        traffic: {},
+      },
+      {
+        account: { id: "acct-beta", displayName: "Beta Plan", desiredRevision: "3", plan: { totalBytes: "0", expiryTime: "0", resetDays: 0, enabled: true } },
+        usage: [],
+        schedule: { nextResetAt: "" },
+        traffic: {},
+      },
+    ],
+    endpoints: [],
+    nodes: [
+      { id: "e1", name: "Shared Entry" },
+      { id: "l1", name: "Shared Exit" },
+      { id: "l2", name: "Other Exit 2" },
+      { id: "l3", name: "Other Exit 3" },
+      { id: "l4", name: "Other Exit 4" },
+    ],
+    runtimes: [
+      { id: "e1", role: "entry", revision: "1", appliedRevision: "1", runtimeReady: true, reportedAt: "", peers: ["l1"] },
+      ...["l1", "l2", "l3", "l4"].map((id) => ({
+        id,
+        certificateId: "a".repeat(64),
+        role: "landing",
+        revision: "1",
+        appliedRevision: "1",
+        runtimeReady: true,
+        reportedAt: "",
+        peers: [],
+      })),
+    ],
+    routes: [
+      { id: "grant-alpha", accountId: "acct-alpha", entryId: "e1", egressId: "l1", port: 1080, enabled: true, hideNative: false, state: "verified" },
+      { id: "grant-beta", accountId: "acct-beta", entryId: "e1", egressId: "l1", port: 1080, enabled: true, hideNative: false, state: "verified" },
+      { id: "grant-3", accountId: "acct-alpha", entryId: "e1", egressId: "l2", port: 1080, enabled: true, hideNative: false, state: "verified" },
+      { id: "grant-4", accountId: "acct-alpha", entryId: "e1", egressId: "l3", port: 1080, enabled: true, hideNative: false, state: "verified" },
+      { id: "grant-5", accountId: "acct-alpha", entryId: "e1", egressId: "l4", port: 1080, enabled: true, hideNative: false, state: "verified" },
+    ],
+  };
+  const names = new Map(inv.nodes.map((n) => [n.id, n.name]));
+  const latencies = new Map<string, RouteLatency>([
+    [latencyKey("e1", "l1", 1080), { entryId: "e1", landingId: "l1", port: 1080, state: "ready", latencyMs: 5, samples: 3, checkedAt: new Date(now - 2_000).toISOString() }],
+  ]);
+
+  const div = document.createElement("div");
+  document.body.append(div);
+  const root = createRoot(div);
+  try {
+    await act(async () => {
+      root.render(
+        <RelayPoolWorkspace
+          inventory={inv}
+          names={names}
+          disabled={false}
+          save={vi.fn(async () => true)}
+          latency={{ values: latencies, now, error: "" }}
+        />,
+      );
+    });
+
+    const listButtons = [...div.querySelectorAll(".gl-topo-twohop-details button.gl-topo-twohop-chip")] as HTMLButtonElement[];
+    expect(listButtons).toHaveLength(5);
+    expect(listButtons[0].textContent).toContain("Alpha Plan");
+    expect(listButtons[0].textContent).toContain("#grant-alpha");
+    expect(listButtons[1].textContent).toContain("Beta Plan");
+    expect(listButtons[1].textContent).toContain("#grant-beta");
+    expect(listButtons[0].textContent).not.toBe(listButtons[1].textContent);
+
+    await act(async () => listButtons[1].click());
+    const detail = div.querySelector(".gl-topology-focus-card")?.textContent ?? "";
+    expect(detail).toContain("Beta Plan");
+    expect(detail).toContain("grant-beta");
+  } finally {
+    await act(async () => root.unmount());
+    div.remove();
+  }
+});

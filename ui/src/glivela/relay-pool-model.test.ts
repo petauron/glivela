@@ -7,7 +7,9 @@ import {
   buildRouteChangePayload,
   buildTopologyModel,
   canStartSocketCutover,
+  estimateSvgTextWidth,
   evaluateObservatorySample,
+  findNearestDenseTwoHopEdge,
   isEntryPoolSelectedOrConnected,
   isLegacyEdgeSelectedOrConnected,
   isPathSelectedOrConnected,
@@ -16,6 +18,7 @@ import {
   isValidIdentifier,
   routeTopologyKind,
   summarizePooledRoute,
+  truncateSvgText,
   validateObservatoryDraft,
   validatePoolDraft,
 } from "./relay-pool-model";
@@ -461,5 +464,243 @@ describe("observatory evaluation and three-column topology model", () => {
     expect(isPathSelectedOrConnected(memberSelection, model.poolLandingEdges[1].path)).toBe(false);
     expect(isTwoHopSelectedOrConnected(memberSelection, model.twoHopEdges[0])).toBe(false);
     expect(isEntryPoolSelectedOrConnected(memberSelection, model.entryPoolEdges[0], model.allFullPaths)).toBe(true);
+  });
+
+  it("bounds dense two-hop corridor height and sorts pool-bound entries and landings to the top", () => {
+    const now = Date.parse("2026-11-28T12:00:00Z");
+    const entryNodes = Array.from({ length: 18 }, (_, i) => ({
+      id: `entry-${String(i + 1).padStart(2, "0")}`,
+      name: `Alpha Entry ${String(i + 1).padStart(2, "0")}`,
+    }));
+    // Alphabetically last entry & landing participate in the relay pool and must sort FIRST
+    entryNodes.push({ id: "entry-z-pooled", name: "Zulu Pooled Entry" });
+    const landingNodes = Array.from({ length: 10 }, (_, i) => ({
+      id: `landing-${String(i + 1).padStart(2, "0")}`,
+      name: `Alpha Exit ${String(i + 1).padStart(2, "0")}`,
+    }));
+    landingNodes.push({ id: "landing-z-pooled", name: "Zulu Pooled Exit" });
+
+    const inv: Inventory = {
+      state: "owned",
+      accounts: [],
+      endpoints: [],
+      nodes: [...entryNodes, { id: "relay-1", name: "Relay One" }, ...landingNodes],
+      runtimes: [
+        ...entryNodes.map((n) => ({ id: n.id, role: "entry", revision: "1", appliedRevision: "1", runtimeReady: true, relayPoolCapable: true, reportedAt: "", peers: [] })),
+        { id: "relay-1", certificateId: "a".repeat(64), role: "landing", revision: "1", appliedRevision: "1", runtimeReady: true, relayPoolCapable: true, reportedAt: "", peers: [] },
+        ...landingNodes.map((n) => ({ id: n.id, certificateId: "b".repeat(64), role: "landing", revision: "1", appliedRevision: "1", runtimeReady: true, relayPoolCapable: true, reportedAt: "", peers: [] })),
+      ],
+      relayPools: [
+        {
+          id: "pool-z",
+          name: "synth-ap-relay-pool-2026",
+          revision: "1",
+          strategy: { expected: 1, maxRttMs: 500 },
+          members: [{ nodeId: "relay-1", certificateId: "a".repeat(64), ingressIpv4: "198.51.100.11", egressIpv4: "198.51.100.11", drained: false, nodeSuspended: false, runtimeReady: true }],
+          routeIds: ["rt-pooled"],
+        },
+      ],
+      routes: [
+        ...Array.from({ length: 16 }, (_, i) => ({
+          id: `rt-twohop-${i + 1}`,
+          accountId: "a1",
+          entryId: entryNodes[i].id,
+          egressId: landingNodes[i % 10].id,
+          port: 1080,
+          enabled: true,
+          hideNative: false,
+          state: "verified",
+        })),
+        {
+          id: "rt-pooled",
+          accountId: "a1",
+          entryId: "entry-z-pooled",
+          egressId: "landing-z-pooled",
+          relayPoolId: "pool-z",
+          activeRelays: 1,
+          activeRelayIds: ["relay-1"],
+          port: 24000,
+          enabled: true,
+          hideNative: false,
+          state: "verified",
+        },
+      ],
+    };
+    const names = new Map(inv.nodes.map((n) => [n.id, n.name]));
+    const latencies = new Map<string, RouteLatency>(
+      Array.from({ length: 10 }, (_, i) => [
+        latencyKey(entryNodes[i].id, landingNodes[i % 10].id, 1080),
+        { entryId: entryNodes[i].id, landingId: landingNodes[i % 10].id, port: 1080, state: "ready", latencyMs: 2 + i, samples: 3, checkedAt: new Date(now - 3_000).toISOString() },
+      ]),
+    );
+    const model = buildTopologyModel({ inventory: inv, names, latencies, now, latencyFailed: false, filter: "all" });
+
+    expect(model.corridor.dense).toBe(true);
+    expect(model.corridor.totalCount).toBe(16);
+    expect(model.corridor.healthyCount).toBe(10);
+    expect(model.corridor.staleOrEmptyCount).toBe(6);
+    expect(model.corridorBottomY).toBeLessThanOrEqual(112);
+
+    const minPoolY = Math.min(...model.pools.map((p) => p.y));
+    const minPoolX = Math.min(...model.pools.map((p) => p.x));
+    const maxPoolRightX = Math.max(...model.pools.map((p) => p.x + p.width));
+    expect(minPoolY).toBeLessThanOrEqual(126);
+    for (const edge of model.twoHopEdges) {
+      expect(edge.corridorY).toBeLessThan(minPoolY);
+      expect(edge.corridorLeftX).toBeLessThan(minPoolX);
+      expect(edge.corridorRightX).toBeGreaterThan(maxPoolRightX);
+      expect(edge.d).toContain(`L ${edge.corridorRightX} ${edge.corridorY}`);
+    }
+
+    // Pool-participating entry and landing sort to the very top of left and right columns
+    expect(model.entries[0].id).toBe("entry-z-pooled");
+    expect(model.landings[0].id).toBe("landing-z-pooled");
+  });
+
+  it("categorizes mixed two-hop states accurately, resolves nearest dense centerline, and bounds wide ASCII truncation", () => {
+    const now = Date.parse("2026-11-28T12:00:00Z");
+    const entries = Array.from({ length: 8 }, (_, i) => ({ id: `e${i + 1}`, name: `Entry ${i + 1}` }));
+    const inv: Inventory = {
+      state: "owned",
+      accounts: [],
+      endpoints: [],
+      availability: {
+        revision: "1",
+        nodes: {
+          e7: { reason: "maintenance", changedAt: new Date(now - 60_000).toISOString() },
+        },
+      },
+      nodes: [...entries, { id: "l1", name: "Landing One" }],
+      runtimes: [
+        ...entries.map((e) => ({ id: e.id, role: "entry", revision: "1", runtimeReady: true, reportedAt: "", peers: [] })),
+        { id: "l1", certificateId: "a".repeat(64), role: "landing", revision: "1", runtimeReady: true, reportedAt: "", peers: [] },
+      ],
+      routes: [
+        // 1: ready (healthy), 2: slow (healthy), 3: unreachable (unhealthy), 4: stale (staleOrEmpty),
+        // 5: no-sample (staleOrEmpty), 6: unavailable (inactive), 7: node-suspended (inactive), 8: disabled (inactive)
+        ...entries.map((e, i) => ({
+          id: `rt-${i + 1}`,
+          accountId: "a1",
+          entryId: e.id,
+          egressId: "l1",
+          port: 1080,
+          enabled: i !== 7,
+          hideNative: false,
+          state: i === 6 ? "temporarily-suspended" : "verified",
+        })),
+      ],
+    };
+    const names = new Map(inv.nodes.map((n) => [n.id, n.name]));
+    const latencies = new Map<string, RouteLatency>([
+      [latencyKey("e1", "l1", 1080), { entryId: "e1", landingId: "l1", port: 1080, state: "ready", latencyMs: 12, samples: 3, checkedAt: new Date(now - 5_000).toISOString() }],
+      [latencyKey("e2", "l1", 1080), { entryId: "e2", landingId: "l1", port: 1080, state: "ready", latencyMs: 140, samples: 3, checkedAt: new Date(now - 5_000).toISOString() }],
+      [latencyKey("e3", "l1", 1080), { entryId: "e3", landingId: "l1", port: 1080, state: "unreachable", samples: 0, checkedAt: new Date(now - 5_000).toISOString() }],
+      [latencyKey("e4", "l1", 1080), { entryId: "e4", landingId: "l1", port: 1080, state: "ready", latencyMs: 15, samples: 3, checkedAt: new Date(now - 240_000).toISOString() }],
+      [latencyKey("e6", "l1", 1080), { entryId: "e6", landingId: "l1", port: 1080, state: "unavailable", samples: 0 }],
+    ]);
+
+    const model = buildTopologyModel({ inventory: inv, names, latencies, now, latencyFailed: false, filter: "all" });
+    expect(model.corridor.dense).toBe(true);
+    expect(model.corridor.totalCount).toBe(8);
+    expect(model.corridor.healthyCount).toBe(2);
+    expect(model.corridor.unhealthyCount).toBe(1);
+    expect(model.corridor.staleOrEmptyCount).toBe(2);
+    expect(model.corridor.inactiveCount).toBe(3);
+    expect(
+      model.corridor.healthyCount +
+        model.corridor.unhealthyCount +
+        model.corridor.staleOrEmptyCount +
+        model.corridor.inactiveCount,
+    ).toBe(model.corridor.totalCount);
+
+    // Nearest centerline selection is restricted strictly to the common horizontal corridor span
+    const first = model.twoHopEdges[0];
+    const middle = model.twoHopEdges[4];
+    expect(findNearestDenseTwoHopEdge(model.twoHopEdges, 520, first.corridorY)?.id).toBe(first.id);
+    expect(findNearestDenseTwoHopEdge(model.twoHopEdges, 520, middle.corridorY)?.id).toBe(middle.id);
+    expect(findNearestDenseTwoHopEdge(model.twoHopEdges, 100, first.corridorY)).toBeNull();
+    // Fanned left/right transition curves (e.g. x=324, inside edge[4].corridorLeftX=316 but left of commonLeftX=332) return null
+    expect(findNearestDenseTwoHopEdge(model.twoHopEdges, 324, middle.corridorY)).toBeNull();
+    expect(findNearestDenseTwoHopEdge(model.twoHopEdges, 716, middle.corridorY)).toBeNull();
+
+    // Wide uppercase ASCII names are conservatively truncated within pixel budget
+    const wide = "W".repeat(26);
+    const truncatedEntry = truncateSvgText(wide, 183, 12.5);
+    expect(truncatedEntry.endsWith("…")).toBe(true);
+    expect(estimateSvgTextWidth(truncatedEntry, 12.5)).toBeLessThanOrEqual(183);
+    expect(truncateSvgText("synth-ap-relay-pool-2026", 258, 12.5)).toBe("synth-ap-relay-pool-2026");
+  });
+
+  it("matches full-key sourced IPv6 two-hop probes in production shape (bare IPv6, no landingAddress/ingressFamily) including unknown/pending attention consistency", () => {
+    const now = Date.parse("2026-11-28T12:00:00Z");
+    const entries = Array.from({ length: 6 }, (_, i) => ({ id: `e${i + 1}`, name: `Entry ${i + 1}` }));
+    const inv: Inventory = {
+      state: "owned",
+      accounts: [],
+      endpoints: [],
+      nodes: [...entries, { id: "l-v6", name: "IPv6 Exit" }],
+      runtimes: [
+        ...entries.map((e) => ({ id: e.id, role: "entry", revision: "1", runtimeReady: true, reportedAt: "", peers: [] })),
+        { id: "l-v6", certificateId: "a".repeat(64), role: "landing", revision: "1", runtimeReady: true, reportedAt: "", peers: [] },
+      ],
+      // Production shape: ordinary two-hop BusinessRoutes omit landingAddress and ingressFamily
+      routes: entries.map((e, i) => ({
+        id: `rt-v6-${i + 1}`,
+        accountId: "a1",
+        entryId: e.id,
+        egressId: "l-v6",
+        port: 24000,
+        enabled: true,
+        hideNative: false,
+        state: "verified",
+      })),
+    };
+    const names = new Map(inv.nodes.map((n) => [n.id, n.name]));
+    const latencies = new Map<string, RouteLatency>([
+      // Online sourced IPv6 probe with bare IPv6 address (real control/route_latency.go shape)
+      [
+        latencyKey("e1", "l-v6", 24000, "2001:db8::1", "2001:db8::20"),
+        { entryId: "e1", landingId: "l-v6", port: 24000, source: "2001:db8::1", address: "2001:db8::20", state: "ready", latencyMs: 18, samples: 3, checkedAt: new Date(now - 3_000).toISOString() },
+      ],
+      // Slow (>100ms) sourced IPv6 probe
+      [
+        latencyKey("e2", "l-v6", 24000, "2001:db8::2", "2001:db8::20"),
+        { entryId: "e2", landingId: "l-v6", port: 24000, source: "2001:db8::2", address: "2001:db8::20", state: "ready", latencyMs: 135, samples: 3, checkedAt: new Date(now - 3_000).toISOString() },
+      ],
+      // Offline sourced IPv6 probe
+      [
+        latencyKey("e3", "l-v6", 24000, "2001:db8::3", "2001:db8::20"),
+        { entryId: "e3", landingId: "l-v6", port: 24000, source: "2001:db8::3", address: "2001:db8::20", state: "unavailable", samples: 0 },
+      ],
+      // Matched sourced IPv6 probes still waiting for first sample (unknown / pending)
+      [
+        latencyKey("e4", "l-v6", 24000, "2001:db8::4", "2001:db8::20"),
+        { entryId: "e4", landingId: "l-v6", port: 24000, source: "2001:db8::4", address: "2001:db8::20", state: "unknown", samples: 0 },
+      ],
+      [
+        latencyKey("e5", "l-v6", 24000, "2001:db8::5", "2001:db8::20"),
+        { entryId: "e5", landingId: "l-v6", port: 24000, source: "2001:db8::5", address: "2001:db8::20", state: "pending", samples: 0 },
+      ],
+      // e6 has no latency entry at all
+    ]);
+
+    const model = buildTopologyModel({ inventory: inv, names, latencies, now, latencyFailed: false, filter: "all" });
+    expect(model.corridor.dense).toBe(true);
+    expect(model.corridor.totalCount).toBe(6);
+    expect(model.corridor.healthyCount).toBe(2);
+    expect(model.corridor.inactiveCount).toBe(1);
+    expect(model.corridor.staleOrEmptyCount).toBe(3);
+    expect(model.twoHopEdges[0].latencyState).toBe("ready");
+    expect(model.twoHopEdges[0].latencyMs).toBe(18);
+    expect(model.twoHopEdges[1].latencyState).toBe("slow");
+    expect(model.twoHopEdges[2].latencyState).toBe("unavailable");
+    expect(model.twoHopEdges[3].latencyState).toBe("no-sample");
+    expect(model.twoHopEdges[4].latencyState).toBe("no-sample");
+    expect(model.twoHopEdges[5].latencyState).toBe("no-sample");
+
+    // Attention filter shares evaluateTwoHopLatencyState: healthy e1/e2 are excluded, while offline e3,
+    // waiting-for-first-sample e4 (unknown) / e5 (pending), and missing e6 are ALL included consistently!
+    const attention = buildTopologyModel({ inventory: inv, names, latencies, now, latencyFailed: false, filter: "attention" });
+    expect(attention.twoHopEdges.map((e) => e.entryId)).toEqual(["e3", "e4", "e5", "e6"]);
   });
 });

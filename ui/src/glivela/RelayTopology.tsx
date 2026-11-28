@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SelectControl } from "@/components/SelectControl";
@@ -6,20 +6,19 @@ import type { RouteLatency } from "./RouteLatency";
 import type { Inventory, RelayPoolView, Runtime } from "./control-types";
 import {
   buildTopologyModel,
+  estimateSvgTextWidth,
+  findNearestDenseTwoHopEdge,
   formatRevisionReceipt,
   formatSampleAge,
   isEntryPoolSelectedOrConnected,
   isLegacyEdgeSelectedOrConnected,
   isPathSelectedOrConnected,
   isTwoHopSelectedOrConnected,
+  truncateSvgText,
   type FullPathStatus,
   type TopologyFilter,
   type TopologySelection,
 } from "./relay-pool-model";
-
-function truncateLabel(value: string, maxChars: number): string {
-  return value.length > maxChars ? `${value.slice(0, maxChars - 1)}…` : value;
-}
 
 function handleSvgActivate(event: KeyboardEvent<SVGGElement>, action: () => void) {
   if (event.key === "Enter" || event.key === " ") {
@@ -100,11 +99,19 @@ export function RelayTopology({
   onEditPool?: (pool: RelayPoolView) => void;
   onEditEntryObservatory?: (entry: Runtime) => void;
 }) {
+  const svgId = useId().replace(/[^A-Za-z0-9_-]/g, "") || "topo";
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const twoHopHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const pendingFocusTwoHop = useRef(false);
   const [filter, setFilter] = useState<TopologyFilter>("all");
   const [entryFilter, setEntryFilter] = useState("__all__");
   const [selection, setSelection] = useState<TopologySelection>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
 
   const nodeName = (id: string) => names.get(id) ?? id;
+  const accountName = (id: string) => inventory.accounts.find((a) => a.account.id === id)?.account.displayName ?? id;
   const poolName = (id?: string) => (id ? inventory.relayPools?.find((p) => p.id === id)?.name ?? id : "");
   const entryOptions = useMemo(
     () => [
@@ -133,6 +140,68 @@ export function RelayTopology({
   const toggleSelection = (next: Exclude<TopologySelection, null>) => {
     setSelection((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? null : next));
   };
+
+  const updateOverflow = useCallback(() => {
+    const el = canvasRef.current;
+    if (!el) {
+      setCanExpand(false);
+      return;
+    }
+    if (el.clientHeight > 0 || el.scrollHeight > 0) {
+      setCanExpand(el.scrollHeight > el.clientHeight + 1);
+    } else {
+      // Headless/jsdom fallback where CSS clamp() layout height is uncomputed.
+      setCanExpand(model.height > 360);
+    }
+  }, [model.height]);
+
+  useEffect(() => {
+    if (expanded) return;
+    updateOverflow();
+    window.addEventListener("resize", updateOverflow);
+    let observer: ResizeObserver | undefined;
+    const el = canvasRef.current;
+    if (el && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(updateOverflow);
+      observer.observe(el);
+    }
+    return () => {
+      window.removeEventListener("resize", updateOverflow);
+      observer?.disconnect();
+    };
+  }, [expanded, updateOverflow, model.width, filter, entryFilter]);
+
+  const showExpandToggle = expanded || canExpand;
+
+  const handleTwoHopClick = (event: ReactMouseEvent<SVGGElement>, fallbackEdgeId: string) => {
+    if (model.corridor.dense && svgRef.current) {
+      const rect = svgRef.current.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0 && (event.clientX !== 0 || event.clientY !== 0)) {
+        const svgX = ((event.clientX - rect.left) / rect.width) * model.width;
+        const svgY = ((event.clientY - rect.top) / rect.height) * model.height;
+        const nearest = findNearestDenseTwoHopEdge(model.twoHopEdges, svgX, svgY);
+        if (nearest) {
+          toggleSelection({ kind: "two-hop", id: nearest.id });
+          return;
+        }
+      }
+    }
+    toggleSelection({ kind: "two-hop", id: fallbackEdgeId });
+  };
+
+  const corridorSummaryText = useMemo(() => {
+    if (!model.corridor.dense) return "";
+    const parts = [`${model.corridor.healthyCount} 健康`];
+    if (model.corridor.unhealthyCount > 0) parts.push(`${model.corridor.unhealthyCount} 失败`);
+    if (model.corridor.staleOrEmptyCount > 0) parts.push(`${model.corridor.staleOrEmptyCount} 无样本/过期`);
+    if (model.corridor.inactiveCount > 0) parts.push(`${model.corridor.inactiveCount} 停用/离线`);
+    return `两跳直连 ${model.corridor.totalCount} 条（${parts.join(" · ")}）· 点击线路或下方清单选择`;
+  }, [model.corridor]);
+
+  const corridorSummaryWidth = useMemo(
+    () => Math.max(280, Math.min(model.width - 40, Math.round(estimateSvgTextWidth(corridorSummaryText, 10.5) + 28))),
+    [corridorSummaryText, model.width],
+  );
 
   const selectedPaths = useMemo(
     () => model.allFullPaths.filter((path) => isPathSelectedOrConnected(selection, path)),
@@ -177,6 +246,37 @@ export function RelayTopology({
   const activePath = selection?.kind === "path" ? model.allFullPaths.find((p) => p.id === selection.id) : undefined;
   const activeTwoHop = selection?.kind === "two-hop" ? model.twoHopEdges.find((e) => e.id === selection.id) : undefined;
 
+  useEffect(() => {
+    if (activeTwoHop && pendingFocusTwoHop.current) {
+      pendingFocusTwoHop.current = false;
+      twoHopHeadingRef.current?.focus();
+    }
+  }, [activeTwoHop?.id]);
+
+  const duplicateTwoHopPairs = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const edge of model.twoHopEdges) {
+      const key = `${edge.entryId}::${edge.landingId}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+  }, [model.twoHopEdges]);
+
+  const twoHopQualifier = (edge: (typeof model.twoHopEdges)[number]) => {
+    const duplicate = duplicateTwoHopPairs.has(`${edge.entryId}::${edge.landingId}`);
+    const parts: string[] = [];
+    if (duplicate || inventory.accounts.length > 1) parts.push(accountName(edge.route.accountId));
+    if (edge.route.name) parts.push(edge.route.name);
+    if (edge.isIpv4Split) parts.push("IPv4 分流");
+    if (duplicate) parts.push(`#${edge.route.id}`);
+    return parts.join(" · ");
+  };
+
+  const selectTwoHopFromFocusCard = (edgeId: string) => {
+    pendingFocusTwoHop.current = true;
+    toggleSelection({ kind: "two-hop", id: edgeId });
+  };
+
   return (
     <section className="gl-topology-panel" aria-label="入口、中转池与固定出口三列交互拓扑">
       <header className="gl-topology-header">
@@ -204,6 +304,11 @@ export function RelayTopology({
           <div className="gl-topology-entry-select">
             <SelectControl aria-label="按入口筛选拓扑" value={entryFilter} onValueChange={setEntryFilter} options={entryOptions} />
           </div>
+          {showExpandToggle ? (
+            <Button type="button" variant="outline" aria-pressed={expanded} onClick={() => setExpanded((prev) => !prev)}>
+              {expanded ? "收起高度" : "展开全高"}
+            </Button>
+          ) : null}
           {selection ? (
             <Button type="button" variant="outline" onClick={() => setSelection(null)}>
               <X />
@@ -235,24 +340,80 @@ export function RelayTopology({
           <p>请切换筛选条件，或先创建中转池与线路绑定。</p>
         </div>
       ) : (
-        <div className="gl-topology-canvas">
+        <div ref={canvasRef} className="gl-topology-canvas" data-expanded={expanded || undefined}>
           <svg
+            ref={svgRef}
             className="gl-topology-svg"
             viewBox={`0 0 ${model.width} ${model.height}`}
+            data-dense-corridor={model.corridor.dense || undefined}
             role="group"
             aria-label="入口、中转池、固定出口三列交互拓扑图"
           >
+            <defs>
+              {model.entries.map((entry, idx) => (
+                <clipPath key={`clip-entry-${entry.id}`} id={`${svgId}-entry-${idx}`}>
+                  <rect x={entry.x + 22} y={entry.y + 4} width={entry.width - 32} height={24} />
+                </clipPath>
+              ))}
+              {model.pools.map((poolNode, poolIdx) => {
+                const revReservePx = Math.max(46, Math.ceil(estimateSvgTextWidth(`rev ${poolNode.pool.revision}`, 10) + 14));
+                const titleClipW = Math.max(40, poolNode.width - 24 - revReservePx + 2);
+                return (
+                  <Fragment key={`clip-pool-group-${poolNode.id}`}>
+                    <clipPath id={`${svgId}-pool-${poolIdx}`}>
+                      <rect x={poolNode.x + 11} y={poolNode.y + 4} width={titleClipW} height={22} />
+                    </clipPath>
+                    {poolNode.members.map((slot, slotIdx) => (
+                      <clipPath key={`clip-member-${slot.nodeId}`} id={`${svgId}-member-${poolIdx}-${slotIdx}`}>
+                        <rect x={slot.x + 21} y={slot.y + 2} width={Math.max(40, slot.width - 84)} height={slot.height - 4} />
+                      </clipPath>
+                    ))}
+                  </Fragment>
+                );
+              })}
+              {model.legacyRelays.map((legacy, idx) => (
+                <clipPath key={`clip-legacy-${legacy.id}`} id={`${svgId}-legacy-${idx}`}>
+                  <rect x={legacy.x + 22} y={legacy.y + 4} width={legacy.width - 33} height={24} />
+                </clipPath>
+              ))}
+              {model.landings.map((landingNode, idx) => (
+                <clipPath key={`clip-landing-${landingNode.id}`} id={`${svgId}-landing-${idx}`}>
+                  <rect x={landingNode.x + 22} y={landingNode.y + 4} width={landingNode.width - 32} height={24} />
+                </clipPath>
+              ))}
+            </defs>
+
             {/* Column labels */}
-            <text x={24} y={24} className="gl-topo-col-title">
+            <text x={model.columns.entryX} y={20} className="gl-topo-col-title">
               入口（Entries · {model.entries.length}）
             </text>
-            <text x={368} y={24} className="gl-topo-col-title">
+            <text x={model.columns.poolX} y={20} className="gl-topo-col-title">
               选路中转组（Relay Pools · {model.pools.length}
               {model.legacyRelays.length > 0 ? ` · 旧三跳 ${model.legacyRelays.length}` : ""}）
             </text>
-            <text x={792} y={24} className="gl-topo-col-title">
+            <text x={model.columns.landingX} y={20} className="gl-topo-col-title">
               固定出口（Fixed Landings · {model.landings.length}）
             </text>
+
+            {model.corridor.dense ? (
+              <g
+                className="gl-topo-corridor-summary"
+                data-corridor-summary="true"
+                transform={`translate(${model.width / 2}, ${model.corridor.summaryY})`}
+              >
+                <rect
+                  x={-corridorSummaryWidth / 2}
+                  y={-10}
+                  width={corridorSummaryWidth}
+                  height={20}
+                  rx={10}
+                  className="gl-topo-corridor-pill-bg"
+                />
+                <text x={0} y={3.5} textAnchor="middle" className="gl-topo-corridor-pill-text">
+                  {corridorSummaryText}
+                </text>
+              </g>
+            ) : null}
 
             {/* Layer 1: Two-hop direct edges bridging strictly through the top corridor above middle cards */}
             <g className="gl-topo-layer-twohop" aria-label="两跳跨中列直连线路">
@@ -270,21 +431,30 @@ export function RelayTopology({
                           ? "good"
                           : "muted";
                 const text = twoHopTelemetryLabel(edge);
+                const qualifier = twoHopQualifier(edge);
+                const showPill =
+                  !model.corridor.dense || selected || (selection !== null && highlighted && selectedTwoHop.length <= 3);
+                const pillX =
+                  model.corridor.dense && selection !== null && !selected && highlighted && selectedTwoHop.length <= 3
+                    ? Math.round(model.width / 2 + (selectedTwoHop.indexOf(edge) - (selectedTwoHop.length - 1) / 2) * 108)
+                    : edge.labelX;
                 return (
                   <g
                     key={edge.id}
                     className="gl-topo-edge-group"
                     data-edge-kind="two-hop"
+                    data-dense={model.corridor.dense || undefined}
                     data-tone={tone}
                     data-dimmed={!highlighted || undefined}
                     data-selected={selected || undefined}
                     role="button"
                     tabIndex={0}
                     aria-pressed={selected}
-                    aria-label={`两跳线路 ${nodeName(edge.entryId)} 直达 ${nodeName(edge.landingId)} · ${text}`}
-                    onClick={() => toggleSelection({ kind: "two-hop", id: edge.id })}
+                    aria-label={`两跳线路 ${nodeName(edge.entryId)} 直达 ${nodeName(edge.landingId)}${qualifier ? `（${qualifier}）` : ""} · ${text}`}
+                    onClick={(event) => handleTwoHopClick(event, edge.id)}
                     onKeyDown={(event) => handleSvgActivate(event, () => toggleSelection({ kind: "two-hop", id: edge.id }))}
                   >
+                    <title>{`两跳 ${nodeName(edge.entryId)} → ${nodeName(edge.landingId)}${qualifier ? `（${qualifier}）` : ""} · ${text}`}</title>
                     <path d={edge.d} className="gl-topo-edge-hit" />
                     <path
                       d={edge.d}
@@ -292,12 +462,21 @@ export function RelayTopology({
                       data-tone={tone}
                       strokeDasharray={edge.latencyState === "stale" || edge.latencyState === "no-sample" ? "5 4" : undefined}
                     />
-                    <g transform={`translate(${edge.labelX}, ${edge.labelY})`}>
-                      <rect x={-34} y={-10} width={68} height={18} rx={9} className="gl-topo-pill-bg" data-tone={tone} />
-                      <text x={0} y={3} textAnchor="middle" className="gl-topo-pill-text" data-tone={tone}>
-                        两跳 {text}
-                      </text>
-                    </g>
+                    {showPill ? (
+                      <g
+                        transform={`translate(${pillX}, ${edge.labelY})`}
+                        data-edge-pill="two-hop"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelection({ kind: "two-hop", id: edge.id });
+                        }}
+                      >
+                        <rect x={-34} y={-9} width={68} height={18} rx={9} className="gl-topo-pill-bg" data-tone={tone} />
+                        <text x={0} y={3} textAnchor="middle" className="gl-topo-pill-text" data-tone={tone}>
+                          两跳 {text}
+                        </text>
+                      </g>
+                    ) : null}
                   </g>
                 );
               })}
@@ -427,7 +606,7 @@ export function RelayTopology({
 
             {/* Column 1: Entry cards */}
             <g className="gl-topo-layer-entries">
-              {model.entries.map((entry) => {
+              {model.entries.map((entry, entryIdx) => {
                 const selected = selection?.kind === "entry" && selection.id === entry.id;
                 const connected =
                   !selection ||
@@ -460,15 +639,21 @@ export function RelayTopology({
                     onClick={() => toggleSelection({ kind: "entry", id: entry.id })}
                     onKeyDown={(event) => handleSvgActivate(event, () => toggleSelection({ kind: "entry", id: entry.id }))}
                   >
-                    <rect x={entry.x} y={entry.y} width={entry.width} height={entry.height} rx={10} className="gl-topo-card-box" />
-                    <circle cx={entry.x + 16} cy={entry.y + 22} r={4.5} className="gl-topo-status-dot" data-tone={readyTone} />
-                    <text x={entry.x + 28} y={entry.y + 26} className="gl-topo-card-title">
-                      {truncateLabel(entry.name, 17)}
+                    <title>{entry.name}</title>
+                    <rect x={entry.x} y={entry.y} width={entry.width} height={entry.height} rx={8} className="gl-topo-card-box" />
+                    <circle cx={entry.x + 13} cy={entry.y + 18} r={4} className="gl-topo-status-dot" data-tone={readyTone} />
+                    <text
+                      x={entry.x + 23}
+                      y={entry.y + 22}
+                      clipPath={`url(#${svgId}-entry-${entryIdx})`}
+                      className="gl-topo-card-title"
+                    >
+                      {truncateSvgText(entry.name, entry.width - 33, 12.5)}
                     </text>
-                    <text x={entry.x + 14} y={entry.y + 47} className="gl-topo-card-sub">
+                    <text x={entry.x + 12} y={entry.y + 39} className="gl-topo-card-sub">
                       回执：{formatRevisionReceipt(entry.runtime?.revision, entry.runtime?.appliedRevision, !!entry.runtime?.runtimeReady)}
                     </text>
-                    <text x={entry.x + 14} y={entry.y + 66} className="gl-topo-card-meta">
+                    <text x={entry.x + 12} y={entry.y + 54} className="gl-topo-card-meta">
                       探测 {entry.observatory.intervalSec}s×{entry.observatory.sampling} · {entry.pooledRouteCount} 池
                       {entry.legacyThreeHopCount > 0 ? ` / ${entry.legacyThreeHopCount} 旧三跳` : ""} / {entry.twoHopRouteCount} 两跳
                     </text>
@@ -479,7 +664,7 @@ export function RelayTopology({
 
             {/* Column 2: Dashed RelayPool cards + Legacy Single-Relay cards */}
             <g className="gl-topo-layer-pools">
-              {model.pools.map((poolNode) => {
+              {model.pools.map((poolNode, poolIdx) => {
                 const selected = selection?.kind === "pool" && selection.id === poolNode.id;
                 const connected =
                   !selection ||
@@ -492,6 +677,9 @@ export function RelayTopology({
                   (selection.kind === "path" && activePath?.poolId === poolNode.id) ||
                   (selection.kind === "legacy-route" && activeLegacyRoute?.pendingRelayPoolId === poolNode.id) ||
                   (selection.kind === "legacy-relay" && (activeLegacyRelay?.pendingPoolIds.includes(poolNode.id) ?? false));
+                const revText = `rev ${poolNode.pool.revision}`;
+                const revReservePx = Math.max(46, Math.ceil(estimateSvgTextWidth(revText, 10) + 14));
+                const poolTitleMaxPx = Math.max(40, poolNode.width - 24 - revReservePx);
                 return (
                   <g
                     key={poolNode.id}
@@ -508,22 +696,28 @@ export function RelayTopology({
                       onClick={() => toggleSelection({ kind: "pool", id: poolNode.id })}
                       onKeyDown={(event) => handleSvgActivate(event, () => toggleSelection({ kind: "pool", id: poolNode.id }))}
                     >
+                      <title>{poolNode.name}</title>
                       <rect
                         x={poolNode.x}
                         y={poolNode.y}
                         width={poolNode.width}
                         height={poolNode.height}
-                        rx={12}
+                        rx={10}
                         strokeDasharray="6 4"
                         className="gl-topo-pool-box"
                       />
-                      <text x={poolNode.x + 14} y={poolNode.y + 22} className="gl-topo-card-title">
-                        {truncateLabel(poolNode.name, 20)}
+                      <text
+                        x={poolNode.x + 12}
+                        y={poolNode.y + 19}
+                        clipPath={`url(#${svgId}-pool-${poolIdx})`}
+                        className="gl-topo-card-title"
+                      >
+                        {truncateSvgText(poolNode.name, poolTitleMaxPx, 12.5)}
                       </text>
-                      <text x={poolNode.x + poolNode.width - 14} y={poolNode.y + 22} textAnchor="end" className="gl-topo-card-meta">
-                        rev {poolNode.pool.revision}
+                      <text x={poolNode.x + poolNode.width - 12} y={poolNode.y + 19} textAnchor="end" className="gl-topo-card-meta">
+                        {revText}
                       </text>
-                      <text x={poolNode.x + 14} y={poolNode.y + 40} className="gl-topo-card-meta">
+                      <text x={poolNode.x + 12} y={poolNode.y + 34} className="gl-topo-card-meta">
                         leastLoad · 期望 {poolNode.pool.strategy.expected} · ≤{poolNode.pool.strategy.maxRttMs}ms · {poolNode.activeMemberCount}/
                         {poolNode.members.length} 就绪
                         {poolNode.revocationPending > 0 ? ` · ${poolNode.revocationPending} 撤销待回执` : ""}
@@ -531,11 +725,11 @@ export function RelayTopology({
                     </g>
 
                     {poolNode.members.length === 0 ? (
-                      <text x={poolNode.x + 14} y={poolNode.y + 70} className="gl-topo-card-meta">
+                      <text x={poolNode.x + 12} y={poolNode.y + 60} className="gl-topo-card-meta">
                         池内无成员（Fail-Closed 阻断）
                       </text>
                     ) : (
-                      poolNode.members.map((slot) => {
+                      poolNode.members.map((slot, slotIdx) => {
                         const memberSelected =
                           selection?.kind === "member" && selection.poolId === slot.poolId && selection.nodeId === slot.nodeId;
                         const memberTone = slot.member.drained || slot.member.nodeSuspended
@@ -566,20 +760,26 @@ export function RelayTopology({
                               )
                             }
                           >
+                            <title>{`#${slot.order} ${slot.name} · ${stateTag}`}</title>
                             <rect
                               x={slot.x}
                               y={slot.y}
                               width={slot.width}
                               height={slot.height}
-                              rx={7}
+                              rx={6}
                               className="gl-topo-member-box"
                               data-tone={memberTone}
                             />
-                            <circle cx={slot.x + 14} cy={slot.y + 17} r={4} className="gl-topo-status-dot" data-tone={memberTone} />
-                            <text x={slot.x + 26} y={slot.y + 21} className="gl-topo-member-name">
-                              #{slot.order} {truncateLabel(slot.name, 17)}
+                            <circle cx={slot.x + 12} cy={slot.y + 14} r={3.5} className="gl-topo-status-dot" data-tone={memberTone} />
+                            <text
+                              x={slot.x + 22}
+                              y={slot.y + 18}
+                              clipPath={`url(#${svgId}-member-${poolIdx}-${slotIdx})`}
+                              className="gl-topo-member-name"
+                            >
+                              {truncateSvgText(`#${slot.order} ${slot.name}`, Math.max(40, slot.width - 86), 11)}
                             </text>
-                            <text x={slot.x + slot.width - 10} y={slot.y + 21} textAnchor="end" className="gl-topo-member-state" data-tone={memberTone}>
+                            <text x={slot.x + slot.width - 10} y={slot.y + 18} textAnchor="end" className="gl-topo-member-state" data-tone={memberTone}>
                               {stateTag}
                             </text>
                           </g>
@@ -590,7 +790,7 @@ export function RelayTopology({
                 );
               })}
 
-              {model.legacyRelays.map((legacy) => {
+              {model.legacyRelays.map((legacy, legacyIdx) => {
                 const selected = selection?.kind === "legacy-relay" && selection.id === legacy.id;
                 const connected =
                   !selection ||
@@ -616,21 +816,27 @@ export function RelayTopology({
                     onClick={() => toggleSelection({ kind: "legacy-relay", id: legacy.id })}
                     onKeyDown={(event) => handleSvgActivate(event, () => toggleSelection({ kind: "legacy-relay", id: legacy.id }))}
                   >
+                    <title>{legacy.name}</title>
                     <rect
                       x={legacy.x}
                       y={legacy.y}
                       width={legacy.width}
                       height={legacy.height}
-                      rx={10}
+                      rx={8}
                       strokeDasharray="3 3"
                       className="gl-topo-legacy-box"
                     />
-                    <circle cx={legacy.x + 16} cy={legacy.y + 22} r={4} className="gl-topo-status-dot" data-tone={readyTone} />
-                    <text x={legacy.x + 28} y={legacy.y + 26} className="gl-topo-card-title">
-                      旧三跳 · {truncateLabel(legacy.name, 16)}
+                    <circle cx={legacy.x + 13} cy={legacy.y + 19} r={3.5} className="gl-topo-status-dot" data-tone={readyTone} />
+                    <text
+                      x={legacy.x + 23}
+                      y={legacy.y + 23}
+                      clipPath={`url(#${svgId}-legacy-${legacyIdx})`}
+                      className="gl-topo-card-title"
+                    >
+                      {truncateSvgText(`旧三跳 · ${legacy.name}`, legacy.width - 35, 12.5)}
                     </text>
-                    <text x={legacy.x + 14} y={legacy.y + 48} className="gl-topo-card-meta">
-                      {truncateLabel(pendingLabel, 34)} · {legacy.routeIds.length} 条线路
+                    <text x={legacy.x + 12} y={legacy.y + 42} className="gl-topo-card-meta">
+                      {truncateSvgText(`${pendingLabel} · ${legacy.routeIds.length} 条线路`, legacy.width - 24, 10)}
                     </text>
                   </g>
                 );
@@ -639,7 +845,7 @@ export function RelayTopology({
 
             {/* Column 3: Fixed Landing cards */}
             <g className="gl-topo-layer-landings">
-              {model.landings.map((landingNode) => {
+              {model.landings.map((landingNode, landingIdx) => {
                 const selected = selection?.kind === "landing" && selection.id === landingNode.id;
                 const connected =
                   !selection ||
@@ -673,22 +879,28 @@ export function RelayTopology({
                     onClick={() => toggleSelection({ kind: "landing", id: landingNode.id })}
                     onKeyDown={(event) => handleSvgActivate(event, () => toggleSelection({ kind: "landing", id: landingNode.id }))}
                   >
+                    <title>{landingNode.name}</title>
                     <rect
                       x={landingNode.x}
                       y={landingNode.y}
                       width={landingNode.width}
                       height={landingNode.height}
-                      rx={10}
+                      rx={8}
                       className="gl-topo-card-box"
                     />
-                    <circle cx={landingNode.x + 16} cy={landingNode.y + 22} r={4.5} className="gl-topo-status-dot" data-tone={readyTone} />
-                    <text x={landingNode.x + 28} y={landingNode.y + 26} className="gl-topo-card-title">
-                      {truncateLabel(landingNode.name, 17)}
+                    <circle cx={landingNode.x + 13} cy={landingNode.y + 18} r={4} className="gl-topo-status-dot" data-tone={readyTone} />
+                    <text
+                      x={landingNode.x + 23}
+                      y={landingNode.y + 22}
+                      clipPath={`url(#${svgId}-landing-${landingIdx})`}
+                      className="gl-topo-card-title"
+                    >
+                      {truncateSvgText(landingNode.name, landingNode.width - 33, 12.5)}
                     </text>
-                    <text x={landingNode.x + 14} y={landingNode.y + 47} className="gl-topo-card-sub">
+                    <text x={landingNode.x + 12} y={landingNode.y + 39} className="gl-topo-card-sub">
                       回执：{formatRevisionReceipt(landingNode.runtime?.revision, landingNode.runtime?.appliedRevision, !!landingNode.runtime?.runtimeReady)}
                     </text>
-                    <text x={landingNode.x + 14} y={landingNode.y + 66} className="gl-topo-card-meta">
+                    <text x={landingNode.x + 12} y={landingNode.y + 54} className="gl-topo-card-meta">
                       {landingNode.incomingPooled} 池入
                       {landingNode.incomingLegacyThreeHop > 0 ? ` / ${landingNode.incomingLegacyThreeHop} 旧三跳` : ""} / {landingNode.incomingTwoHop} 两跳
                       {occupiedCount > 0 ? ` · ${occupiedCount} 个 24000 待切窗` : landingNode.runtime?.relayPoolCapable ? " · EIH 24000" : ""}
@@ -725,6 +937,28 @@ export function RelayTopology({
                   探测目标 {activeEntry.observatory.destination}（{activeEntry.observatory.intervalSec}s / 采样 {activeEntry.observatory.sampling} / 超时{" "}
                   {activeEntry.observatory.timeoutSec}s）
                 </p>
+                {selectedTwoHop.length > 0 ? (
+                  <div>
+                    <p className="gl-context-copy">直连两跳（{selectedTwoHop.length} 条，点选查看单条明细）：</p>
+                    <div className="gl-topo-twohop-chips">
+                      {selectedTwoHop.map((edge) => {
+                        const qualifier = twoHopQualifier(edge);
+                        return (
+                          <button
+                            key={edge.id}
+                            type="button"
+                            className="gl-topo-twohop-chip"
+                            aria-pressed={selection?.kind === "two-hop" && selection.id === edge.id}
+                            onClick={() => selectTwoHopFromFocusCard(edge.id)}
+                          >
+                            {nodeName(edge.landingId)}
+                            {qualifier ? `（${qualifier}）` : ""} · {twoHopTelemetryLabel(edge)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
               {activeEntry.runtime && onEditEntryObservatory ? (
                 <Button type="button" variant="outline" onClick={() => onEditEntryObservatory(activeEntry.runtime!)}>
@@ -808,15 +1042,41 @@ export function RelayTopology({
                 ? ` · 端口 24000 单用户占用地址：${activeLanding.runtime!.occupiedPort24000!.join(", ")}`
                 : ""}
             </p>
+            {selectedTwoHop.length > 0 ? (
+              <div>
+                <p className="gl-context-copy">直连两跳来源（{selectedTwoHop.length} 条，点选查看单条明细）：</p>
+                <div className="gl-topo-twohop-chips">
+                  {selectedTwoHop.map((edge) => {
+                    const qualifier = twoHopQualifier(edge);
+                    return (
+                      <button
+                        key={edge.id}
+                        type="button"
+                        className="gl-topo-twohop-chip"
+                        aria-pressed={selection?.kind === "two-hop" && selection.id === edge.id}
+                        onClick={() => selectTwoHopFromFocusCard(edge.id)}
+                      >
+                        {nodeName(edge.entryId)}
+                        {qualifier ? `（${qualifier}）` : ""} · {twoHopTelemetryLabel(edge)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
         {activeTwoHop ? (
           <div className="gl-topology-focus-card">
-            <h3>
+            <h3 ref={twoHopHeadingRef} tabIndex={-1}>
               两跳直连：{nodeName(activeTwoHop.entryId)} → {nodeName(activeTwoHop.landingId)}
             </h3>
             <p className="gl-context-copy">
+              账户：{accountName(activeTwoHop.route.accountId)} · 线路 {activeTwoHop.route.id}
+              {activeTwoHop.route.name ? `（${activeTwoHop.route.name}）` : ""}
+              {activeTwoHop.isIpv4Split ? " · IPv4 分流" : ""}
+              {" · "}
               期望配置：{activeTwoHop.desiredEnabled ? "启用" : "停用"}
               {activeTwoHop.route.udp ? " · UDP(XUDP)" : " · TCP-only"}
               {" · "}
@@ -826,6 +1086,29 @@ export function RelayTopology({
               {activeTwoHop.checkedAt ? `（${formatSampleAge(activeTwoHop.checkedAt, now)}）` : ""}
             </p>
           </div>
+        ) : null}
+
+        {model.corridor.dense ? (
+          <details className="gl-topo-twohop-details">
+            <summary>全部两跳直连清单（{model.twoHopEdges.length} 条，可精确点选单条线路）</summary>
+            <div className="gl-topo-twohop-chips">
+              {model.twoHopEdges.map((edge) => {
+                const qualifier = twoHopQualifier(edge);
+                return (
+                  <button
+                    key={edge.id}
+                    type="button"
+                    className="gl-topo-twohop-chip"
+                    aria-pressed={selection?.kind === "two-hop" && selection.id === edge.id}
+                    onClick={() => toggleSelection({ kind: "two-hop", id: edge.id })}
+                  >
+                    {nodeName(edge.entryId)} → {nodeName(edge.landingId)}
+                    {qualifier ? `（${qualifier}）` : ""} · {twoHopTelemetryLabel(edge)}
+                  </button>
+                );
+              })}
+            </div>
+          </details>
         ) : null}
 
         {selectedPaths.length > 0 ? (
