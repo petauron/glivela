@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/petauron/glivela/compare/v0.2.1...v0.3.0) (2026-11-28)
+
+
+### Features
+
+* **relay-pool:** Phase 1 dynamic relay pools, single-port 24000 EIH, and staged cutover ([#242](https://github.com/petauron/glivela/issues/242)) ([bf3a8f1](https://github.com/petauron/glivela/commit/bf3a8f1e7db6669ed39bee9d0ce71b91d4743d1f))
+* **relay-pool:** Phase 2 management panel, SVG topology, and docs ([#244](https://github.com/petauron/glivela/issues/244)) ([30925a0](https://github.com/petauron/glivela/commit/30925a00aef8a4d1760323dcf10b11a64ef0d404))
+
 ## [0.2.1](https://github.com/petauron/glivela/compare/v0.2.0...v0.2.1) (2026-11-26)
 
 
