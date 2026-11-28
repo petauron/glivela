@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { Compass, Server, UserRound, Layers, Activity, Settings2, Menu, X, RefreshCw, ShieldCheck } from "lucide-react";
+import { Compass, Server, UserRound, Layers, Link2, Activity, Settings2, Menu, X, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-export type PanelPage = "nodes" | "accounts" | "routes" | "quality" | "diagnostics" | "settings";
+export type PanelPage = "nodes" | "accounts" | "routes" | "pools" | "quality" | "diagnostics" | "settings";
 const navigation = [
  { id:"nodes",label:"节点",icon:Server }, {id:"accounts",label:"账户与订阅",icon:UserRound},
- {id:"routes",label:"线路组合",icon:Layers}, {id:"quality",label:"质量与解锁",icon:ShieldCheck}, {id:"diagnostics",label:"诊断",icon:Activity},
+ {id:"routes",label:"线路组合",icon:Layers}, {id:"pools",label:"中转池与拓扑",icon:Link2}, {id:"quality",label:"质量与解锁",icon:ShieldCheck}, {id:"diagnostics",label:"诊断",icon:Activity},
  {id:"settings",label:"连接设置",icon:Settings2},
 ] as const;
 export function PanelShell({page,onNavigate,subtitle,busy,onRefresh,standalone,children,actions}: {page:PanelPage;onNavigate:(page:PanelPage)=>void;subtitle:string;busy:boolean;onRefresh:()=>void;standalone:boolean;children:ReactNode;actions?:ReactNode}) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"maps"
 	"math"
@@ -110,6 +111,7 @@ type SocketCutoverPlan struct {
 	Port              int                     `json:"port"`
 	Occupied          bool                    `json:"occupied"`
 	Deferred          bool                    `json:"deferred"`
+	ScopeDigest       string                  `json:"scopeDigest"`
 	BlockingConsumers []string                `json:"blockingConsumers"`
 	Consumers         []SocketCutoverConsumer `json:"consumers"`
 }
@@ -135,6 +137,7 @@ type SocketCutoverRequest struct {
 	Address                string `json:"address,omitempty"`
 	GrantID                string `json:"grantId,omitempty"`
 	ExpectedTargetRevision uint64 `json:"expectedTargetRevision,string,omitempty"`
+	ExpectedScopeDigest    string `json:"expectedScopeDigest,omitempty"`
 }
 
 func socketCutoverID(targetNodeID, address string) string {
@@ -474,13 +477,51 @@ func (s *Store) inspectSocketCutoverLocked(targetNodeID, address string, now tim
 		return strings.Compare(a.PeerKey+a.GrantID, b.PeerKey+b.GrantID)
 	})
 	plan.Deferred = len(plan.BlockingConsumers) > 0
+	plan.ScopeDigest = socketCutoverScopeDigest(plan)
 	return plan, nil
+}
+
+func socketCutoverScopeDigest(plan SocketCutoverPlan) string {
+	canonical := struct {
+		TargetNodeID      string                  `json:"targetNodeId"`
+		Address           string                  `json:"address"`
+		Port              int                     `json:"port"`
+		Occupied          bool                    `json:"occupied"`
+		Deferred          bool                    `json:"deferred"`
+		BlockingConsumers []string                `json:"blockingConsumers"`
+		Consumers         []SocketCutoverConsumer `json:"consumers"`
+	}{
+		TargetNodeID:      plan.TargetNodeID,
+		Address:           plan.Address,
+		Port:              plan.Port,
+		Occupied:          plan.Occupied,
+		Deferred:          plan.Deferred,
+		BlockingConsumers: plan.BlockingConsumers,
+		Consumers:         plan.Consumers,
+	}
+	raw, _ := json.Marshal(canonical)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 // StartSocketCutover begins Stage 1 of Option A cutover using write-ahead intent:
 // persists Phase=="starting" first, then saves bindings, switches ONLY the
 // target listener to EIH 24000, and promotes intent to "listener-pending".
 func (s *Store) StartSocketCutover(ctx context.Context, targetNodeID, address string, expectedTargetRevision uint64) (SocketCutoverView, error) {
+	return s.startSocketCutover(ctx, targetNodeID, address, expectedTargetRevision, "")
+}
+
+// StartSocketCutoverWithScope enforces that the live consumer/blocker inventory
+// re-inspected under the store lock still matches expectedScopeDigest from the
+// operator's inspect preview, even if targetNode.Desired.Revision did not change.
+func (s *Store) StartSocketCutoverWithScope(ctx context.Context, targetNodeID, address string, expectedTargetRevision uint64, expectedScopeDigest string) (SocketCutoverView, error) {
+	if !glivela.ValidIdentity(expectedScopeDigest) {
+		return SocketCutoverView{}, errors.New("control: socket cutover requires valid expectedScopeDigest from inspect")
+	}
+	return s.startSocketCutover(ctx, targetNodeID, address, expectedTargetRevision, expectedScopeDigest)
+}
+
+func (s *Store) startSocketCutover(ctx context.Context, targetNodeID, address string, expectedTargetRevision uint64, expectedScopeDigest string) (SocketCutoverView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ctx.Err() != nil {
@@ -490,6 +531,9 @@ func (s *Store) StartSocketCutover(ctx context.Context, targetNodeID, address st
 	plan, err := s.inspectSocketCutoverLocked(targetNodeID, address, now)
 	if err != nil {
 		return SocketCutoverView{}, err
+	}
+	if expectedScopeDigest != "" && plan.ScopeDigest != expectedScopeDigest {
+		return SocketCutoverView{}, errors.New("control: socket cutover scope changed; re-inspect required")
 	}
 	if !plan.Occupied {
 		return SocketCutoverView{}, errors.New("control: socket is not occupied by a single-user 24000 listener")

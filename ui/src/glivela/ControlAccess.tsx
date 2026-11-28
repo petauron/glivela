@@ -22,6 +22,9 @@ function client(applicationId?: string): Request {
       if (response.status === 409 && operation === "retire-landing") throw new Error("清退尚未完成：请刷新状态，确认无限期停用、关联线路均已停用、没有共享发布依赖或未结束测速；已撤销的身份不会自动恢复。重试前须核对原节点标识和证书。");
       if (response.status === 409 && operation === "retire-returned-entry") throw new Error("永久清退未确认：请核对已退租身份、无限期维护、离线至少五分钟、关联线路停用，以及是否有其他角色或未结束任务。请刷新状态后再操作。");
       if (response.status === 409 && operation === "retire-entry") throw new Error("退役未确认：请检查入口是否离线、已暂停，服务端专属传输是否已退役，以及是否有配置变更待处理。");
+      if (response.status === 409 && operation === "relay-pools") throw new Error("中转池变更未确认：请刷新状态，核对修订号、成员节点与证书，以及删除前是否仍有线路引用该中转池。");
+      if (response.status === 409 && operation === "entry-observatory") throw new Error("入口探测与源地址配置未确认：请刷新状态，核对入口修订号、有效公网源地址与探测间隔（≥ 10 秒）。");
+      if (response.status === 409 && operation === "socket-cutover") throw new Error("端口 24000 切窗或旧三跳切换未确认：目标修订、受影响消费方范围或切窗阶段可能已变化，请刷新状态并重新检查占用与影响范围后再试。");
       if (response.status === 409 && operation === "routes" && body && typeof body === "object" && "delete" in body && body.delete === true) throw new Error("删除未确认：请先停用线路，等待相关节点应用后再试。");
       if (response.status === 401) throw new Error("登录已过期，请重新登录 Vastora 后重试。");
       if (response.status === 403) throw new Error("当前身份没有此应用的管理权限。");

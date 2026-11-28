@@ -103,3 +103,12 @@ leaves the peer closed, without trying public, overlay or direct alternatives.
 After server acceptance, disabling only the old client publication removes its
 native client-to-LAN forwarding rule but retains the listener and server path.
 Changing or clearing a private link used by an enabled server grant is refused.
+
+## Multi-user port 24000 EIH and controlled socket cutover
+
+Dynamic relay pools and migrated shared port-24000 sockets use Xray SS2022 EIH
+(`2022-blake3-aes-128-gcm` multi-user `server-iPSK:user-uPSK`) on port `24000`.
+When an existing single-user port-24000 listener occupies a target address,
+upgrade it through the Option A write-ahead controlled cutover window
+(`POST /v1/admin/socket-cutover`) rather than overwriting the socket in place.
+See [dynamic relay pools and topology](relay-pools.md).

@@ -7,7 +7,10 @@ routes remain TCP-only until the operator enables UDP.
 Datagrams use Xray XUDP inside the existing SS2022 TCP connection. TCP streams
 are not multiplexed. The public listener, issued key, exact source authorization,
 account credentials, subscription token and traffic history stay unchanged. A
-three-hop route carries the final SS2022 stream through its existing TCP relay.
+three-hop route carries the final SS2022 stream through its existing TCP relay;
+for pooled three-hop routes on port 24000 EIH, UDP-enabled grants receive
+isolated `uPSK`s separate from TCP-only grants on the same relay and landing.
+See [dynamic relay pools and topology](relay-pools.md).
 No public UDP listener, dynamic UDP port range or additional runtime is created.
 
 The authenticated `routes` operation accepts `udp: true` or `udp: false` with its

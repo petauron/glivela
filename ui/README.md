@@ -22,10 +22,12 @@ server-side mTLS identity. The standalone panel requires an enrolled administrat
 identity. Node and subscription credentials do not grant administrative access.
 
 `GlivelaLauncher` opens `GlivelaControl`; the panel's workspaces reuse the backend
-API and existing diagnostic controls. Business state and mutations belong to
+API and existing diagnostic controls, including `RelayPoolWorkspace` and the
+native-SVG three-column interactive topology (`RelayTopology`) with zero extra
+dependencies. Business state and mutations belong to
 Glivela. No production data or environment-specific node labels belong in fixtures.
 
-See [panel access](../docs/panel-access.md) and [releases](../RELEASING.md).
+See [panel access](../docs/panel-access.md), [dynamic relay pools](../docs/relay-pools.md) and [releases](../RELEASING.md).
 UI build output is distributed through the signed application catalog; source CI
 does not update installed applications.
 

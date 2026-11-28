@@ -73,8 +73,11 @@ func (c ObservatoryConfig) Validate() error {
 }
 
 // EntryRelayConfig stores per-entry public source addresses and the entry's
-// process-level burstObservatory configuration.
+// process-level burstObservatory configuration. Revision is controller-managed
+// optimistic concurrency state so concurrent edits conflict even before any
+// pooled route binds this entry (without bumping entry Desired.Revision).
 type EntryRelayConfig struct {
+	Revision    uint64             `json:"revision,string,omitempty"`
 	SourceIPv4  string             `json:"sourceIpv4,omitempty"`
 	SourceIPv6  string             `json:"sourceIpv6,omitempty"`
 	Observatory *ObservatoryConfig `json:"observatory,omitempty"`

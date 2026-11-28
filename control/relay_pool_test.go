@@ -242,8 +242,44 @@ func TestRelayPoolPhysicalEdgeReuseAndCredentialIsolation(t *testing.T) {
 		t.Fatalf("expected 5 distinct landing EIH users on landing-example (4 original + 1 alt relayEgress), got %d", len(s.nodes[landing1Cert].Desired.Landing.EIHListeners[0].Users))
 	}
 
-	// Business() inventory must remain strictly secret-free.
+	// Business() inventory must remain strictly secret-free while exposing
+	// Phase 2 UI metadata (admitted relay IDs, revocation status, applied
+	// revisions, capability, and non-secret public address hints).
 	inv := s.Business()
+	var foundPool, foundRoute, foundEntry, foundRelayB bool
+	for _, p := range inv.RelayPools {
+		if p.ID == "pool-shared" {
+			foundPool = true
+			if p.Revocation.PendingEntries == nil || p.Revocation.PendingLandings == nil || len(p.RouteIDs) != 3 {
+				t.Fatalf("unexpected RelayPoolView Phase 2 metadata: %+v", p)
+			}
+		}
+	}
+	for _, r := range inv.Routes {
+		if r.ID == g1.ID {
+			foundRoute = true
+			if r.RelayPoolID != "pool-shared" || r.LandingAddress != "2606:4700:4700::1111" || r.EgressIP != "8.8.8.8" || r.Name != "HK Exit 1" || len(r.ActiveRelayIDs) != 2 {
+				t.Fatalf("unexpected pooled route inventory metadata: %+v", r)
+			}
+		}
+	}
+	for _, rt := range inv.Runtimes {
+		if rt.ID == grant.EntryID {
+			foundEntry = true
+			if !rt.RelayPoolCapable || rt.PublicIPv6 != "2001:4860:4860::8888" {
+				t.Fatalf("unexpected entry runtime relay metadata: %+v", rt)
+			}
+		}
+		if rt.ID == "relay-b" {
+			foundRelayB = true
+			if !rt.RelayPoolCapable || rt.PublicIPv4 != "9.9.9.11" || rt.EgressIP != "2001:4860:4860::2222" || rt.AppliedRevision == 0 {
+				t.Fatalf("unexpected relay-b runtime relay metadata: %+v", rt)
+			}
+		}
+	}
+	if !foundPool || !foundRoute || !foundEntry || !foundRelayB {
+		t.Fatalf("missing expected Phase 2 inventory entries: pool=%v route=%v entry=%v relayB=%v", foundPool, foundRoute, foundEntry, foundRelayB)
+	}
 	rawInv, err := json.Marshal(inv)
 	if err != nil {
 		t.Fatal(err)
@@ -1464,7 +1500,7 @@ func TestObservatoryLowFrequencyReportingAndCoalescing(t *testing.T) {
 		t.Fatal("Observatory telemetry unexpectedly bumped entry revision")
 	}
 	inv := s.Business()
-	if len(inv.ObservatoryPaths) != 1 || inv.ObservatoryPaths[0].RelayNodeID != "relay-obs" || inv.ObservatoryPaths[0].DelayMS != 42 || !inv.ObservatoryPaths[0].Alive {
+	if len(inv.ObservatoryPaths) != 1 || inv.ObservatoryPaths[0].RelayNodeID != "relay-obs" || inv.ObservatoryPaths[0].GrantID == "" || inv.ObservatoryPaths[0].DelayMS != 42 || !inv.ObservatoryPaths[0].Alive {
 		t.Fatalf("Business inventory missing ObservatoryPaths: %+v", inv.ObservatoryPaths)
 	}
 	t2 := t1.Add(time.Second)
@@ -1588,7 +1624,7 @@ func TestRelayPoolAdminEndpointsAndDockerDriverRejection(t *testing.T) {
 		Address:      "9.9.9.9",
 	}, http.StatusOK)
 	var cutPlan SocketCutoverPlan
-	if err := json.Unmarshal(inspectRaw, &cutPlan); err != nil || !cutPlan.Occupied {
+	if err := json.Unmarshal(inspectRaw, &cutPlan); err != nil || !cutPlan.Occupied || !glivela.ValidIdentity(cutPlan.ScopeDigest) {
 		t.Fatalf("unexpected socket-cutover inspect response: %s %v", string(inspectRaw), err)
 	}
 
@@ -2219,5 +2255,201 @@ func TestSocketCutoverDisableLastRouteSurvivesRestart(t *testing.T) {
 		if validateRouteEntries(n) == nil {
 			t.Fatalf("validateRouteEntries accepted invalid EIH RouteEntry (%s)", name)
 		}
+	}
+}
+
+func TestChangeEntryRelayConfigCASWithoutBoundPool(t *testing.T) {
+	s, entryCert, _, grant := managedServerLandingFixture(t)
+	reportFreshEntry(t, s, entryCert)
+	initialEntryRev := s.nodes[entryCert].Desired.Revision
+
+	// Two concurrent editors read an entry with no pooled routes yet (configRevision == 0).
+	rev0 := uint64(0)
+	obs1 := glivela.ObservatoryConfig{Destination: "https://www.gstatic.com/generate_204", IntervalSec: 20, Sampling: 3, TimeoutSec: 5}
+	view1, err := s.ChangeEntryRelayConfig(context.Background(), EntryRelayConfigChange{
+		EntryID:                grant.EntryID,
+		ExpectedRevision:       initialEntryRev,
+		ExpectedConfigRevision: &rev0,
+		Config:                 glivela.EntryRelayConfig{SourceIPv4: "8.8.4.4", Observatory: &obs1},
+	})
+	if err != nil {
+		t.Fatalf("first entry observatory save failed: %v", err)
+	}
+	if view1.ConfigRevision != 1 {
+		t.Fatalf("expected ConfigRevision=1, got %d", view1.ConfigRevision)
+	}
+	if s.nodes[entryCert].Desired.Revision != initialEntryRev {
+		t.Fatalf("expected no entry restart/revision bump when no pool is bound, got %d vs %d", s.nodes[entryCert].Desired.Revision, initialEntryRev)
+	}
+
+	// Second concurrent writer with stale configRevision=0 must fail even though
+	// entry Desired.Revision did not change.
+	obs2 := glivela.ObservatoryConfig{Destination: "https://www.gstatic.com/generate_204", IntervalSec: 30, Sampling: 4, TimeoutSec: 5}
+	if _, err := s.ChangeEntryRelayConfig(context.Background(), EntryRelayConfigChange{
+		EntryID:                grant.EntryID,
+		ExpectedRevision:       initialEntryRev,
+		ExpectedConfigRevision: &rev0,
+		Config:                 glivela.EntryRelayConfig{SourceIPv4: "1.1.1.1", Observatory: &obs2},
+	}); err == nil {
+		t.Fatal("stale concurrent entry observatory save unexpectedly succeeded")
+	}
+	inv := s.Business()
+	if inv.EntryRelayConfigs[grant.EntryID].Revision != 1 || inv.EntryRelayConfigs[grant.EntryID].SourceIPv4 != "8.8.4.4" {
+		t.Fatalf("stale write mutated saved EntryRelayConfig: %+v", inv.EntryRelayConfigs[grant.EntryID])
+	}
+
+	// Clearing back to default with current configRevision=1 advances monotonic CAS to 2
+	// without restarting the entry, and rejects replaying either rev 0 or rev 1.
+	rev1 := uint64(1)
+	view2, err := s.ChangeEntryRelayConfig(context.Background(), EntryRelayConfigChange{
+		EntryID:                grant.EntryID,
+		ExpectedRevision:       initialEntryRev,
+		ExpectedConfigRevision: &rev1,
+		Config:                 glivela.EntryRelayConfig{},
+	})
+	if err != nil {
+		t.Fatalf("clear entry observatory config failed: %v", err)
+	}
+	if view2.ConfigRevision != 2 || s.nodes[entryCert].Desired.Revision != initialEntryRev {
+		t.Fatalf("unexpected clear result: view=%+v entryRev=%d", view2, s.nodes[entryCert].Desired.Revision)
+	}
+	for _, staleRev := range []uint64{0, 1} {
+		r := staleRev
+		if _, err := s.ChangeEntryRelayConfig(context.Background(), EntryRelayConfigChange{
+			EntryID:                grant.EntryID,
+			ExpectedRevision:       initialEntryRev,
+			ExpectedConfigRevision: &r,
+			Config:                 glivela.EntryRelayConfig{SourceIPv4: "1.1.1.1"},
+		}); err == nil {
+			t.Fatalf("stale write with configRevision=%d succeeded after clear", staleRev)
+		}
+	}
+
+	// Legacy Phase 1 unversioned EntryRelayConfig (present in map with Revision == 0):
+	// clearing it must persist an R1 tombstone so another editor holding R0 is rejected.
+	sLegacy, entryCertLegacy, _, grantLegacy := managedServerLandingFixture(t)
+	reportFreshEntry(t, sLegacy, entryCertLegacy)
+	legacyEntryRev := sLegacy.nodes[entryCertLegacy].Desired.Revision
+	sLegacy.mu.Lock()
+	sLegacy.business.material.EntryRelayConfigs = map[string]glivela.EntryRelayConfig{
+		grantLegacy.EntryID: {SourceIPv4: "8.8.4.4"},
+	}
+	sLegacy.mu.Unlock()
+	clearedLegacy, err := sLegacy.ChangeEntryRelayConfig(context.Background(), EntryRelayConfigChange{
+		EntryID:                grantLegacy.EntryID,
+		ExpectedRevision:       legacyEntryRev,
+		ExpectedConfigRevision: &rev0,
+		Config:                 glivela.EntryRelayConfig{},
+	})
+	if err != nil {
+		t.Fatalf("clearing legacy R0 EntryRelayConfig failed: %v", err)
+	}
+	if clearedLegacy.ConfigRevision != 1 || sLegacy.nodes[entryCertLegacy].Desired.Revision != legacyEntryRev {
+		t.Fatalf("expected R1 tombstone without entry restart, got view=%+v entryRev=%d", clearedLegacy, sLegacy.nodes[entryCertLegacy].Desired.Revision)
+	}
+	if _, err := sLegacy.ChangeEntryRelayConfig(context.Background(), EntryRelayConfigChange{
+		EntryID:                grantLegacy.EntryID,
+		ExpectedRevision:       legacyEntryRev,
+		ExpectedConfigRevision: &rev0,
+		Config:                 glivela.EntryRelayConfig{SourceIPv4: "8.8.4.4"},
+	}); err == nil {
+		t.Fatal("stale R0 write unexpectedly restored cleared legacy EntryRelayConfig")
+	}
+}
+
+func TestSocketCutoverScopeDigestRejectsStaleConsumerPreview(t *testing.T) {
+	s, entryCert, targetCert, grant := managedServerLandingFixture(t)
+	revision := func() uint64 { return s.business.material.Plan.Accounts[0].Account.DesiredRevision }
+	targetID := s.nodes[entryCert].Desired.EntryNetwork.Peers[0].Identity
+
+	grant.ID = "twohop-scope-base"
+	grant.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatal(err)
+	}
+	reportFreshLanding(t, s, targetCert, targetID)
+	reportFreshEntry(t, s, entryCert)
+
+	relayCert := strings.Repeat("c", 64)
+	enrollPoolTestLanding(t, s, "relay-scope", relayCert, "100.64.0.41", "9.9.9.41", "8.8.8.8")
+	obs := glivela.DefaultObservatoryConfig()
+	if _, err := s.ChangeEntryRelayConfig(context.Background(), EntryRelayConfigChange{
+		EntryID:          grant.EntryID,
+		ExpectedRevision: s.nodes[entryCert].Desired.Revision,
+		Config:           glivela.EntryRelayConfig{SourceIPv4: "8.8.4.4", Observatory: &obs},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ChangeRelayPool(context.Background(), RelayPoolChange{
+		Pool: glivela.RelayPool{
+			ID:       "pool-scope",
+			Name:     "Scope Pool",
+			Strategy: glivela.DefaultRelayPoolStrategy(1),
+			Members: []glivela.RelayPoolMember{
+				{NodeID: "relay-scope", CertificateID: relayCert, IngressIPv4: "9.9.9.41", EgressIPv4: "8.8.8.8"},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	origRev := s.nodes[targetCert].Desired.Revision
+	planBefore, err := s.InspectSocketCutover("landing-example", "9.9.9.9")
+	if err != nil || !planBefore.Occupied || planBefore.Deferred || len(planBefore.Consumers) != 1 || !glivela.ValidIdentity(planBefore.ScopeDigest) {
+		t.Fatalf("unexpected initial inspect plan: %+v err=%v", planBefore, err)
+	}
+
+	// Add a compatible pooled route targeting the occupied socket (9.9.9.9:24000).
+	// Target landing revision stays unchanged while consumer scope expands.
+	pooled := grant
+	pooled.ID = "pooled-scope-extra"
+	pooled.RelayPoolID = "pool-scope"
+	pooled.LandingAddress = "9.9.9.9"
+	pooled.ExpectedExit = "8.8.8.8"
+	pooled.Name = "Scope Extra"
+	pooled.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), pooled); err != nil {
+		t.Fatal(err)
+	}
+	reportFreshEntry(t, s, entryCert)
+	if s.nodes[targetCert].Desired.Revision != origRev {
+		t.Fatalf("expected target revision unchanged on occupied 24000 socket: got %d want %d", s.nodes[targetCert].Desired.Revision, origRev)
+	}
+
+	planExpanded, err := s.InspectSocketCutover("landing-example", "9.9.9.9")
+	if err != nil || len(planExpanded.Consumers) != 2 || planExpanded.ScopeDigest == planBefore.ScopeDigest {
+		t.Fatalf("expected expanded consumer scope and distinct digest: before=%+v after=%+v err=%v", planBefore, planExpanded, err)
+	}
+	// Starting with empty or stale digest from planBefore must be refused under lock.
+	if _, err := s.StartSocketCutoverWithScope(context.Background(), "landing-example", "9.9.9.9", origRev, ""); err == nil {
+		t.Fatal("StartSocketCutoverWithScope accepted empty scope digest")
+	}
+	if _, err := s.StartSocketCutoverWithScope(context.Background(), "landing-example", "9.9.9.9", origRev, planBefore.ScopeDigest); err == nil {
+		t.Fatal("StartSocketCutoverWithScope accepted stale scope digest after consumer addition")
+	}
+
+	// Disabling the added pooled route shrinks consumer scope back without bumping target revision;
+	// stale expanded digest must now be refused too.
+	pooled.Enabled = false
+	pooled.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), pooled); err != nil {
+		t.Fatal(err)
+	}
+	reportFreshEntry(t, s, entryCert)
+	if s.nodes[targetCert].Desired.Revision != origRev {
+		t.Fatalf("expected target revision unchanged after disabling pooled route: got %d want %d", s.nodes[targetCert].Desired.Revision, origRev)
+	}
+	if _, err := s.StartSocketCutoverWithScope(context.Background(), "landing-example", "9.9.9.9", origRev, planExpanded.ScopeDigest); err == nil {
+		t.Fatal("StartSocketCutoverWithScope accepted stale scope digest after consumer removal")
+	}
+
+	// Fresh re-inspect produces current digest and allows StartSocketCutoverWithScope to proceed.
+	planFinal, err := s.InspectSocketCutover("landing-example", "9.9.9.9")
+	if err != nil || planFinal.Deferred || len(planFinal.Consumers) != 1 {
+		t.Fatalf("unexpected final inspect plan: %+v err=%v", planFinal, err)
+	}
+	started, err := s.StartSocketCutoverWithScope(context.Background(), "landing-example", "9.9.9.9", origRev, planFinal.ScopeDigest)
+	if err != nil || started.Phase != "listener-pending" {
+		t.Fatalf("StartSocketCutoverWithScope with fresh digest failed: %+v err=%v", started, err)
 	}
 }

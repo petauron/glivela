@@ -52,24 +52,27 @@ type RelayPoolMemberView struct {
 }
 
 type RelayPoolView struct {
-	ID       string                    `json:"id"`
-	Name     string                    `json:"name"`
-	Revision uint64                    `json:"revision,string"`
-	Strategy glivela.RelayPoolStrategy `json:"strategy"`
-	Members  []RelayPoolMemberView     `json:"members"`
-	RouteIDs []string                  `json:"routeIds"`
+	ID         string                    `json:"id"`
+	Name       string                    `json:"name"`
+	Revision   uint64                    `json:"revision,string"`
+	Strategy   glivela.RelayPoolStrategy `json:"strategy"`
+	Members    []RelayPoolMemberView     `json:"members"`
+	RouteIDs   []string                  `json:"routeIds"`
+	Revocation RelayPoolRevocationStatus `json:"revocation"`
 }
 
 type EntryRelayConfigChange struct {
-	EntryID          string                   `json:"entryId"`
-	ExpectedRevision uint64                   `json:"expectedRevision,string"`
-	Config           glivela.EntryRelayConfig `json:"config"`
+	EntryID                string                   `json:"entryId"`
+	ExpectedRevision       uint64                   `json:"expectedRevision,string"`
+	ExpectedConfigRevision *uint64                  `json:"expectedConfigRevision,string,omitempty"`
+	Config                 glivela.EntryRelayConfig `json:"config"`
 }
 
 type EntryRelayConfigView struct {
-	EntryID  string                   `json:"entryId"`
-	Revision uint64                   `json:"revision,string"`
-	Config   glivela.EntryRelayConfig `json:"config"`
+	EntryID        string                   `json:"entryId"`
+	Revision       uint64                   `json:"revision,string"`
+	ConfigRevision uint64                   `json:"configRevision,string"`
+	Config         glivela.EntryRelayConfig `json:"config"`
 }
 
 func randomSS2022Key16() (string, error) {
@@ -1433,6 +1436,11 @@ func (s *Store) ChangeEntryRelayConfig(ctx context.Context, change EntryRelayCon
 		return EntryRelayConfigView{}, refused
 	}
 	next := s.business.material
+	oldCfg, hadCfg := next.EntryRelayConfigs[change.EntryID]
+	currentCfgRev := oldCfg.Revision
+	if change.ExpectedConfigRevision != nil && *change.ExpectedConfigRevision != currentCfgRev {
+		return EntryRelayConfigView{}, refused
+	}
 	next.EntryRelayConfigs = maps.Clone(next.EntryRelayConfigs)
 	if next.EntryRelayConfigs == nil {
 		next.EntryRelayConfigs = map[string]glivela.EntryRelayConfig{}
@@ -1442,12 +1450,18 @@ func (s *Store) ChangeEntryRelayConfig(ctx context.Context, change EntryRelayCon
 		obs := *cfg.Observatory
 		cfg.Observatory = &obs
 	}
-	if cfg.SourceIPv4 == "" && cfg.SourceIPv6 == "" && cfg.Observatory == nil {
+	emptyConfig := cfg.SourceIPv4 == "" && cfg.SourceIPv6 == "" && cfg.Observatory == nil
+	if emptyConfig && !hadCfg {
+		cfg.Revision = 0
 		delete(next.EntryRelayConfigs, change.EntryID)
 		if len(next.EntryRelayConfigs) == 0 {
 			next.EntryRelayConfigs = nil
 		}
 	} else {
+		if currentCfgRev == math.MaxUint64 {
+			return EntryRelayConfigView{}, refused
+		}
+		cfg.Revision = currentCfgRev + 1
 		next.EntryRelayConfigs[change.EntryID] = cfg
 	}
 	if err := ensurePooledRouteCredentials(s.nodes, &next); err != nil {
@@ -1468,9 +1482,10 @@ func (s *Store) ChangeEntryRelayConfig(ctx context.Context, change EntryRelayCon
 		}
 	}
 	return EntryRelayConfigView{
-		EntryID:  change.EntryID,
-		Revision: s.nodes[entryCert].Desired.Revision,
-		Config:   cfg,
+		EntryID:        change.EntryID,
+		Revision:       s.nodes[entryCert].Desired.Revision,
+		ConfigRevision: cfg.Revision,
+		Config:         cfg,
 	}, nil
 }
 
@@ -1486,12 +1501,13 @@ func (s *Store) relayPoolViewsLocked(now time.Time) []RelayPoolView {
 	}
 	for _, pool := range m.RelayPools {
 		v := RelayPoolView{
-			ID:       pool.ID,
-			Name:     pool.Name,
-			Revision: pool.Revision,
-			Strategy: pool.Strategy,
-			Members:  make([]RelayPoolMemberView, 0, len(pool.Members)),
-			RouteIDs: []string{},
+			ID:         pool.ID,
+			Name:       pool.Name,
+			Revision:   pool.Revision,
+			Strategy:   pool.Strategy,
+			Members:    make([]RelayPoolMemberView, 0, len(pool.Members)),
+			RouteIDs:   []string{},
+			Revocation: s.poolRevocationStatusLocked(pool.ID, now),
 		}
 		for _, member := range pool.Members {
 			node, ok := byID[member.NodeID]
@@ -1509,9 +1525,14 @@ func (s *Store) relayPoolViewsLocked(now time.Time) []RelayPoolView {
 				RuntimeReady:  ok && runtimeFresh(node, now),
 			})
 		}
+		seenRoutes := map[string]bool{}
 		for _, a := range m.Plan.Accounts {
 			for _, g := range a.Grants {
-				if !m.DeletedRoutes[g.ID] && g.RelayPoolID == pool.ID {
+				if m.DeletedRoutes[g.ID] || seenRoutes[g.ID] {
+					continue
+				}
+				if g.RelayPoolID == pool.ID || m.PooledRoutes[g.ID].RelayPoolID == pool.ID {
+					seenRoutes[g.ID] = true
 					v.RouteIDs = append(v.RouteIDs, g.ID)
 				}
 			}
@@ -1521,4 +1542,65 @@ func (s *Store) relayPoolViewsLocked(now time.Time) []RelayPoolView {
 	}
 	slices.SortFunc(views, func(a, b RelayPoolView) int { return strings.Compare(a.ID, b.ID) })
 	return views
+}
+
+// runtimeRelayMetadata returns strictly non-secret relay capability, public
+// address hints, and single-user port-24000 occupancy for BusinessRuntime.
+func runtimeRelayMetadata(node Node, m *glivela.ImportMaterial) (capable bool, publicIPv4, publicIPv6, egressIP string, occupied24000 []string) {
+	if node.Desired.Entry != nil {
+		capable = entryKnownRelayPoolCapable(node)
+		var cfg glivela.EntryRelayConfig
+		if m != nil {
+			cfg = entryEffectiveRelayConfig(node, *m)
+		} else if len(node.Desired.Entry.RealityEndpoints) > 0 {
+			ep := node.Desired.Entry.RealityEndpoints[0]
+			if glivela.PublicTransportIPv6(ep.ListenAddress) {
+				cfg.SourceIPv6 = ep.ListenAddress
+			}
+			if glivela.PublicTransportIPv4(ep.IPv4ListenAddress) {
+				cfg.SourceIPv4 = ep.IPv4ListenAddress
+			}
+		}
+		return capable, cfg.SourceIPv4, cfg.SourceIPv6, "", nil
+	}
+	if node.Desired.Landing == nil {
+		return false, "", "", "", nil
+	}
+	plan := *node.Desired.Landing
+	capable = node.MaxLandingRenderVersion >= landing.RenderVersion
+	egressIP = plan.EgressIP
+	recordAddr := func(addr string) {
+		if publicIPv4 == "" && glivela.PublicTransportIPv4(addr) {
+			publicIPv4 = addr
+		}
+		if publicIPv6 == "" && glivela.PublicTransportIPv6(addr) {
+			publicIPv6 = addr
+		}
+	}
+	recordAddr(plan.Transport.PublicAddress)
+	recordAddr(plan.IPv6OnlyAddress)
+	for _, l := range plan.EIHListeners {
+		recordAddr(l.Address)
+	}
+	seenOccupied := map[string]bool{}
+	checkOccupied := func(addr string) {
+		if addr == "" || seenOccupied[addr] || !(glivela.PublicTransportIPv4(addr) || glivela.PublicTransportIPv6(addr)) {
+			return
+		}
+		if socketOccupiedBySingleUser(plan, addr) {
+			seenOccupied[addr] = true
+			occupied24000 = append(occupied24000, addr)
+		}
+	}
+	checkOccupied(plan.Transport.Endpoint(plan.Address))
+	for _, c := range plan.ActiveClientListeners() {
+		cAddr := plan.Transport.PublicAddress
+		if c.Transport == "ipv6-ss2022" || c.Interface != "" {
+			cAddr = c.Address
+		}
+		recordAddr(cAddr)
+		checkOccupied(cAddr)
+	}
+	slices.Sort(occupied24000)
+	return capable, publicIPv4, publicIPv6, egressIP, occupied24000
 }

@@ -46,6 +46,7 @@ type EntryObservatoryReport struct {
 // full (entry, pool, relay, landing) path.
 type EntryObservatoryPathView struct {
 	EntryID         string    `json:"entryId"`
+	GrantID         string    `json:"grantId,omitempty"`
 	PoolID          string    `json:"poolId"`
 	RelayNodeID     string    `json:"relayNodeId"`
 	EgressID        string    `json:"egressId"`
@@ -225,10 +226,17 @@ func (s *Store) observatoryPathViewsLocked() []EntryObservatoryPathView {
 		if node.Desired.Entry == nil || node.Receipt == nil || node.Receipt.Observatory == nil {
 			continue
 		}
+		tagGrant := map[string]string{}
+		for _, pool := range node.Desired.Entry.RelayPools {
+			for idx := range pool.Candidates {
+				tagGrant[glivela.PoolCandidateTag(pool.Key, idx)] = pool.GrantID
+			}
+		}
 		obs := node.Receipt.Observatory
 		for _, p := range obs.Paths {
 			views = append(views, EntryObservatoryPathView{
 				EntryID:         node.ID,
+				GrantID:         tagGrant[p.OutboundTag],
 				PoolID:          p.PoolID,
 				RelayNodeID:     p.RelayNodeID,
 				EgressID:        p.EgressID,
@@ -255,7 +263,10 @@ func (s *Store) observatoryPathViewsLocked() []EntryObservatoryPathView {
 		if c := strings.Compare(a.EgressID, b.EgressID); c != 0 {
 			return c
 		}
-		return strings.Compare(a.RelayNodeID, b.RelayNodeID)
+		if c := strings.Compare(a.RelayNodeID, b.RelayNodeID); c != 0 {
+			return c
+		}
+		return strings.Compare(a.OutboundTag, b.OutboundTag)
 	})
 	return views
 }
