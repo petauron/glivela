@@ -202,7 +202,7 @@ func validateServerTransportBindings(nodes map[string]Node, material glivela.Imp
 		}
 		for _, account := range material.Plan.Accounts {
 			for _, g := range account.Grants {
-				if !material.DeletedRoutes[g.ID] && g.AccountID == r.AccountID && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.ClientChainID == r.Peer.ClientChainID && g.Enabled {
+				if !material.DeletedRoutes[g.ID] && g.RelayPoolID == "" && g.AccountID == r.AccountID && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.ClientChainID == r.Peer.ClientChainID && g.Enabled {
 					return bad
 				}
 			}
@@ -297,7 +297,7 @@ func orderedTransportListeners(current, candidates []landing.ClientListener) ([]
 func serverTransportUsed(nodes map[string]Node, m glivela.ImportMaterial, r glivela.ServerTransport, grants map[string]glivela.RouteGrant, now time.Time) bool {
 	if r.Peer.Relay != nil && isRetainedLegacyThreeHop(nodes, m, r.ID, now) {
 		for _, g := range grants {
-			if !m.DeletedRoutes[g.ID] && g.AccountID == r.AccountID && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.Enabled && g.Route.Enabled && (g.ClientChainID == r.Peer.ClientChainID || g.RelayPoolID != "" && m.PooledRoutes[g.ID].LegacyTransportID == r.ID) {
+			if !m.DeletedRoutes[g.ID] && g.AccountID == r.AccountID && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.Enabled && g.Route.Enabled && (g.RelayPoolID == "" && g.ClientChainID == r.Peer.ClientChainID || g.RelayPoolID != "" && m.PooledRoutes[g.ID].LegacyTransportID == r.ID) {
 				return true
 			}
 		}
@@ -312,7 +312,7 @@ func serverTransportUsed(nodes map[string]Node, m glivela.ImportMaterial, r gliv
 		}
 		for _, current := range node.Desired.Entry.Grants {
 			g, ok := grants[current.ID]
-			if ok && !m.DeletedRoutes[g.ID] && g.AccountID == r.AccountID && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.ClientChainID == r.Peer.ClientChainID && g.Enabled && g.Route.Enabled {
+			if ok && !m.DeletedRoutes[g.ID] && g.RelayPoolID == "" && g.AccountID == r.AccountID && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.ClientChainID == r.Peer.ClientChainID && g.Enabled && g.Route.Enabled {
 				return true
 			}
 		}

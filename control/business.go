@@ -336,7 +336,7 @@ func (s *Store) Business() BusinessInventory {
 		}
 		for _, a := range m.Plan.Accounts {
 			for _, g := range a.Grants {
-				if !m.DeletedRoutes[g.ID] && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.AccountID == r.AccountID && g.ClientChainID == r.Peer.ClientChainID {
+				if !m.DeletedRoutes[g.ID] && g.RelayPoolID == "" && g.EntryID == r.EntryID && g.EgressID == r.EgressID && g.AccountID == r.AccountID && g.ClientChainID == r.Peer.ClientChainID {
 					viewResource.RouteIDs = append(viewResource.RouteIDs, g.ID)
 				}
 			}

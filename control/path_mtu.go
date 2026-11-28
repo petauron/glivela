@@ -87,7 +87,7 @@ func (s *Store) pathMTUTargetLocked(mode, id, landingID string) (Node, string, e
 				continue
 			}
 			for _, g := range a.Grants {
-				if g.ClientChainID != "" || g.ID != id || !g.Enabled || g.EgressID != landingID && g.IPv4EgressID != landingID {
+				if g.ClientChainID != "" || g.RelayPoolID != "" || g.ID != id || !g.Enabled || g.EgressID != landingID && g.IPv4EgressID != landingID {
 					continue
 				}
 				t, ok := s.serverLatencyTargetLocked(g.EntryID, landingID)

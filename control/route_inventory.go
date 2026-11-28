@@ -2,6 +2,7 @@ package control
 
 import (
 	"errors"
+	"net/netip"
 
 	glivela "github.com/petauron/glivela"
 )
@@ -13,6 +14,8 @@ type RouteEntry struct {
 	Address       string `json:"address"`
 }
 
+var tailnetPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
 func validateRouteEntries(node Node) error {
 	if node.Desired.Landing == nil {
 		return errors.New("control: landing plan required for route inventory")
@@ -23,7 +26,15 @@ func validateRouteEntries(node Node) error {
 	if len(node.RouteEntries) == 0 {
 		return nil
 	}
-	if len(node.RouteEntries) > len(node.Desired.Landing.Sources) || len(node.RouteEntries) > 64 {
+	eihLandingUsers := 0
+	for _, l := range node.Desired.Landing.EIHListeners {
+		for _, u := range l.Users {
+			if u.Role == "landing" {
+				eihLandingUsers++
+			}
+		}
+	}
+	if len(node.RouteEntries) > len(node.Desired.Landing.Sources)+eihLandingUsers || len(node.RouteEntries) > 64 {
 		return errors.New("control: entry inventory exceeds authorized sources")
 	}
 	sources := map[string]bool{}
@@ -31,12 +42,26 @@ func validateRouteEntries(node Node) error {
 		sources[source.Address] = true
 	}
 	seenCertificates := map[string]bool{}
+	seenAddresses := map[string]bool{}
 	for id, entry := range node.RouteEntries {
-		if !glivela.ValidIdentifier(id) || !glivela.ValidIdentity(entry.CertificateID) || entry.CertificateID == node.CertificateID || seenCertificates[entry.CertificateID] || !sources[entry.Address] {
+		if !glivela.ValidIdentifier(id) || !glivela.ValidIdentity(entry.CertificateID) || entry.CertificateID == node.CertificateID || seenCertificates[entry.CertificateID] || seenAddresses[entry.Address] {
 			return errors.New("control: entry identity or source differs from landing policy")
 		}
-		delete(sources, entry.Address)
+		if sources[entry.Address] {
+			delete(sources, entry.Address)
+		} else if eihLandingUsers > 0 {
+			// Cut-over two-hop entries move their public source into EIHListeners
+			// while retaining their authenticated tailnet RouteEntries binding.
+			ip, err := netip.ParseAddr(entry.Address)
+			if err != nil || ip.String() != entry.Address || !tailnetPrefix.Contains(ip) || entry.Address == node.Desired.Landing.Address {
+				return errors.New("control: entry identity or source differs from landing policy")
+			}
+			eihLandingUsers--
+		} else {
+			return errors.New("control: entry identity or source differs from landing policy")
+		}
 		seenCertificates[entry.CertificateID] = true
+		seenAddresses[entry.Address] = true
 	}
 	return nil
 }

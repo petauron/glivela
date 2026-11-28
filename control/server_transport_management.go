@@ -79,7 +79,7 @@ func (s *Store) ChangeServerTransport(ctx context.Context, c ServerTransportChan
 		}
 		for _, account := range next.Plan.Accounts {
 			for _, g := range account.Grants {
-				if !next.DeletedRoutes[g.ID] && g.EntryID == old.EntryID && g.EgressID == old.EgressID && g.ClientChainID == old.Peer.ClientChainID {
+				if !next.DeletedRoutes[g.ID] && g.RelayPoolID == "" && g.EntryID == old.EntryID && g.EgressID == old.EgressID && g.ClientChainID == old.Peer.ClientChainID {
 					return bad
 				}
 			}
