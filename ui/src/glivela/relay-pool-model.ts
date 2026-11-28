@@ -241,10 +241,175 @@ export type TopologyPoolLandingEdge = {
   labelY: number;
 };
 
+export type TopologyCorridorSummary = {
+  dense: boolean;
+  summaryY: number;
+  totalCount: number;
+  healthyCount: number;
+  unhealthyCount: number;
+  inactiveCount: number;
+  staleOrEmptyCount: number;
+};
+
+export const TWO_HOP_INLINE_LABEL_LIMIT = 4;
+
+// Conservative proportional-font width estimator (in CSS/SVG px) so wide uppercase ASCII
+// characters (e.g. W/M) and CJK ideographs never overflow cards or collide with badges.
+export function estimateSvgTextWidth(value: string, fontSizePx: number): number {
+  let width = 0;
+  for (const ch of value) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp > 0x2e7f) {
+      width += fontSizePx * 1.04;
+    } else if (ch === "W" || ch === "M" || ch === "@" || ch === "%") {
+      width += fontSizePx * 0.96;
+    } else if ((cp >= 0x41 && cp <= 0x5a) || (cp >= 0x30 && cp <= 0x39)) {
+      width += fontSizePx * 0.74;
+    } else if ("ilI1tfrj.,:;-|! `'\"()[]/".includes(ch)) {
+      width += fontSizePx * 0.38;
+    } else {
+      width += fontSizePx * 0.6;
+    }
+  }
+  return width;
+}
+
+export function truncateSvgText(value: string, maxPx: number, fontSizePx: number): string {
+  if (estimateSvgTextWidth(value, fontSizePx) <= maxPx) return value;
+  const ellipsisPx = fontSizePx * 0.95;
+  const budget = Math.max(0, maxPx - ellipsisPx);
+  let width = 0;
+  let out = "";
+  for (const ch of value) {
+    const next = estimateSvgTextWidth(ch, fontSizePx);
+    if (width + next > budget) break;
+    width += next;
+    out += ch;
+  }
+  return `${out.trimEnd()}…`;
+}
+
+// In dense top corridors where horizontal bridge lanes sit only ~2-3 SVG units apart,
+// resolve pointer clicks strictly inside the shared horizontal bridge span by nearest
+// centerline Y; curved left/right transitions outside [commonLeftX, commonRightX] keep their own edge ID.
+export function findNearestDenseTwoHopEdge(
+  edges: readonly TopologyTwoHopEdge[],
+  svgX: number,
+  svgY: number,
+): TopologyTwoHopEdge | null {
+  if (edges.length === 0) return null;
+  let commonLeftX = Number.NEGATIVE_INFINITY;
+  let commonRightX = Number.POSITIVE_INFINITY;
+  for (const edge of edges) {
+    if (edge.corridorLeftX > commonLeftX) commonLeftX = edge.corridorLeftX;
+    if (edge.corridorRightX < commonRightX) commonRightX = edge.corridorRightX;
+  }
+  if (svgX < commonLeftX || svgX > commonRightX) return null;
+  let best: TopologyTwoHopEdge | null = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const edge of edges) {
+    const dist = Math.abs(edge.corridorY - svgY);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = edge;
+    }
+  }
+  return best && bestDist <= 14 ? best : null;
+}
+
+function stripEndpointPort(endpoint?: string): string {
+  if (!endpoint) return "";
+  const trimmed = endpoint.trim();
+  if (trimmed.startsWith("[")) {
+    const end = trimmed.indexOf("]");
+    if (end > 1) return trimmed.slice(1, end);
+  }
+  const lastColon = trimmed.lastIndexOf(":");
+  if (lastColon > 0 && trimmed.indexOf(":") === lastColon) {
+    return trimmed.slice(0, lastColon);
+  }
+  return trimmed;
+}
+
+export type TwoHopLatencyIndex = Map<string, RouteLatency[]>;
+
+export function indexTwoHopLatencies(latencies: Map<string, RouteLatency>): TwoHopLatencyIndex {
+  const index: TwoHopLatencyIndex = new Map();
+  for (const item of latencies.values()) {
+    const bucketKey = latencyKey(item.entryId, item.landingId, item.port);
+    const bucket = index.get(bucketKey);
+    if (bucket) bucket.push(item);
+    else index.set(bucketKey, [item]);
+  }
+  return index;
+}
+
+// Match route-latencies for both unsourced IPv4 (entry/landing/port) and sourced IPv6
+// bound-server-transport probes (entry/landing/port/source/address) without guessing on ambiguity.
+export function findTwoHopLatency(
+  latencies: Map<string, RouteLatency>,
+  route: Route,
+  landingId: string,
+  port: number,
+  index?: TwoHopLatencyIndex,
+): RouteLatency | undefined {
+  const bucketKey = latencyKey(route.entryId, landingId, port);
+  let candidates = index
+    ? index.get(bucketKey) ?? []
+    : [...latencies.values()].filter(
+        (item) => item.entryId === route.entryId && item.landingId === landingId && item.port === port,
+      );
+  if (candidates.length === 0) return undefined;
+  if (route.landingAddress) {
+    const exact = candidates.filter((item) => stripEndpointPort(item.address) === route.landingAddress);
+    if (exact.length > 0) {
+      candidates = exact;
+    } else {
+      const unaddressed = candidates.filter((item) => !stripEndpointPort(item.address));
+      if (unaddressed.length === 0) return undefined;
+      candidates = unaddressed;
+    }
+  }
+  if (candidates.length === 1) return candidates[0];
+  if (route.ingressFamily) {
+    const wantIpv6 = route.ingressFamily === "ipv6";
+    const byFamily = candidates.filter((item) => {
+      const host = stripEndpointPort(item.address) || item.source || "";
+      return host !== "" && host.includes(":") === wantIpv6;
+    });
+    if (byFamily.length > 0) candidates = byFamily;
+  }
+  if (candidates.length === 1) return candidates[0];
+  if (!route.landingAddress && route.ingressFamily !== "ipv6") {
+    return latencies.get(bucketKey);
+  }
+  return undefined;
+}
+
+export function evaluateTwoHopLatencyState(
+  lat: RouteLatency | undefined,
+  now: number,
+  latencyFailed: boolean,
+): TopologyTwoHopEdge["latencyState"] {
+  if (lat?.state === "unavailable") return "unavailable";
+  const checkedMs = lat?.checkedAt ? Date.parse(lat.checkedAt) : NaN;
+  const isStale = latencyFailed || lat?.state === "stale" || (Number.isFinite(checkedMs) && now - checkedMs > 120_000);
+  if (isStale) return "stale";
+  if (lat?.state === "unreachable") return "unreachable";
+  if (lat?.latencyMs != null && Number.isFinite(lat.latencyMs)) return lat.latencyMs > 100 ? "slow" : "ready";
+  return "no-sample";
+}
+
 export type TopologyModel = {
   width: number;
   height: number;
   corridorBottomY: number;
+  columns: {
+    entryX: number;
+    poolX: number;
+    landingX: number;
+  };
+  corridor: TopologyCorridorSummary;
   entries: TopologyEntryNode[];
   pools: TopologyPoolNode[];
   legacyRelays: TopologyLegacyRelayNode[];
@@ -735,6 +900,8 @@ export function buildTopologyModel(params: {
     }
   }
 
+  const latencyIndex = indexTwoHopLatencies(latencies);
+
   const routeMatchesFilter = (route: Route): boolean => {
     const kind = routeTopologyKind(route);
     if (filter === "pooled") return kind === "pooled" || kind === "legacy-three-hop";
@@ -756,9 +923,21 @@ export function buildTopologyModel(params: {
       if (kind === "legacy-three-hop") {
         return !!route.pendingLegacyCutover || !route.enabled || route.state !== "verified";
       }
-      const lat = latencies.get(latencyKey(route.entryId, route.egressId, route.port));
-      const stale = latencyFailed || lat?.state === "stale" || (!!lat?.checkedAt && now - Date.parse(lat.checkedAt) > 120_000);
-      return !route.enabled || route.state !== "verified" || stale || lat?.state === "unreachable" || lat?.state === "unavailable" || !lat;
+      const primaryLat = findTwoHopLatency(latencies, route, route.egressId, route.port, latencyIndex);
+      const splitLat =
+        route.ipv4EgressId && route.ipv4EgressId !== route.egressId
+          ? findTwoHopLatency(latencies, route, route.ipv4EgressId, route.ipv4Port ?? 0, latencyIndex)
+          : undefined;
+      const latNeedsAttention = (lat: RouteLatency | undefined) => {
+        const state = evaluateTwoHopLatencyState(lat, now, latencyFailed);
+        return state !== "ready" && state !== "slow";
+      };
+      return (
+        !route.enabled ||
+        route.state !== "verified" ||
+        latNeedsAttention(primaryLat) ||
+        (!!route.ipv4EgressId && route.ipv4EgressId !== route.egressId && latNeedsAttention(splitLat))
+      );
     }
     return true;
   };
@@ -801,34 +980,56 @@ export function buildTopologyModel(params: {
     }
   }
 
-  const sortedEntryIds = [...entryIds].sort((a, b) => nodeName(a).localeCompare(nodeName(b)));
-  const sortedLandingIds = [...landingIds].sort((a, b) => nodeName(a).localeCompare(nodeName(b)));
+  // Sort pool / three-hop participating entries and landings first so active relay-pool
+  // flows align horizontally near the top of the viewport instead of sitting far below two-hop-only nodes.
+  const entryTier = (id: string) => {
+    if (pooledRoutes.some((r) => r.entryId === id) || legacyThreeHopRoutes.some((r) => r.entryId === id)) return 0;
+    if (twoHopRoutes.some((r) => r.entryId === id)) return 1;
+    return 2;
+  };
+  const landingTier = (id: string) => {
+    if (pooledRoutes.some((r) => r.egressId === id) || legacyThreeHopRoutes.some((r) => r.egressId === id)) return 0;
+    if (twoHopRoutes.some((r) => r.egressId === id || r.ipv4EgressId === id)) return 1;
+    return 2;
+  };
 
-  // Fixed SVG coordinate geometry (responsive via viewBox)
+  const sortedEntryIds = [...entryIds].sort((a, b) => entryTier(a) - entryTier(b) || nodeName(a).localeCompare(nodeName(b)));
+  const sortedLandingIds = [...landingIds].sort((a, b) => landingTier(a) - landingTier(b) || nodeName(a).localeCompare(nodeName(b)));
+
+  // Fixed 1:1 CSS-pixel SVG coordinate geometry (capped at max-width: 1040px in CSS so wide screens never magnify text)
   const width = 1040;
-  const colEntryX = 24;
-  const entryW = 224;
-  const entryH = 82;
-  const colPoolX = 368;
-  const poolW = 304;
-  const colLandingX = 792;
-  const landingW = 224;
-  const landingH = 82;
-  const corridorLeftX = colPoolX - 28; // 340, strictly left of middle column
-  const corridorRightX = colPoolX + poolW + 28; // 700, strictly right of middle column
+  const colEntryX = 20;
+  const entryW = 216;
+  const entryH = 64;
+  const colPoolX = 356;
+  const poolW = 328;
+  const colLandingX = 804;
+  const landingW = 216;
+  const landingH = 64;
+  const baseCorridorLeftX = colPoolX - 24; // 332, strictly left of middle column
+  const baseCorridorRightX = colPoolX + poolW + 24; // 708, strictly right of middle column
 
   // Count total two-hop segments so EVERY two-hop horizontal bridge lane fits strictly
-  // above topStartY without ever intersecting or passing behind middle-column cards.
+  // above topStartY without ever intersecting middle-column cards, while capping corridor
+  // height in dense clusters (> 4 two-hop routes) so the columns stay immediately visible.
   let totalTwoHopLanes = 0;
   for (const route of twoHopRoutes) {
     totalTwoHopLanes += 1;
     if (route.ipv4EgressId && route.ipv4EgressId !== route.egressId) totalTwoHopLanes += 1;
   }
-  const laneStartY = 46;
-  const laneStepY = 22;
-  const corridorBottomY = totalTwoHopLanes > 0 ? laneStartY + (totalTwoHopLanes - 1) * laneStepY + 14 : 36;
-  const topStartY = totalTwoHopLanes > 0 ? corridorBottomY + 22 : 48;
-  const rowGap = 18;
+  const denseTwoHop = totalTwoHopLanes > TWO_HOP_INLINE_LABEL_LIMIT;
+  const corridorSummaryY = 40;
+  const laneStartY = denseTwoHop ? 58 : 42;
+  const laneStepY = 17;
+  const denseCorridorSpan = 44;
+  const corridorBottomY =
+    totalTwoHopLanes === 0
+      ? 30
+      : denseTwoHop
+        ? laneStartY + denseCorridorSpan + 6
+        : laneStartY + (totalTwoHopLanes - 1) * laneStepY + 12;
+  const topStartY = totalTwoHopLanes === 0 ? 38 : denseTwoHop ? corridorBottomY + 14 : corridorBottomY + 16;
+  const rowGap = 10;
 
   const entries: TopologyEntryNode[] = sortedEntryIds.map((id, index) => {
     const rt = runtimesById.get(id);
@@ -855,14 +1056,14 @@ export function buildTopologyModel(params: {
 
   let middleCursorY = topStartY;
   const pools: TopologyPoolNode[] = visiblePools.map((pool) => {
-    const headerH = 52;
-    const memberH = 34;
-    const memberGap = 8;
-    const footerPad = 14;
-    const bodyH = pool.members.length > 0 ? pool.members.length * memberH + (pool.members.length - 1) * memberGap : 32;
+    const headerH = 44;
+    const memberH = 28;
+    const memberGap = 6;
+    const footerPad = 10;
+    const bodyH = pool.members.length > 0 ? pool.members.length * memberH + (pool.members.length - 1) * memberGap : 26;
     const h = headerH + bodyH + footerPad;
     const y = middleCursorY;
-    middleCursorY += h + 20;
+    middleCursorY += h + 14;
     const members: TopologyMemberSlot[] = pool.members.map((member, idx) => ({
       poolId: pool.id,
       nodeId: member.nodeId,
@@ -902,9 +1103,9 @@ export function buildTopologyModel(params: {
   const legacyRelays: TopologyLegacyRelayNode[] = [...legacyGroupMap.values()]
     .sort((a, b) => nodeName(a.relayNodeId).localeCompare(nodeName(b.relayNodeId)))
     .map((group) => {
-      const h = 68;
+      const h = 56;
       const y = middleCursorY;
-      middleCursorY += h + 18;
+      middleCursorY += h + 12;
       return {
         id: `legacy-relay:${group.relayNodeId}`,
         relayNodeId: group.relayNodeId,
@@ -962,25 +1163,23 @@ export function buildTopologyModel(params: {
       const landingNode = landingById.get(target.landingId);
       if (!landingNode) continue;
       const sx = entryNode.x + entryNode.width;
-      const sy = entryNode.y + 20 + (twoHopIndex % 3) * 14;
+      const sy = entryNode.y + 14 + (twoHopIndex % 3) * 10;
       const tx = landingNode.x;
-      const ty = landingNode.y + 20 + (twoHopIndex % 3) * 14;
-      const corridorY = laneStartY + twoHopIndex * laneStepY;
-      const leftCtrlX = Math.round((sx + corridorLeftX) / 2);
-      const rightCtrlX = Math.round((corridorRightX + tx) / 2);
+      const ty = landingNode.y + 14 + (twoHopIndex % 3) * 10;
+      const edgeCorridorLeftX = denseTwoHop ? baseCorridorLeftX - (twoHopIndex % 5) * 4 : baseCorridorLeftX;
+      const edgeCorridorRightX = denseTwoHop ? baseCorridorRightX + (twoHopIndex % 5) * 4 : baseCorridorRightX;
+      const corridorY = denseTwoHop
+        ? Math.round((laneStartY + (twoHopIndex / Math.max(1, totalTwoHopLanes - 1)) * denseCorridorSpan) * 10) / 10
+        : laneStartY + twoHopIndex * laneStepY;
+      const leftCtrlX = Math.round((sx + edgeCorridorLeftX) / 2);
+      const rightCtrlX = Math.round((edgeCorridorRightX + tx) / 2);
       // 3-segment SVG path: left rise C -> strictly horizontal bridge L inside corridor -> right descent C
-      const d = `M ${sx} ${sy} C ${leftCtrlX} ${sy}, ${leftCtrlX} ${corridorY}, ${corridorLeftX} ${corridorY} L ${corridorRightX} ${corridorY} C ${rightCtrlX} ${corridorY}, ${rightCtrlX} ${ty}, ${tx} ${ty}`;
-      const labelOffset = ((twoHopIndex % 3) - 1) * 86;
-      const labelX = Math.round((corridorLeftX + corridorRightX) / 2 + labelOffset);
+      const d = `M ${sx} ${sy} C ${leftCtrlX} ${sy}, ${leftCtrlX} ${corridorY}, ${edgeCorridorLeftX} ${corridorY} L ${edgeCorridorRightX} ${corridorY} C ${rightCtrlX} ${corridorY}, ${rightCtrlX} ${ty}, ${tx} ${ty}`;
+      const labelOffset = ((twoHopIndex % 3) - 1) * 124;
+      const labelX = Math.round((baseCorridorLeftX + baseCorridorRightX) / 2 + labelOffset);
       const labelY = corridorY;
-      const lat = latencies.get(latencyKey(route.entryId, target.landingId, target.port));
-      const checkedMs = lat?.checkedAt ? Date.parse(lat.checkedAt) : NaN;
-      const isStale = latencyFailed || lat?.state === "stale" || (Number.isFinite(checkedMs) && now - checkedMs > 120_000);
-      let latencyState: TopologyTwoHopEdge["latencyState"] = "no-sample";
-      if (lat?.state === "unavailable") latencyState = "unavailable";
-      else if (isStale) latencyState = "stale";
-      else if (lat?.state === "unreachable") latencyState = "unreachable";
-      else if (lat?.latencyMs != null && Number.isFinite(lat.latencyMs)) latencyState = lat.latencyMs > 100 ? "slow" : "ready";
+      const lat = findTwoHopLatency(latencies, route, target.landingId, target.port, latencyIndex);
+      const latencyState = evaluateTwoHopLatencyState(lat, now, latencyFailed);
       const suspended =
         route.state === "temporarily-suspended" ||
         isSuspensionActive(inventory.availability?.nodes[route.entryId], now) ||
@@ -999,8 +1198,8 @@ export function buildTopologyModel(params: {
         latencyMs: lat?.latencyMs,
         checkedAt: lat?.checkedAt,
         corridorY,
-        corridorLeftX,
-        corridorRightX,
+        corridorLeftX: edgeCorridorLeftX,
+        corridorRightX: edgeCorridorRightX,
         d,
         labelX,
         labelY,
@@ -1008,6 +1207,31 @@ export function buildTopologyModel(params: {
       twoHopIndex++;
     }
   }
+
+  let corridorHealthy = 0;
+  let corridorUnhealthy = 0;
+  let corridorInactive = 0;
+  let corridorStaleOrEmpty = 0;
+  for (const edge of twoHopEdges) {
+    if (!edge.desiredEnabled || edge.suspended || edge.latencyState === "unavailable") {
+      corridorInactive++;
+    } else if (edge.latencyState === "ready" || edge.latencyState === "slow") {
+      corridorHealthy++;
+    } else if (edge.latencyState === "unreachable") {
+      corridorUnhealthy++;
+    } else {
+      corridorStaleOrEmpty++;
+    }
+  }
+  const corridor: TopologyCorridorSummary = {
+    dense: denseTwoHop,
+    summaryY: corridorSummaryY,
+    totalCount: twoHopEdges.length,
+    healthyCount: corridorHealthy,
+    unhealthyCount: corridorUnhealthy,
+    inactiveCount: corridorInactive,
+    staleOrEmptyCount: corridorStaleOrEmpty,
+  };
 
   // Build Legacy Three-Hop edges (Entry -> Legacy Single Relay -> Fixed Landing)
   const legacyEdges: TopologyLegacyEdge[] = [];
@@ -1018,12 +1242,12 @@ export function buildTopologyModel(params: {
     const landingNode = landingById.get(route.egressId);
     if (!entryNode || !legacyRelayNode || !landingNode) return;
     const sx = entryNode.x + entryNode.width;
-    const sy = entryNode.y + entryNode.height - 20;
+    const sy = entryNode.y + entryNode.height - 14;
     const rxIn = legacyRelayNode.x;
-    const ry = legacyRelayNode.y + legacyRelayNode.height / 2 + ((idx % 3) - 1) * 6;
+    const ry = legacyRelayNode.y + legacyRelayNode.height / 2 + ((idx % 3) - 1) * 5;
     const rxOut = legacyRelayNode.x + legacyRelayNode.width;
     const tx = landingNode.x;
-    const ty = landingNode.y + landingNode.height - 20;
+    const ty = landingNode.y + landingNode.height - 14;
     const leftMidX = Math.round((sx + rxIn) / 2);
     const rightMidX = Math.round((rxOut + tx) / 2);
     const suspended =
@@ -1070,9 +1294,9 @@ export function buildTopologyModel(params: {
     const poolNode = poolById.get(poolId);
     if (!entryNode || !poolNode) continue;
     const sx = entryNode.x + entryNode.width;
-    const sy = entryNode.y + entryNode.height / 2 + ((epIdx % 3) - 1) * 10;
+    const sy = entryNode.y + entryNode.height / 2 + ((epIdx % 3) - 1) * 7;
     const tx = poolNode.x;
-    const ty = poolNode.y + 26 + ((epIdx % 3) - 1) * 8;
+    const ty = poolNode.y + 22 + ((epIdx % 3) - 1) * 6;
     const midX = Math.round((sx + tx) / 2);
     const d = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
     const desiredEnabledCount = epRoutes.filter((r) => r.enabled).length;
@@ -1108,7 +1332,7 @@ export function buildTopologyModel(params: {
     const sx = memberSlot.x + memberSlot.width;
     const sy = memberSlot.y + memberSlot.height / 2;
     const tx = landingNode.x;
-    const ty = landingNode.y + landingNode.height / 2 + ((idx % 3) - 1) * 12;
+    const ty = landingNode.y + landingNode.height / 2 + ((idx % 3) - 1) * 8;
     const midX = Math.round((sx + tx) / 2);
     const d = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
     poolLandingEdges.push({
@@ -1120,15 +1344,21 @@ export function buildTopologyModel(params: {
     });
   }
 
-  const bottomEntry = entries.length ? entries[entries.length - 1].y + entryH : topStartY + 120;
-  const bottomMiddle = middleCursorY > topStartY ? middleCursorY : topStartY + 120;
-  const bottomLanding = landings.length ? landings[landings.length - 1].y + landingH : topStartY + 120;
-  const height = Math.max(260, Math.max(bottomEntry, bottomMiddle, bottomLanding) + 36);
+  const bottomEntry = entries.length ? entries[entries.length - 1].y + entryH : topStartY + 80;
+  const bottomMiddle = middleCursorY > topStartY ? middleCursorY : topStartY + 80;
+  const bottomLanding = landings.length ? landings[landings.length - 1].y + landingH : topStartY + 80;
+  const height = Math.max(220, Math.max(bottomEntry, bottomMiddle, bottomLanding) + 24);
 
   return {
     width,
     height,
     corridorBottomY,
+    columns: {
+      entryX: colEntryX,
+      poolX: colPoolX,
+      landingX: colLandingX,
+    },
+    corridor,
     entries,
     pools,
     legacyRelays,
