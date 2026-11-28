@@ -791,7 +791,7 @@ it("sends allowlisted RouteChange payloads when toggling a pooled route in Route
           save={save}
           latency={{ values: new Map(), now, busy: false, error: "", refresh: vi.fn(async () => {}) }}
           loadSpeeds={vi.fn(async () => ({ revision: "0", tests: [], channels: [] }))}
-          active
+          active={false}
         />,
       );
     });
