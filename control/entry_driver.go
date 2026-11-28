@@ -72,6 +72,9 @@ func (d *EntryDriver) plan(desired Desired) error {
 	if desired.Entry.PublicSSH != nil {
 		return errors.New("control: public SSH requires the native entry runtime")
 	}
+	if len(desired.Entry.RelayPools) > 0 || len(desired.Entry.RelayEdges) > 0 {
+		return errors.New("control: relay pools require the native entry runtime")
+	}
 	for _, peer := range desired.Entry.Peers {
 		if peer.Transport.PublicAddress != "" {
 			return errors.New("control: public SS2022 requires the native entry runtime")

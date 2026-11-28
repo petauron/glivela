@@ -16,8 +16,25 @@ import (
 type EntryNetwork struct {
 	Source *landing.PeerIdentity `json:"source,omitempty"`
 	Peers  []EntryPeer           `json:"peers"`
+	// RelayPeers and PooledLandings decouple physical relay transport edges from
+	// logical fixed-landing routes so multiple routes may share a relay:24000 socket.
+	RelayPeers     []EntryRelayNetworkPeer `json:"relayPeers,omitempty"`
+	PooledLandings []EntryPooledLanding    `json:"pooledLandings,omitempty"`
 	// SpeedPeers authorize temporary point-to-point tests, not proxy routes.
 	SpeedPeers []EntrySpeedPeer `json:"speedPeers,omitempty"`
+}
+
+type EntryRelayNetworkPeer struct {
+	NodeID        string               `json:"nodeId"`
+	CertificateID string               `json:"certificateId"`
+	Identity      landing.PeerIdentity `json:"identity"`
+}
+
+type EntryPooledLanding struct {
+	EgressID      string                `json:"egressId"`
+	CertificateID string                `json:"certificateId"`
+	Identity      *landing.PeerIdentity `json:"identity,omitempty"`
+	ExpectedExit  string                `json:"expectedExit"`
 }
 
 type EntrySpeedPeer struct {
@@ -52,6 +69,14 @@ func (n EntryNetwork) clone() EntryNetwork {
 			n.Peers[i].RelayIdentity = &v
 		}
 	}
+	n.RelayPeers = slices.Clone(n.RelayPeers)
+	n.PooledLandings = slices.Clone(n.PooledLandings)
+	for i := range n.PooledLandings {
+		if n.PooledLandings[i].Identity != nil {
+			v := *n.PooledLandings[i].Identity
+			n.PooledLandings[i].Identity = &v
+		}
+	}
 	n.SpeedPeers = slices.Clone(n.SpeedPeers)
 	if n.Source != nil {
 		source := *n.Source
@@ -77,7 +102,17 @@ func (n EntryNetwork) validate(plan glivela.XrayPlan) error {
 			return invalid
 		}
 	}
-	if len(n.Peers) > 1024 || len(n.Peers) == 0 && n.Source != nil || len(n.Peers) != 0 && (n.Source == nil || n.Source.Validate() != nil) {
+	hasPoolNet := len(n.RelayPeers) != 0 || len(n.PooledLandings) != 0
+	if len(n.Peers) > 1024 || len(n.RelayPeers) > 1024 || len(n.PooledLandings) > 1024 {
+		return invalid
+	}
+	if len(n.Peers) == 0 && !hasPoolNet && n.Source != nil {
+		return invalid
+	}
+	if len(n.Peers) != 0 && (n.Source == nil || n.Source.Validate() != nil) {
+		return invalid
+	}
+	if n.Source != nil && n.Source.Validate() != nil {
 		return invalid
 	}
 	used := make(map[string]bool)
@@ -100,19 +135,39 @@ func (n EntryNetwork) validate(plan glivela.XrayPlan) error {
 	ids, keys, addresses := map[string]string{}, map[string]string{}, map[string]string{}
 	endpoints := map[string]bool{}
 	physical := map[string]landing.PeerIdentity{}
+	registerIdentity := func(nodeID string, identity landing.PeerIdentity) bool {
+		if identity.Validate() != nil {
+			return false
+		}
+		if n.Source != nil && (identity.ID == n.Source.ID || identity.PublicKey == n.Source.PublicKey || identity.Address == n.Source.Address) {
+			return false
+		}
+		if previous, ok := physical[nodeID]; ok && previous != identity {
+			return false
+		}
+		if ids[identity.ID] != "" && ids[identity.ID] != nodeID {
+			return false
+		}
+		if keys[identity.PublicKey] != "" && keys[identity.PublicKey] != nodeID {
+			return false
+		}
+		if addresses[identity.Address] != "" && addresses[identity.Address] != nodeID {
+			return false
+		}
+		physical[nodeID] = identity
+		ids[identity.ID], keys[identity.PublicKey], addresses[identity.Address] = nodeID, nodeID, nodeID
+		return true
+	}
 	for _, peer := range n.Peers {
 		route, found := configured[peer.PeerKey()]
-		if previous, ok := physical[peer.EgressID]; ok && previous != peer.Identity {
+		if !registerIdentity(peer.EgressID, peer.Identity) {
 			return invalid
 		}
-		physical[peer.EgressID] = peer.Identity
 		if route.Relay == nil && peer.RelayIdentity != nil || route.Relay != nil && (peer.RelayIdentity == nil || peer.RelayIdentity.Validate() != nil || peer.RelayIdentity.Address == peer.Identity.Address || peer.RelayIdentity.Address == n.Source.Address || peer.RelayIdentity.ID == peer.Identity.ID || peer.RelayIdentity.ID == n.Source.ID || peer.RelayIdentity.PublicKey == peer.Identity.PublicKey || peer.RelayIdentity.PublicKey == n.Source.PublicKey) {
 			return invalid
 		}
 		exit, err := netip.ParseAddr(peer.ExpectedExit)
-		if !used[peer.PeerKey()] || !found || peer.ClientChainID != route.ClientChainID || peer.Identity.Validate() != nil || route.ExitFamily.Validate() != nil || route.Port != route.Transport.ListenerPort() || route.Address != peer.Identity.Address ||
-			peer.Identity.ID == n.Source.ID || peer.Identity.PublicKey == n.Source.PublicKey || peer.Identity.Address == n.Source.Address ||
-			(ids[peer.Identity.ID] != "" && ids[peer.Identity.ID] != peer.EgressID) || (keys[peer.Identity.PublicKey] != "" && keys[peer.Identity.PublicKey] != peer.EgressID) || (addresses[peer.Identity.Address] != "" && addresses[peer.Identity.Address] != peer.EgressID) || err != nil || exit.String() != peer.ExpectedExit || !landing.PublicIP(exit) || !validRouteTarget(peer.Target) {
+		if !used[peer.PeerKey()] || !found || peer.ClientChainID != route.ClientChainID || route.ExitFamily.Validate() != nil || route.Port != route.Transport.ListenerPort() || route.Address != peer.Identity.Address || err != nil || exit.String() != peer.ExpectedExit || !landing.PublicIP(exit) || !validRouteTarget(peer.Target) {
 			return invalid
 		}
 		if route.ExitFamily == glivela.EgressIPv4Only && !exit.Is4() || route.ExitFamily == glivela.EgressIPv6Only && !exit.Is6() {
@@ -125,9 +180,55 @@ func (n EntryNetwork) validate(plan glivela.XrayPlan) error {
 		}
 		endpoints[endpoint] = true
 		delete(used, peer.PeerKey())
-		ids[peer.Identity.ID], keys[peer.Identity.PublicKey], addresses[peer.Identity.Address] = peer.EgressID, peer.EgressID, peer.EgressID
 	}
 	if len(used) != 0 {
+		return invalid
+	}
+	relayNodes := map[string]bool{}
+	for _, rp := range n.RelayPeers {
+		if !glivela.ValidIdentifier(rp.NodeID) || !glivela.ValidIdentity(rp.CertificateID) || relayNodes[rp.NodeID] || !registerIdentity(rp.NodeID, rp.Identity) {
+			return invalid
+		}
+		relayNodes[rp.NodeID] = true
+	}
+	pooledLandings := map[string]EntryPooledLanding{}
+	for _, pl := range n.PooledLandings {
+		exit, err := netip.ParseAddr(pl.ExpectedExit)
+		if !glivela.ValidIdentifier(pl.EgressID) || !glivela.ValidIdentity(pl.CertificateID) || pooledLandings[pl.EgressID].EgressID != "" || err != nil || exit.String() != pl.ExpectedExit || !landing.PublicIP(exit) {
+			return invalid
+		}
+		if pl.Identity != nil && !registerIdentity(pl.EgressID, *pl.Identity) {
+			return invalid
+		}
+		pooledLandings[pl.EgressID] = pl
+	}
+	usedRelays := map[string]bool{}
+	for _, edge := range plan.RelayEdges {
+		if !relayNodes[edge.RelayNodeID] {
+			return invalid
+		}
+		usedRelays[edge.RelayNodeID] = true
+	}
+	if len(usedRelays) != len(relayNodes) {
+		return invalid
+	}
+	usedLandings := map[string]bool{}
+	for _, pool := range plan.RelayPools {
+		pl, ok := pooledLandings[pool.EgressID]
+		if !ok {
+			return invalid
+		}
+		if len(pool.Candidates) > 0 && pl.Identity == nil {
+			return invalid
+		}
+		usedLandings[pool.EgressID] = true
+		for _, cand := range pool.Candidates {
+			if !relayNodes[cand.RelayNodeID] || cand.RelayNodeID == pool.EgressID {
+				return invalid
+			}
+		}
+	}
+	if len(usedLandings) != len(pooledLandings) {
 		return invalid
 	}
 	return nil

@@ -123,7 +123,7 @@ func (s *Store) ChangePrivateListener(ctx context.Context, input PrivateListener
 	next := s.copy()
 	next[certificate] = node
 	invalidateEntryChecks(next, node.ID)
-	projected, changed, err := projectBusinessEntries(next, s.business.material, now)
+	projected, changed, err := s.projectBusinessLocked(next, s.business.material, now)
 	if err != nil || changed {
 		return PrivateListenerView{}, errors.New("control: pending business projection must be resolved first")
 	}

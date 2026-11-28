@@ -87,21 +87,27 @@ func (a BusinessAccount) MarshalJSON() ([]byte, error) {
 // endpoint-private-key, certificate-private-key or retained-source fields.
 // Historical statuses are not current runtime-health evidence.
 type BusinessInventory struct {
-	ServerTransports []ServerTransportView `json:"serverTransports"`
-	Availability     availabilityState     `json:"availability"`
-	State            string                `json:"state"`
-	SnapshotID       string                `json:"snapshotId,omitempty"`
-	Accounts         []BusinessAccount     `json:"accounts"`
-	Nodes            []BusinessNode        `json:"nodes"`
-	Endpoints        []BusinessEndpoint    `json:"endpoints"`
-	Routes           []BusinessRoute       `json:"routes"`
-	Runtimes         []BusinessRuntime     `json:"runtimes"`
+	ServerTransports  []ServerTransportView               `json:"serverTransports"`
+	RelayPools        []RelayPoolView                     `json:"relayPools"`
+	EntryRelayConfigs map[string]glivela.EntryRelayConfig `json:"entryRelayConfigs,omitempty"`
+	ObservatoryPaths  []EntryObservatoryPathView          `json:"observatoryPaths,omitempty"`
+	SocketCutovers    []SocketCutoverView                 `json:"socketCutovers,omitempty"`
+	Availability      availabilityState                   `json:"availability"`
+	State             string                              `json:"state"`
+	SnapshotID        string                              `json:"snapshotId,omitempty"`
+	Accounts          []BusinessAccount                   `json:"accounts"`
+	Nodes             []BusinessNode                      `json:"nodes"`
+	Endpoints         []BusinessEndpoint                  `json:"endpoints"`
+	Routes            []BusinessRoute                     `json:"routes"`
+	Runtimes          []BusinessRuntime                   `json:"runtimes"`
 }
 
 type BusinessRoute struct {
 	UDP           bool   `json:"udp"`
 	ClientChainID string `json:"clientChainId,omitempty"`
+	RelayPoolID   string `json:"relayPoolId,omitempty"`
 	RelayID       string `json:"relayId,omitempty"`
+	ActiveRelays  int    `json:"activeRelays,omitempty"`
 	Port          int    `json:"port"`
 	IPv4Port      int    `json:"ipv4Port,omitempty"`
 	ID            string `json:"id"`
@@ -193,14 +199,15 @@ func (s *Store) LoadBusiness(keyPath string) error {
 		return err
 	}
 	// Resolve the old ownership model before any runtime authorization or
-	// publication. This forward migration must not issue a node revision.
+	// publication.
 	if material.Ownership != nil {
+		now := time.Now().UTC()
 		migrated, changed, migrationErr := migrateServerTransports(s.nodes, material)
 		if migrationErr != nil {
 			return migrationErr
 		}
 		if changed {
-			if _, _, projectionErr := projectBusinessEntries(s.nodes, migrated, time.Now()); projectionErr != nil {
+			if _, _, projectionErr := projectBusinessEntriesWithOptions(s.nodes, migrated, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers); projectionErr != nil {
 				return errors.New("control: server ownership migration would change a runtime")
 			}
 			s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key), sourceSHA256: sha256.Sum256(material.RetainedSource)}
@@ -213,7 +220,23 @@ func (s *Store) LoadBusiness(keyPath string) error {
 		}
 	}
 	if material.Ownership != nil {
-		projected, changed, err := projectBusinessEntries(s.nodes, material, time.Now())
+		now := time.Now().UTC()
+		s.business = &businessState{snapshotID: snapshot, material: material, keyPath: keyPath, fileSHA256: fileSHA, keySHA256: sha256.Sum256(key), sourceSHA256: sha256.Sum256(material.RetainedSource)}
+		if err := s.recoverSocketCutoversLocked(now); err != nil {
+			s.business = nil
+			return err
+		}
+		material, fileSHA = s.business.material, s.business.fileSHA256
+		if retireCompletedLegacyThreeHops(&material, s.nodes, now) {
+			gcUnreferencedRelayPoolCredentials(&material, s.nodes, s.socketCutovers)
+			if err := s.saveOwnedBusinessLocked(material); err != nil {
+				s.business = nil
+				return err
+			}
+			material, fileSHA = s.business.material, s.business.fileSHA256
+		}
+		s.business = nil
+		projected, changed, err := projectBusinessEntriesWithOptions(s.nodes, material, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
 		if err != nil {
 			return err
 		}
@@ -275,6 +298,7 @@ func (s *Store) Business() BusinessInventory {
 	defer s.mu.Unlock()
 	view := BusinessInventory{State: "empty", Availability: availabilityState{Version: s.availability.Version, Revision: s.availability.Revision, Nodes: s.effectiveAvailabilities()}, Accounts: []BusinessAccount{}, Nodes: []BusinessNode{}, Endpoints: []BusinessEndpoint{}, Routes: []BusinessRoute{}, Runtimes: []BusinessRuntime{}}
 	view.ServerTransports = []ServerTransportView{}
+	view.RelayPools = []RelayPoolView{}
 	if s.business == nil {
 		// Transport-only staged controllers still own enrollment and availability;
 		// they must not need to adopt the legacy ledger to pause a known source.
@@ -357,6 +381,20 @@ func (s *Store) Business() BusinessInventory {
 	}
 	slices.SortFunc(view.Endpoints, func(a, b BusinessEndpoint) int { return strings.Compare(a.ID, b.ID) })
 	now := time.Now().UTC()
+	view.RelayPools = s.relayPoolViewsLocked(now)
+	if len(m.EntryRelayConfigs) > 0 {
+		view.EntryRelayConfigs = make(map[string]glivela.EntryRelayConfig, len(m.EntryRelayConfigs))
+		for id, cfg := range m.EntryRelayConfigs {
+			copyCfg := cfg
+			if cfg.Observatory != nil {
+				obs := *cfg.Observatory
+				copyCfg.Observatory = &obs
+			}
+			view.EntryRelayConfigs[id] = copyCfg
+		}
+	}
+	view.ObservatoryPaths = s.observatoryPathViewsLocked()
+	view.SocketCutovers = s.socketCutoverViewsLocked(now)
 	credentials, grants, projectionErr := effectiveBusinessCredentials(m, now)
 	for _, item := range m.Plan.Accounts {
 		account := BusinessAccount{RetiredUsageBytes: item.RetiredUsageBytes, Account: item.Account, Schedule: m.ResetSchedules[item.Account.ID], Usage: append([]glivela.UsageMember{}, item.Usage...), Traffic: map[string]glivela.ImportTrafficCounters{}}
@@ -380,6 +418,12 @@ func (s *Store) Business() BusinessInventory {
 					if projectionErr != nil || entry.ID != grant.EntryID || entry.Desired.Entry == nil || !effective.Deployable() || !s.availableRuntime(entry, now) {
 						continue
 					}
+					if grant.RelayPoolID != "" {
+						if slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Base.ID]) && slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Route.ID]) && slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, effective) }) && s.subscriptionPooledReadyLocked(entry, grant, now) {
+							state = "verified"
+						}
+						continue
+					}
 					if slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Base.ID]) && slices.Contains(entry.Desired.Entry.Credentials, credentials[grant.Route.ID]) && slices.ContainsFunc(entry.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return sameGrantPolicy(current, effective) }) && s.subscriptionPeerReady(entry, grant.EgressID, now, grant.PeerKey()) && (grant.IPv4EgressID == "" || s.subscriptionPeerReady(entry, grant.IPv4EgressID, now)) {
 						state = "verified"
 					}
@@ -388,29 +432,30 @@ func (s *Store) Business() BusinessInventory {
 			if s.suspended(grant.EntryID, now) || s.suspended(grant.EgressID, now) || s.suspended(grant.IPv4EgressID, now) {
 				state = "temporarily-suspended"
 			}
-			port, ipv4Port := 0, 0
-			relayID := ""
+			port, ipv4Port, activeRelays := 0, 0, 0
 			for _, entry := range s.nodes {
 				if entry.ID != grant.EntryID || entry.Desired.Entry == nil {
+					continue
+				}
+				if grant.RelayPoolID != "" {
+					port = glivela.RelayPoolPort
+					for _, ep := range entry.Desired.Entry.RelayPools {
+						if ep.Key == grant.PoolKey() {
+							activeRelays = len(ep.Candidates)
+						}
+					}
 					continue
 				}
 				for _, peer := range entry.Desired.Entry.Peers {
 					if peer.PeerKey() == grant.PeerKey() {
 						port = peer.Port
-						if peer.Relay != nil {
-							relayID = peer.Relay.NodeID
-							port = peer.Relay.Port
-						}
 					}
 					if peer.EgressID == grant.IPv4EgressID {
 						ipv4Port = peer.Port
 					}
 				}
 			}
-			if relayID != "" && s.suspended(relayID, now) {
-				state = "temporarily-suspended"
-			}
-			view.Routes = append(view.Routes, BusinessRoute{UDP: grant.UDP, ClientChainID: grant.ClientChainID, RelayID: relayID, Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
+			view.Routes = append(view.Routes, BusinessRoute{UDP: grant.UDP, ClientChainID: grant.ClientChainID, RelayPoolID: grant.RelayPoolID, ActiveRelays: activeRelays, Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
 		}
 	}
 	for _, node := range s.nodes {

@@ -586,10 +586,27 @@ func (r *NativeRuntime) Inspect(ctx context.Context) (Observation, error) {
 		return Observation{AppliedReceipt: glivela.AppliedReceipt{}}, err
 	}
 	observation := Observation{AppliedReceipt: glivela.AppliedReceipt{Revision: a.Revision, ConfigSHA256: a.ConfigSHA256}}
-	entry, combined := r.Driver.(interface {
+	if a.Landing != nil {
+		observation.MaxLandingRenderVersion = landing.RenderVersion
+	}
+	if a.Entry != nil {
+		switch r.Driver.(type) {
+		case *NativeEntryDriver:
+			observation.MaxEntryRenderVersion = glivela.XrayRenderVersion
+		case *EntryDriver:
+			observation.MaxEntryRenderVersion = 127
+		}
+	}
+	combined := false
+	if entry, ok := r.Driver.(interface {
+		observe(context.Context, Desired) (bool, *EntryTraffic, *EntryObservatoryReport)
+	}); ok {
+		combined = true
+		observation.RuntimeReady, observation.Traffic, observation.Observatory = entry.observe(ctx, a)
+	} else if entry, ok := r.Driver.(interface {
 		observe(context.Context, Desired) (bool, *EntryTraffic)
-	})
-	if combined {
+	}); ok {
+		combined = true
 		observation.RuntimeReady, observation.Traffic = entry.observe(ctx, a)
 	} else {
 		observation.RuntimeReady = r.Driver.Healthy(ctx, a) == nil

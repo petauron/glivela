@@ -182,7 +182,7 @@ func enrollFixtureServerTransport(t *testing.T, s *Store, entry Node, resource g
 	nodes := s.copy()
 	nodes[entry.CertificateID] = entry
 	next := s.business.material
-	next.ServerTransportVersion = 1
+	next.ServerTransportVersion = glivela.CurrentServerTransportVersion
 	next.ServerTransports = maps.Clone(next.ServerTransports)
 	if next.ServerTransports == nil {
 		next.ServerTransports = map[string]glivela.ServerTransport{}

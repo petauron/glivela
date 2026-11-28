@@ -195,7 +195,7 @@ func (s *Store) RegisterEndpoint(ctx context.Context, input EndpointRegistration
 		projected[input.CertificateID] = Node{ID: entry, CertificateID: input.CertificateID, Desired: desired}
 	}
 	for _, id := range input.Accounts {
-		projected, err = projectAccountCreation(projected, next, id)
+		projected, err = s.projectAccountCreationLocked(projected, next, id)
 		if err != nil {
 			return err
 		}

@@ -22,10 +22,11 @@ import (
 // No Docker socket, image runtime, or host operation from desired messages.
 type NativeEntryDriver struct {
 	SystemdDriver
-	Directory  string
-	monitors   entryMonitors
-	readiness  entryReadiness
-	executable nativeExecutableVerification
+	Directory   string
+	monitors    entryMonitors
+	readiness   entryReadiness
+	executable  nativeExecutableVerification
+	observatory nativeObservatoryCache
 }
 
 // Only the expensive executable digest is reused. Service, process identity,
@@ -152,11 +153,31 @@ func (d *NativeEntryDriver) policy(desired Desired) (landing.EntryFirewall, erro
 			}
 		}
 	}
+	for _, edge := range desired.Entry.RelayEdges {
+		if !slices.Contains(policy.Peers, edge.Address) {
+			policy.Peers = append(policy.Peers, edge.Address)
+		}
+		if policy.PeerPorts == nil {
+			policy.PeerPorts = map[string]int{}
+		}
+		if old := policy.PeerPorts[edge.Address]; old == 0 {
+			policy.PeerPorts[edge.Address] = edge.Port
+		} else if old != edge.Port {
+			if policy.ExtraPeerPorts == nil {
+				policy.ExtraPeerPorts = map[string][]int{}
+			}
+			if !slices.Contains(policy.ExtraPeerPorts[edge.Address], edge.Port) {
+				policy.ExtraPeerPorts[edge.Address] = append(policy.ExtraPeerPorts[edge.Address], edge.Port)
+			}
+		}
+	}
 	var err error
 	policy.DNS, err = d.existingEntryDNS()
 	return policy, err
 }
 
+// Pooled relays live in Entry.RelayEdges and rely on UID-scoped EntryFirewall
+// plus control-plane admission rather than startup-blocking per-relay gates.
 func (d *NativeEntryDriver) gates(desired Desired) ([]*landing.TrafficGate, error) {
 	if err := d.plan(desired); err != nil {
 		return nil, err
@@ -369,23 +390,24 @@ func (d *NativeEntryDriver) healthyProcess(ctx context.Context, desired Desired)
 	return before, nil
 }
 
-// observe verifies health and accounting together, with fresh generation reads
-// bracketing both health acceptance and the subsequent counter query.
-func (d *NativeEntryDriver) observe(ctx context.Context, desired Desired) (bool, *EntryTraffic) {
+// observe verifies health, accounting, and low-frequency burstObservatory
+// snapshots together, with fresh generation reads bracketing checks.
+func (d *NativeEntryDriver) observe(ctx context.Context, desired Desired) (bool, *EntryTraffic, *EntryObservatoryReport) {
 	before, err := d.healthyProcess(ctx, desired)
 	if err != nil {
-		return false, nil
+		return false, nil, nil
 	}
 	traffic, err := d.trafficFromProcess(ctx, desired, before)
 	if errors.Is(err, errNativeEntryChanged) {
-		return false, nil
+		return false, nil, nil
 	}
+	observatory := d.observatoryFromProcess(ctx, desired, before)
 	if err != nil {
-		return true, nil
+		return true, nil, observatory
 	}
 	// Accounting failure does not authorize restarting a healthy worker. Missing
 	// counters stay missing; the next observation performs all checks anew.
-	return true, traffic
+	return true, traffic, observatory
 }
 
 func (d *NativeEntryDriver) EntryHealth(desired Desired) *EntryHealthReport {

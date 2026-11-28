@@ -87,6 +87,12 @@ func loadSubscriptionPresentation(directory string, m glivela.ImportMaterial) (s
 	for id := range m.ServerTransports {
 		known[id] = true
 	}
+	for grantID, pr := range m.PooledRoutes {
+		known[grantID] = true
+		if pr.LegacyTransportID != "" {
+			known[pr.LegacyTransportID] = true
+		}
+	}
 	for id := range state.Names {
 		if !known[id] {
 			return subscriptionPresentation{}, errors.New("control: issued name has no retained endpoint or chain")
@@ -145,6 +151,12 @@ func (s *Store) ChangeSubscriptionNames(ctx context.Context, expected, updates m
 	}
 	for id := range s.business.material.ServerTransports {
 		known[id] = true
+	}
+	for grantID, pr := range s.business.material.PooledRoutes {
+		known[grantID] = true
+		if pr.LegacyTransportID != "" {
+			known[pr.LegacyTransportID] = true
+		}
 	}
 	for id := range next {
 		if !known[id] {

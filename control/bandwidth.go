@@ -198,7 +198,7 @@ func (s *Store) speedPairLocked(entryID, landingID string, requireFresh bool) (l
 					if !requireFresh {
 						// A previously issued stage may reconnect with stale health, but
 						// never against expired, revoked, or otherwise stale policy.
-						projected, _, err := projectBusinessEntries(s.nodes, s.business.material, now)
+						projected, _, err := s.projectBusinessLocked(s.nodes, s.business.material, now)
 						if err != nil || !reflect.DeepEqual(projected[t.Certificate].Desired, s.nodes[t.Certificate].Desired) || !reflect.DeepEqual(projected[cert].Desired, n.Desired) {
 							return latencyTarget{}, "", "", fail
 						}

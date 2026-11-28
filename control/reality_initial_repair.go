@@ -71,6 +71,6 @@ func (s *Store) initialRealityTargetRepairable(node Node, e glivela.ImportEndpoi
 		}
 	}
 	// No hidden or stale credentials or policy may be changed by the repair.
-	expected, _, err := projectBusinessEntries(s.nodes, m, now)
+	expected, _, err := s.projectBusinessLocked(s.nodes, m, now)
 	return err == nil && credentials > 0 && credentials == len(plan.Credentials) && reflect.DeepEqual(expected, s.nodes)
 }

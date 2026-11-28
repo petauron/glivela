@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	glivela "github.com/petauron/glivela"
@@ -62,7 +63,41 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 			return publicPeerProof{}, refused
 		}
 		if route.Transport.ClientListenerID != "" {
-			if c, ok := s.boundServerTransport(entry, target, route); !ok || !s.serverRelayLive(c, peer, now) {
+			r, ok := s.boundServerTransport(entry, target, route)
+			if !ok {
+				return publicPeerProof{}, refused
+			}
+			if route.Relay != nil {
+				relay, hasRelay := s.nodes[route.Relay.CertificateID]
+				if !hasRelay || relay.ID != route.Relay.NodeID || relay.Desired.Landing == nil || !s.availableRuntime(relay, now) || relay.Receipt.ManagementIdentity == nil || peer.RelayIdentity == nil || *relay.Receipt.ManagementIdentity != *peer.RelayIdentity || peer.RelayIdentity.Address != relay.Desired.Landing.Address || r.RelayListener == nil || !slices.Contains(relay.Desired.Landing.ClientListeners, *r.RelayListener) {
+					return publicPeerProof{}, refused
+				}
+			}
+			return publicPeerProof{peer.ClientChainID, entry.ID, target.ID, entry.Desired.Revision, entry.Desired.ConfigSHA256, peer.Identity, target.Desired.Revision, target.Desired.ConfigSHA256, now}, nil
+		}
+		authorized, found := target.RouteEntries[entry.ID]
+		source := entry.Desired.EntryNetwork.Source
+		if !found || authorized.CertificateID != cert || authorized.Address != source.Address {
+			return publicPeerProof{}, refused
+		}
+		if strings.Contains(route.Transport.Key, ":") {
+			serverKey, userKey, ok := strings.Cut(route.Transport.Key, ":")
+			if !ok || route.Port != glivela.RelayPoolPort {
+				return publicPeerProof{}, refused
+			}
+			matched := false
+			for _, l := range target.Desired.Landing.EIHListeners {
+				if l.Address != route.Transport.PublicAddress || l.Port != glivela.RelayPoolPort || l.ServerKey != serverKey {
+					continue
+				}
+				for _, u := range l.Users {
+					if u.Role == "landing" && u.Key == userKey {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
 				return publicPeerProof{}, refused
 			}
 			return publicPeerProof{peer.ClientChainID, entry.ID, target.ID, entry.Desired.Revision, entry.Desired.ConfigSHA256, peer.Identity, target.Desired.Revision, target.Desired.ConfigSHA256, now}, nil
@@ -70,9 +105,7 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 		if !reflect.DeepEqual(route.Transport, target.Desired.Landing.Transport) || route.Port != target.Desired.Landing.Transport.ListenerPort() {
 			return publicPeerProof{}, refused
 		}
-		authorized, found := target.RouteEntries[entry.ID]
-		source := entry.Desired.EntryNetwork.Source
-		if !found || authorized.CertificateID != cert || authorized.Address != source.Address || !slices.ContainsFunc(target.Desired.Landing.Sources, func(p landing.Source) bool {
+		if !slices.ContainsFunc(target.Desired.Landing.Sources, func(p landing.Source) bool {
 			return p.Address == source.Address && p.TCPOnly && glivela.PublicTransportIPv4(p.PublicAddress)
 		}) {
 			return publicPeerProof{}, refused
@@ -121,17 +154,4 @@ func (d *NativeEntryDriver) SetPublicPeerVerifier(verify PublicPeerVerifier) {
 }
 func (d *EntryDriver) SetPublicPeerVerifier(verify PublicPeerVerifier) {
 	d.monitors.verifyPublicPeer = verify
-}
-
-func (s *Store) serverRelayLive(c glivela.ServerTransport, peer EntryPeer, now time.Time) bool {
-	if c.Peer.Relay == nil {
-		return true
-	}
-	var relay Node
-	for _, node := range s.nodes {
-		if node.ID == c.Peer.Relay.NodeID {
-			relay = node
-		}
-	}
-	return relay.Desired.Landing != nil && relay.CertificateID == c.Peer.Relay.CertificateID && !s.suspended(relay.ID, now) && s.availableRuntime(relay, now) && relay.Receipt.ManagementIdentity != nil && peer.RelayIdentity != nil && *relay.Receipt.ManagementIdentity == *peer.RelayIdentity && peer.RelayIdentity.Address == relay.Desired.Landing.Address
 }

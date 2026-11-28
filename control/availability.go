@@ -117,6 +117,11 @@ func (s *Store) SetAvailability(id, reason string, resumeAt time.Time, expected 
 	if err := s.commit(nodes); err != nil {
 		return err
 	}
+	if s.business != nil && s.business.material.Ownership != nil && len(s.business.material.RelayPools) > 0 {
+		if err := s.reconcileOwnedEntriesLocked(now); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

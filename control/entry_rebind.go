@@ -49,7 +49,7 @@ func (s *Store) RebindEntry(ctx context.Context, change EntryRebind) error {
 	if index < 0 || material.Endpoints[index].Retired || material.Endpoints[index].Reality.ListenAddress != change.PreviousAddress || material.Endpoints[index].Hysteria != nil {
 		return invalid
 	}
-	if _, _, err := projectBusinessEntries(s.nodes, material, time.Now()); err != nil {
+	if _, _, err := s.projectBusinessLocked(s.nodes, material, time.Now().UTC()); err != nil {
 		return err
 	}
 	key, err := ecdh.X25519().GenerateKey(rand.Reader)
@@ -95,7 +95,7 @@ func (s *Store) RebindEntry(ctx context.Context, change EntryRebind) error {
 	node.EntryHealthBarrierAt = time.Time{}
 	nodes[certificate] = node
 	invalidateEntryChecks(nodes, node.ID)
-	projected, _, err := projectBusinessEntries(nodes, material, time.Now())
+	projected, _, err := s.projectBusinessLocked(nodes, material, time.Now().UTC())
 	if err != nil {
 		return err
 	}

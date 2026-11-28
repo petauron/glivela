@@ -35,6 +35,7 @@ type Plan struct {
 	IPv6OnlyAddress string                   `json:"ipv6OnlyAddress,omitempty"`
 	PublicSSH       *glivela.PublicSSHPolicy `json:"publicSSH,omitempty"`
 	ClientListeners []ClientListener         `json:"clientListeners,omitempty"`
+	EIHListeners    []EIHListener            `json:"eihListeners,omitempty"`
 	Transport       glivela.PrivateTransport `json:"transport,omitzero"`
 	Revision        uint64                   `json:"revision"`
 	Address         string                   `json:"address"`
@@ -138,7 +139,7 @@ func (p Plan) Validate() error {
 		seenPorts[c.Port] = c
 		seenIDs[c.ID] = true
 	}
-	return nil
+	return p.validateEIHListeners()
 }
 
 // Exact historical rule shape, only for snapshot verification and owned cleanup.
@@ -148,8 +149,9 @@ const legacyManagementPorts = "22,23,135,139,445,1080,1433,1521,2053,2375,2376,3
 // default VLESS/Hysteria private-target guard. UID-scoped kernel filtering
 // remains mandatory for post-resolution targets and address-family limits.
 // Bit four disables Xray access logging while retaining warning/error logs;
-// versions 0..15 remain immutable snapshot readers.
-const RenderVersion uint8 = 31
+// bit five enables single-port 24000 SS2022 EIH multi-user listeners and relay
+// destination finalRules. Versions 0..15 remain immutable snapshot readers.
+const RenderVersion uint8 = 63
 
 func (p Plan) Render() ([]byte, error) {
 	return p.RenderVersion(RenderVersion)
@@ -161,6 +163,12 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		return nil, errors.New("landing: unsupported render version")
 	}
 	base := version &^ 16
+	if base > 15 && base != 47 {
+		return nil, errors.New("landing: unsupported render version")
+	}
+	if base&32 == 0 && len(p.EIHListeners) != 0 {
+		return nil, errors.New("landing: EIH listeners require the current landing format")
+	}
 	if base&8 == 0 && (len(p.UDPOverTCPListeners) != 0 || slices.ContainsFunc(p.Sources, func(s Source) bool { return s.UDPOverTCP })) {
 		return nil, errors.New("landing: UDP-over-TCP requires the current landing format")
 	}
@@ -174,7 +182,7 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 		return nil, err
 	}
 	egress, _ := netip.ParseAddr(p.EgressIP)
-	custom := p.HasClientEgress()
+	custom := p.HasClientEgress() || len(p.activeEIHListeners()) > 0
 	dual := slices.ContainsFunc(p.EgressAddresses(), func(ip string) bool { return strings.Contains(ip, ":") != egress.Is6() })
 	strategy, opposite := "UseIPv4", "::/0"
 	if egress.Is6() {
@@ -327,12 +335,13 @@ func (p Plan) RenderVersion(version uint8) ([]byte, error) {
 			return map[string]any{"tag": tag, "protocol": "freedom", "sendThrough": ip, "settings": map[string]any{"targetStrategy": force, "finalRules": []any{map[string]any{"action": "block", "ip": blocked, "blockDelay": "0"}}}}
 		}
 		outbounds[1] = freedom("egress", p.EgressIP)
-		for _, ip := range p.EgressAddresses() {
+		for _, ip := range p.landingEgressAddresses() {
 			if ip != p.EgressIP {
 				outbounds = append(outbounds, freedom(clientEgressTag(ip), ip))
 			}
 		}
 	}
+	inbounds, outbounds, rules = p.renderEIH(inbounds, outbounds, rules, dual)
 	logConfig := map[string]any{"loglevel": "warning"}
 	if version&16 != 0 {
 		logConfig["access"] = "none"
@@ -398,6 +407,45 @@ func (p Plan) Firewall(uid uint32, iface string) (ServerFirewall, error) {
 		}
 		result.ClientListeners = append(result.ClientListeners, ClientListenerPolicy{Interface: c.Interface, EgressIP: c.EgressIP, Shared: c.Shared, Port: c.Port, Source: c.Source, Transport: c.Transport, Address: c.Address})
 	}
+	for _, l := range p.activeEIHListeners() {
+		ep := EIHListenerPolicy{Address: l.Address, Port: l.Port}
+		for _, u := range l.Users {
+			if !slices.Contains(ep.Sources, u.Source) {
+				ep.Sources = append(ep.Sources, u.Source)
+			}
+			if u.Role == "landing" {
+				ip := u.EgressIP
+				if ip == "" {
+					ip = p.EgressIP
+				}
+				if ip != p.EgressIP && !slices.Contains(ep.EgressIPs, ip) {
+					ep.EgressIPs = append(ep.EgressIPs, ip)
+				}
+				if u.UDP {
+					result.UDPEgressIPs = append(result.UDPEgressIPs, ip)
+				}
+			} else if u.Role == "relay" {
+				for _, target := range u.RelayTargets {
+					rp := EIHRelayPolicy{Source: u.EgressIP, Address: target.Address, Port: target.Port}
+					if !slices.Contains(ep.RelayEgress, rp) {
+						ep.RelayEgress = append(ep.RelayEgress, rp)
+					}
+				}
+			}
+		}
+		slices.Sort(ep.Sources)
+		slices.Sort(ep.EgressIPs)
+		slices.SortFunc(ep.RelayEgress, func(a, b EIHRelayPolicy) int {
+			if c := strings.Compare(a.Source, b.Source); c != 0 {
+				return c
+			}
+			if c := strings.Compare(a.Address, b.Address); c != 0 {
+				return c
+			}
+			return a.Port - b.Port
+		})
+		result.EIHListeners = append(result.EIHListeners, ep)
+	}
 	slices.Sort(result.UDPEgressIPs)
 	result.UDPEgressIPs = slices.Compact(result.UDPEgressIPs)
 	return result, result.validate()
@@ -434,11 +482,41 @@ func (p Plan) HasClientEgress() bool {
 	return slices.ContainsFunc(p.ClientListeners, func(c ClientListener) bool { return c.EgressIP != "" })
 }
 
-func (p Plan) EgressAddresses() []string {
+// ActiveEIHListeners returns sorted active single-port 24000 EIH listeners.
+func (p Plan) ActiveEIHListeners() []EIHListener {
+	return p.activeEIHListeners()
+}
+
+// CloneEIHListeners returns a deep copy of the plan's EIH listener slice.
+func (p Plan) CloneEIHListeners() []EIHListener {
+	return cloneEIHListeners(p.EIHListeners)
+}
+
+func (p Plan) landingEgressAddresses() []string {
 	addresses := []string{p.EgressIP}
 	for _, c := range p.ActiveClientListeners() {
 		if c.EgressIP != "" && !slices.Contains(addresses, c.EgressIP) {
 			addresses = append(addresses, c.EgressIP)
+		}
+	}
+	for _, l := range p.activeEIHListeners() {
+		for _, u := range l.Users {
+			if u.Role == "landing" && u.EgressIP != "" && !slices.Contains(addresses, u.EgressIP) {
+				addresses = append(addresses, u.EgressIP)
+			}
+		}
+	}
+	slices.Sort(addresses)
+	return addresses
+}
+
+func (p Plan) EgressAddresses() []string {
+	addresses := p.landingEgressAddresses()
+	for _, l := range p.activeEIHListeners() {
+		for _, u := range l.Users {
+			if u.Role == "relay" && u.EgressIP != "" && !slices.Contains(addresses, u.EgressIP) {
+				addresses = append(addresses, u.EgressIP)
+			}
 		}
 	}
 	slices.Sort(addresses)

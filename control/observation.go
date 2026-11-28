@@ -16,8 +16,11 @@ import (
 type Observation struct {
 	ManagementIdentity *landing.PeerIdentity `json:"managementIdentity,omitempty"`
 	glivela.AppliedReceipt
-	EntryHealth *EntryHealthReport `json:"entryHealth,omitempty"`
-	Traffic     *EntryTraffic      `json:"traffic,omitempty"`
+	MaxLandingRenderVersion uint8                   `json:"maxLandingRenderVersion,omitempty"`
+	MaxEntryRenderVersion   uint8                   `json:"maxEntryRenderVersion,omitempty"`
+	EntryHealth             *EntryHealthReport      `json:"entryHealth,omitempty"`
+	Traffic                 *EntryTraffic           `json:"traffic,omitempty"`
+	Observatory             *EntryObservatoryReport `json:"observatory,omitempty"`
 }
 
 type EntryHealthReport struct {
@@ -37,6 +40,7 @@ func (o Observation) clone() Observation {
 		o.ManagementIdentity = &identity
 	}
 	o.Traffic = o.Traffic.clone()
+	o.Observatory = o.Observatory.clone()
 	if o.EntryHealth != nil {
 		h := *o.EntryHealth
 		h.Peers = maps.Clone(h.Peers)

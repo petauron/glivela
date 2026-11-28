@@ -181,9 +181,60 @@ func TestOfficialXrayEntryPlanValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pooledPlan := d.clone().Entry
+	poolRouteID := uuid.NewString()
+	poolRoute := glivela.Credential{ID: "pool-route-example", AccountID: base.Credential.AccountID, Kind: glivela.RouteCredential, User: glivela.RouteUser("pool-grant-example"), Identity: glivela.Identity(poolRouteID), EntryID: "entry-example", EgressID: "landing-example", Enabled: true}
+	poolGrant := glivela.RouteGrant{ID: "pool-grant-example", AccountID: poolRoute.AccountID, EntryID: poolRoute.EntryID, EgressID: poolRoute.EgressID, RelayPoolID: "pool-example", UDP: true, InboundTag: pooledPlan.RealityEndpoints[0].InboundTag, Base: base.Credential, Route: poolRoute, Mode: glivela.FixedMode, Enabled: true, DesiredRev: 1}
+	pooledPlan.Credentials = append(pooledPlan.Credentials, glivela.CredentialMaterial{Credential: poolRoute, ProtocolID: poolRouteID})
+	pooledPlan.Grants = []glivela.RouteGrant{poolGrant}
+	obs := glivela.DefaultObservatoryConfig()
+	pooledPlan.Observatory = &obs
+	pooledPlan.RelayEdges = []glivela.EntryRelayEdge{
+		{ID: "re-a", RelayNodeID: "relay-a", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::1111", Port: glivela.RelayPoolPort, Password: "MDEyMzQ1Njc4OWFiY2RlZg==:YWJjZGVmZ2hpamtsbW5vcA=="},
+		{ID: "re-b", RelayNodeID: "relay-b", Source: "2001:4860:4860::8888", Address: "2001:4860:4860::2222", Port: glivela.RelayPoolPort, Password: "MDEyMzQ1Njc4OWFiY2RlZg==:cHFyc3R1dnd4eXp7fH1+fw=="},
+	}
+	pooledPlan.RelayPools = []glivela.EntryRelayPool{{
+		Key:       poolGrant.PoolKey(),
+		GrantID:   poolGrant.ID,
+		AccountID: poolGrant.AccountID,
+		PoolID:    poolGrant.RelayPoolID,
+		EgressID:  poolGrant.EgressID,
+		UDP:       true,
+		Strategy:  glivela.DefaultRelayPoolStrategy(2),
+		Candidates: []glivela.EntryPoolCandidate{
+			{RelayNodeID: "relay-a", RelayEdgeID: "re-a", LandingAddress: "2606:4700:4700::1111", LandingPort: glivela.RelayPoolPort, LandingPass: "MDEyMzQ1Njc4OWFiY2RlZg==:YWJjZGVmZ2hpamtsbW5vcA=="},
+			{RelayNodeID: "relay-b", RelayEdgeID: "re-b", LandingAddress: "2606:4700:4700::1111", LandingPort: glivela.RelayPoolPort, LandingPass: "MDEyMzQ1Njc4OWFiY2RlZg==:cHFyc3R1dnd4eXp7fH1+fw=="},
+		},
+	}}
+	pooledNet := EntryNetwork{
+		RelayPeers: []EntryRelayNetworkPeer{
+			{NodeID: "relay-a", CertificateID: strings.Repeat("a", 64), Identity: landing.PeerIdentity{ID: "relay-a-mesh", PublicKey: "nodekey:relaya", Address: "100.64.0.11"}},
+			{NodeID: "relay-b", CertificateID: strings.Repeat("b", 64), Identity: landing.PeerIdentity{ID: "relay-b-mesh", PublicKey: "nodekey:relayb", Address: "100.64.0.12"}},
+		},
+		PooledLandings: []EntryPooledLanding{{
+			EgressID:      "landing-example",
+			CertificateID: strings.Repeat("c", 64),
+			Identity:      &landing.PeerIdentity{ID: "landing-mesh", PublicKey: "nodekey:landing", Address: "100.64.0.2"},
+			ExpectedExit:  "8.8.8.8",
+		}},
+	}
+	pooled, err := NewEntryDesired(*pooledPlan, pooledNet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyPoolPlan := pooled.clone().Entry
+	emptyPoolPlan.RelayEdges = nil
+	emptyPoolPlan.RelayPools[0].Candidates = nil
+	emptyPoolNet := EntryNetwork{
+		PooledLandings: pooledNet.PooledLandings,
+	}
+	emptyPool, err := NewEntryDesired(*emptyPoolPlan, emptyPoolNet)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Empty authentication inventories must at least validate with the pinned
 	// original core. This is syntax evidence, not actual authentication denial.
-	for _, desired := range []Desired{d, routed, disabled, private} {
+	for _, desired := range []Desired{d, routed, disabled, private, pooled, emptyPool} {
 		path := filepath.Join(t.TempDir(), "entry.json")
 		if err := os.WriteFile(path, desired.Config, 0600); err != nil {
 			t.Fatal(err)

@@ -39,6 +39,9 @@ func NewDesired(plan landing.Plan) (Desired, error) {
 		version = 6
 	}
 	if len(plan.UDPOverTCPListeners) != 0 || slices.ContainsFunc(plan.Sources, func(s landing.Source) bool { return s.UDPOverTCP }) {
+		version = 15
+	}
+	if len(plan.EIHListeners) != 0 {
 		version = landing.RenderVersion
 	}
 	version |= 16
@@ -55,6 +58,7 @@ func newLandingDesiredVersion(plan landing.Plan, version uint8) (Desired, error)
 	}
 	plan.Sources = slices.Clone(plan.Sources)
 	plan.ClientListeners = slices.Clone(plan.ClientListeners)
+	plan.EIHListeners = plan.CloneEIHListeners()
 	plan.UDPOverTCPListeners = slices.Clone(plan.UDPOverTCPListeners)
 	return Desired{DesiredArtifact: a, LandingRenderVersion: version, Landing: &plan}, nil
 }
@@ -125,12 +129,22 @@ func (d Desired) clone() Desired {
 		plan.PublicSSH = plan.PublicSSH.Clone()
 		plan.Sources = slices.Clone(plan.Sources)
 		plan.ClientListeners = slices.Clone(plan.ClientListeners)
+		plan.EIHListeners = plan.CloneEIHListeners()
 		plan.UDPOverTCPListeners = slices.Clone(plan.UDPOverTCPListeners)
 		d.Landing = &plan
 	}
 	if d.Entry != nil {
 		plan := *d.Entry
 		plan.PublicSSH = plan.PublicSSH.Clone()
+		if plan.Observatory != nil {
+			obs := *plan.Observatory
+			plan.Observatory = &obs
+		}
+		plan.RelayEdges = slices.Clone(plan.RelayEdges)
+		plan.RelayPools = slices.Clone(plan.RelayPools)
+		for i := range plan.RelayPools {
+			plan.RelayPools[i].Candidates = slices.Clone(plan.RelayPools[i].Candidates)
+		}
 		plan.RealityEndpoints = slices.Clone(plan.RealityEndpoints)
 		for i := range plan.RealityEndpoints {
 			plan.RealityEndpoints[i].ServerNames = slices.Clone(plan.RealityEndpoints[i].ServerNames)

@@ -16,6 +16,12 @@ import (
 type RouteChange struct {
 	UDP              bool   `json:"udp,omitempty"`
 	ClientChainID    string `json:"clientChainId,omitempty"`
+	RelayPoolID      string `json:"relayPoolId,omitempty"`
+	LandingAddress   string `json:"landingAddress,omitempty"`
+	ExpectedExit     string `json:"expectedExit,omitempty"`
+	EgressIP         string `json:"egressIp,omitempty"`
+	IngressFamily    string `json:"ingressFamily,omitempty"`
+	Name             string `json:"name,omitempty"`
 	ID               string `json:"id"`
 	AccountID        string `json:"accountId"`
 	EntryID          string `json:"entryId"`
@@ -40,7 +46,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	if !glivela.ValidIdentifier(change.ID) || !glivela.ValidIdentifier(change.AccountID) || !glivela.ValidIdentifier(change.EntryID) || !glivela.ValidIdentifier(change.EgressID) || change.ExpectedRevision == 0 || change.ExpectedRevision == math.MaxUint64 || s.business == nil || s.business.faulted || s.business.material.Ownership == nil {
 		return AccountChangeResult{}, invalid
 	}
-	if s.entryRetiredLocked(change.EntryID) {
+	if s.entryRetiredLocked(change.EntryID) || change.ClientChainID != "" {
 		return AccountChangeResult{}, invalid
 	}
 	next := s.business.material
@@ -49,35 +55,44 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	if ai < 0 {
 		return AccountChangeResult{}, invalid
 	}
-	if change.ClientChainID != "" && change.Enabled {
-		found := false
-		for _, entry := range s.nodes {
-			if entry.ID != change.EntryID || entry.Desired.Entry == nil {
-				continue
-			}
-			for _, peer := range entry.Desired.Entry.Peers {
-				if peer.ClientChainID != change.ClientChainID || peer.EgressID != change.EgressID {
-					continue
-				}
-				for _, target := range s.nodes {
-					if target.ID == change.EgressID {
-						c, ok := s.configuredServerTransport(entry, target, peer)
-						found = ok && c.AccountID == change.AccountID && c.Peer.Relay != nil
-					}
-				}
-			}
-		}
-		if !found {
+	var pooledTarget Node
+	if change.RelayPoolID != "" {
+		if change.IPv4EgressID != "" || change.EntryID == change.EgressID || next.ServerTransportVersion != glivela.CurrentServerTransportVersion {
 			return AccountChangeResult{}, invalid
 		}
+		if _, hasPool := next.RelayPools[change.RelayPoolID]; !hasPool {
+			return AccountChangeResult{}, invalid
+		}
+		foundTarget := false
+		for _, target := range s.nodes {
+			if target.ID == change.EgressID && target.Desired.Landing != nil && !entryRetired(next, target.ID) {
+				pooledTarget, foundTarget = target, true
+				break
+			}
+		}
+		if !foundTarget {
+			return AccountChangeResult{}, invalid
+		}
+		if !change.Delete && change.Enabled {
+			entryCapable := false
+			for _, entry := range s.nodes {
+				if entry.ID == change.EntryID && entry.Desired.Entry != nil {
+					entryCapable = entryKnownRelayPoolCapable(entry)
+					break
+				}
+			}
+			if !entryCapable {
+				return AccountChangeResult{}, errors.New("control: entry runtime does not support relay pools")
+			}
+		}
 	}
-	if change.Enabled {
+	if change.Enabled && change.RelayPoolID == "" {
 		for _, entry := range s.nodes {
 			if entry.ID != change.EntryID || entry.Desired.Entry == nil {
 				continue
 			}
 			for _, peer := range entry.Desired.Entry.Peers {
-				if peer.EgressID != change.EgressID || peer.ClientChainID != change.ClientChainID || peer.Transport.ClientListenerID == "" {
+				if peer.EgressID != change.EgressID || peer.ClientChainID != "" || peer.Transport.ClientListenerID == "" {
 					continue
 				}
 				authorized := false
@@ -96,7 +111,7 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	account := &accounts[ai]
 	gi := slices.IndexFunc(account.Grants, func(g glivela.RouteGrant) bool { return g.ID == change.ID })
 	deleted := next.DeletedRoutes[change.ID]
-	same := gi >= 0 && account.Grants[gi].UDP == change.UDP && account.Grants[gi].EntryID == change.EntryID && account.Grants[gi].EgressID == change.EgressID && account.Grants[gi].IPv4EgressID == change.IPv4EgressID && account.Grants[gi].ClientChainID == change.ClientChainID && account.Grants[gi].HideNative == change.HideNative && account.Grants[gi].Enabled == change.Enabled && deleted == change.Delete
+	same := gi >= 0 && account.Grants[gi].UDP == change.UDP && account.Grants[gi].EntryID == change.EntryID && account.Grants[gi].EgressID == change.EgressID && account.Grants[gi].IPv4EgressID == change.IPv4EgressID && account.Grants[gi].ClientChainID == "" && account.Grants[gi].RelayPoolID == change.RelayPoolID && account.Grants[gi].HideNative == change.HideNative && account.Grants[gi].Enabled == change.Enabled && deleted == change.Delete
 	if change.Delete && (change.Enabled || gi < 0 || account.Grants[gi].HideNative != change.HideNative) || deleted && !same {
 		return AccountChangeResult{}, invalid
 	}
@@ -106,7 +121,8 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 	if account.Account.DesiredRevision != change.ExpectedRevision && !(same && account.Account.DesiredRevision == change.ExpectedRevision+1) {
 		return AccountChangeResult{}, invalid
 	}
-	if _, _, err := projectBusinessEntries(s.nodes, next, time.Now()); err != nil {
+	now := time.Now().UTC()
+	if _, _, err := s.projectBusinessLocked(s.nodes, next, now); err != nil {
 		return AccountChangeResult{}, err
 	}
 	if !same {
@@ -117,11 +133,11 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 		if gi >= 0 {
 			grant := &account.Grants[gi]
 			// Changing a route's exits/identity is a new grant, not credential reuse.
-			if grant.EntryID != change.EntryID || grant.EgressID != change.EgressID || grant.IPv4EgressID != change.IPv4EgressID || grant.ClientChainID != change.ClientChainID || grant.DesiredRev == math.MaxUint64 {
+			if grant.EntryID != change.EntryID || grant.EgressID != change.EgressID || grant.IPv4EgressID != change.IPv4EgressID || grant.ClientChainID != "" || grant.RelayPoolID != change.RelayPoolID || grant.DesiredRev == math.MaxUint64 {
 				return AccountChangeResult{}, invalid
 			}
 			if !change.Delete {
-				if change.Enabled && (!grant.Enabled || change.UDP != grant.UDP) && next.ManagedRouteLandings[change.ID] != "" {
+				if change.RelayPoolID == "" && change.Enabled && (!grant.Enabled || change.UDP != grant.UDP) && next.ManagedRouteLandings[change.ID] != "" {
 					cert, err := s.managedRouteReactivationCertificate(change)
 					if err != nil || cert != next.ManagedRouteLandings[change.ID] {
 						return AccountChangeResult{}, invalid
@@ -151,11 +167,45 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				return AccountChangeResult{}, err
 			}
 			credential := glivela.Credential{ID: cid.String(), AccountID: change.AccountID, Kind: glivela.RouteCredential, User: glivela.RouteUser(change.ID), Identity: glivela.Identity(identity.String()), EntryID: change.EntryID, EgressID: change.EgressID, Enabled: true}
-			grant := glivela.RouteGrant{UDP: change.UDP, ClientChainID: change.ClientChainID, ID: change.ID, AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, IPv4EgressID: change.IPv4EgressID, InboundTag: next.Endpoints[ei].Reality.InboundTag, Base: account.Credentials[base], Route: credential, Mode: glivela.FixedMode, Enabled: true, HideNative: change.HideNative, DesiredRev: 1}
+			grant := glivela.RouteGrant{UDP: change.UDP, RelayPoolID: change.RelayPoolID, ID: change.ID, AccountID: change.AccountID, EntryID: change.EntryID, EgressID: change.EgressID, IPv4EgressID: change.IPv4EgressID, InboundTag: next.Endpoints[ei].Reality.InboundTag, Base: account.Credentials[base], Route: credential, Mode: glivela.FixedMode, Enabled: true, HideNative: change.HideNative, DesiredRev: 1}
 			if grant.Validate() != nil {
 				return AccountChangeResult{}, invalid
 			}
-			if _, imported := next.References.Nodes[change.EgressID]; !imported {
+			if change.RelayPoolID != "" {
+				landingAddr := change.LandingAddress
+				if landingAddr == "" {
+					if pooledTarget.Desired.Landing.IPv6OnlyAddress != "" {
+						landingAddr = pooledTarget.Desired.Landing.IPv6OnlyAddress
+					} else {
+						landingAddr = pooledTarget.Desired.Landing.Transport.PublicAddress
+					}
+				}
+				expectedExit := change.ExpectedExit
+				if expectedExit == "" {
+					expectedExit = pooledTarget.Desired.Landing.EgressIP
+				}
+				pr := glivela.PooledRoute{
+					GrantID:              change.ID,
+					AccountID:            change.AccountID,
+					EntryID:              change.EntryID,
+					EgressID:             change.EgressID,
+					RelayPoolID:          change.RelayPoolID,
+					LandingCertificateID: pooledTarget.CertificateID,
+					LandingAddress:       landingAddr,
+					ExpectedExit:         expectedExit,
+					EgressIP:             change.EgressIP,
+					IngressFamily:        change.IngressFamily,
+					Name:                 change.Name,
+				}
+				if pr.Validate() != nil {
+					return AccountChangeResult{}, invalid
+				}
+				next.PooledRoutes = maps.Clone(next.PooledRoutes)
+				if next.PooledRoutes == nil {
+					next.PooledRoutes = map[string]glivela.PooledRoute{}
+				}
+				next.PooledRoutes[change.ID] = pr
+			} else if _, imported := next.References.Nodes[change.EgressID]; !imported {
 				cert, err := s.managedRouteReactivationCertificate(change)
 				if err != nil {
 					return AccountChangeResult{}, err
@@ -181,6 +231,13 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 				next.DeletedRoutes = make(map[string]bool)
 			}
 			next.DeletedRoutes[change.ID] = true
+			if _, hasPR := next.PooledRoutes[change.ID]; hasPR {
+				next.PooledRoutes = maps.Clone(next.PooledRoutes)
+				delete(next.PooledRoutes, change.ID)
+				if len(next.PooledRoutes) == 0 {
+					next.PooledRoutes = nil
+				}
+			}
 		}
 		account.Account.DesiredRevision++
 		var err error
@@ -188,21 +245,33 @@ func (s *Store) ChangeRoute(ctx context.Context, change RouteChange) (AccountCha
 		if err != nil {
 			return AccountChangeResult{}, err
 		}
+		if err := ensurePooledRouteCredentials(s.nodes, &next); err != nil {
+			return AccountChangeResult{}, err
+		}
+		if change.Delete {
+			pruneUnreferencedTwoHopEIHBindings(&next, s.nodes, s.socketCutovers, now)
+		}
+		gcUnreferencedRelayPoolCredentials(&next, s.nodes, s.socketCutovers)
 	}
 	var projected map[string]Node
 	var err error
 	if change.Delete {
 		// A ledger deletion must preserve the enrolled credential set, including
 		// credentials already withdrawn from native runtime during handover.
-		projected, _, err = projectBusinessEntries(s.nodes, next, time.Now())
+		projected, _, err = s.projectBusinessLocked(s.nodes, next, now)
 	} else {
-		projected, err = projectManagedRoutes(s.nodes, next, change.EntryID)
+		projected, err = projectManagedRoutes(s.nodes, next, change.EntryID, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
 	}
 	if err != nil {
 		return AccountChangeResult{}, err
 	}
-	if _, err := projectServerLandings(projected, next, time.Now()); err != nil {
-		return AccountChangeResult{}, err
+	if !change.Delete {
+		if _, err := projectServerLandings(projected, next, now, s.socketCutovers); err != nil {
+			return AccountChangeResult{}, err
+		}
+		if _, err := projectRelayPools(projected, next, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers); err != nil {
+			return AccountChangeResult{}, err
+		}
 	}
 	if change.Delete && !reflect.DeepEqual(projected, s.nodes) {
 		return AccountChangeResult{}, errors.New("control: deletion would change an entry runtime")
@@ -227,7 +296,7 @@ func routeDeletionReady(nodes map[string]Node, grant glivela.RouteGrant, now tim
 		}
 		for _, current := range node.Desired.Entry.Grants {
 			if current.ID == grant.ID {
-				return current.EntryID == grant.EntryID && current.EgressID == grant.EgressID && current.IPv4EgressID == grant.IPv4EgressID && current.ClientChainID == grant.ClientChainID && !current.Enabled && !current.Route.Enabled
+				return current.EntryID == grant.EntryID && current.EgressID == grant.EgressID && current.IPv4EgressID == grant.IPv4EgressID && current.ClientChainID == grant.ClientChainID && current.RelayPoolID == grant.RelayPoolID && !current.Enabled && !current.Route.Enabled
 			}
 		}
 		// A fresh applied plan without this grant already proves withdrawal.
@@ -240,8 +309,8 @@ func routeDeletionReady(nodes map[string]Node, grant glivela.RouteGrant, now tim
 
 // Rebuild only the selected entry's business users from the authoritative
 // ledger. Transport/peer enrollment remains unchanged and must match exactly.
-func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial, entryID string) (map[string]Node, error) {
-	credentials, grants, err := effectiveBusinessCredentials(material, time.Now())
+func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial, entryID string, now time.Time, isSuspended func(string) bool, cutovers map[string]SocketCutover) (map[string]Node, error) {
+	credentials, grants, err := effectiveBusinessCredentials(material, now)
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +324,7 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 		desired := node.Desired.clone()
 		plan := desired.Entry
 		plan.Credentials, plan.Grants = nil, nil
+		hasPooled := false
 		for _, account := range material.Plan.Accounts {
 			for _, credential := range account.Credentials {
 				if credential.EntryID == entryID {
@@ -267,12 +337,19 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 				// but never reintroduce it after native handover omitted it.
 				retained := slices.ContainsFunc(node.Desired.Entry.Grants, func(current glivela.RouteGrant) bool { return current.ID == grant.ID })
 				if grant.EntryID == entryID && (!material.DeletedRoutes[grant.ID] || retained) {
-					plan.Grants = append(plan.Grants, grants[grant.ID])
+					g := grants[grant.ID]
+					plan.Grants = append(plan.Grants, g)
+					if g.RelayPoolID != "" {
+						hasPooled = true
+					}
 				}
 			}
 		}
 		used := map[string]bool{}
 		for _, grant := range plan.Grants {
+			if grant.RelayPoolID != "" {
+				continue
+			}
 			used[grant.PeerKey()] = true
 			if grant.IPv4EgressID != "" {
 				used[grant.IPv4EgressID] = true
@@ -285,6 +362,31 @@ func projectManagedRoutes(nodes map[string]Node, material glivela.ImportMaterial
 			}
 		}
 		if reflect.DeepEqual(plan, node.Desired.Entry) {
+			continue
+		}
+		if hasPooled {
+			node.Desired.Entry = plan
+			node.Desired.EntryNetwork = desired.EntryNetwork
+			next[certificate] = node
+			if _, err := projectRelayPools(next, material, now, isSuspended, cutovers); err != nil {
+				return nil, err
+			}
+			// If projectRelayPools did not bump revision because pool structure
+			// stayed unchanged while grant flags changed, finalize the revision now.
+			if next[certificate].Desired.Validate() != nil || next[certificate].Desired.Revision == nodes[certificate].Desired.Revision {
+				updated := next[certificate]
+				if updated.Desired.Entry.Revision == math.MaxUint64 {
+					return nil, errors.New("control: entry revision exhausted")
+				}
+				updated.Desired.Entry.Revision++
+				rebuilt, err := newEntryDesiredVersion(*updated.Desired.Entry, *updated.Desired.EntryNetwork, glivela.XrayRenderVersion)
+				if err != nil {
+					return nil, err
+				}
+				updated.Desired, updated.Receipt, updated.ReportedAt, updated.EntryHealthBarrierAt = rebuilt, nil, time.Time{}, time.Time{}
+				next[certificate] = updated
+				invalidateEntryChecks(next, updated.ID)
+			}
 			continue
 		}
 		if plan.Revision == math.MaxUint64 {
@@ -376,7 +478,7 @@ func (s *Store) managedRouteReactivationCertificate(change RouteChange) (string,
 						continue
 					}
 					now := time.Now()
-					if !s.availableRuntime(target, now) || target.Receipt.ManagementIdentity == nil || *target.Receipt.ManagementIdentity != network.Identity || network.Identity.Address != target.Desired.Landing.Address || !s.serverRelayLive(r, network, now) {
+					if !s.availableRuntime(target, now) || target.Receipt.ManagementIdentity == nil || *target.Receipt.ManagementIdentity != network.Identity || network.Identity.Address != target.Desired.Landing.Address {
 						return "", refused
 					}
 					return cert, nil

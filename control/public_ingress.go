@@ -136,7 +136,7 @@ func (s *Store) ChangePublicIngress(ctx context.Context, in PublicIngressChange)
 		material.Endpoints[i] = endpoint
 	}
 	nodes := s.copy()
-	projected, changed, err := projectBusinessEntries(nodes, material, time.Now())
+	projected, changed, err := s.projectBusinessLocked(nodes, material, time.Now().UTC())
 	if err != nil {
 		return PublicIngressView{}, err
 	}

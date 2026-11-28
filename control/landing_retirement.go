@@ -88,11 +88,22 @@ func (s *Store) retireReturnedNode(ctx context.Context, change RetireLandingChan
 			return refused
 		}
 	}
+	for _, cutover := range s.socketCutovers {
+		if cutover.TargetNodeID == change.ID {
+			return refused
+		}
+		for _, c := range cutover.Consumers {
+			if c.EntryID == change.ID {
+				return refused
+			}
+		}
+	}
 	next, removed, err := retiredNodeMaterial(s.business.material, change, entry)
 	if err != nil {
 		return err
 	}
-	projected, _, err := projectBusinessEntries(s.nodes, next, now)
+	gcUnreferencedRelayPoolCredentials(&next, s.nodes, s.socketCutovers)
+	projected, _, err := projectBusinessEntriesWithOptions(s.nodes, next, now, func(id string) bool { return s.suspended(id, now) }, s.socketCutovers)
 	if err != nil {
 		return err
 	}
@@ -145,6 +156,41 @@ func retiredNodeMaterial(m glivela.ImportMaterial, change RetireLandingChange, e
 	next := m
 	next.Endpoints = slices.DeleteFunc(slices.Clone(m.Endpoints), func(e glivela.ImportEndpoint) bool { return entry && e.Reality.EntryID == change.ID })
 	next.ServerTransports = maps.Clone(m.ServerTransports)
+	next.EntryRelayConfigs = maps.Clone(m.EntryRelayConfigs)
+	next.PooledRoutes = maps.Clone(m.PooledRoutes)
+	next.EIHNodeKeys = maps.Clone(m.EIHNodeKeys)
+	for _, pool := range m.RelayPools {
+		for _, member := range pool.Members {
+			if member.NodeID == change.ID || member.CertificateID == change.CertificateID {
+				return m, nil, errors.New("control: remove node from relay pools first")
+			}
+		}
+	}
+	next.TwoHopEIHBindings = maps.Clone(m.TwoHopEIHBindings)
+	for id, b := range next.TwoHopEIHBindings {
+		if b.EntryID != change.ID && b.EgressID != change.ID {
+			continue
+		}
+		for _, a := range m.Plan.Accounts {
+			for _, g := range a.Grants {
+				if !m.DeletedRoutes[g.ID] && g.Enabled && g.EntryID == b.EntryID && (g.EgressID == b.EgressID || g.IPv4EgressID == b.EgressID) {
+					return m, nil, refused
+				}
+			}
+		}
+		delete(next.TwoHopEIHBindings, id)
+	}
+	if len(next.TwoHopEIHBindings) == 0 {
+		next.TwoHopEIHBindings = nil
+	}
+	delete(next.EntryRelayConfigs, change.ID)
+	delete(next.EIHNodeKeys, change.ID)
+	if len(next.EntryRelayConfigs) == 0 {
+		next.EntryRelayConfigs = nil
+	}
+	if len(next.EIHNodeKeys) == 0 {
+		next.EIHNodeKeys = nil
+	}
 	removed := map[string]bool{}
 	if entry {
 		removed[change.ID] = true
@@ -177,6 +223,7 @@ func retiredNodeMaterial(m glivela.ImportMaterial, change RetireLandingChange, e
 			removedRoutes[grant.ID] = true
 			delete(next.DeletedRoutes, grant.ID)
 			delete(next.ManagedRouteLandings, grant.ID)
+			delete(next.PooledRoutes, grant.ID)
 		}
 		a.Grants = slices.DeleteFunc(a.Grants, func(g glivela.RouteGrant) bool { return removedRoutes[g.ID] })
 		removedCredentials := map[string]bool{}
@@ -306,6 +353,9 @@ func retiredNodeMaterial(m glivela.ImportMaterial, change RetireLandingChange, e
 			copy.Revision++
 		}
 		next.References.LandingSelection = &copy
+	}
+	if len(next.PooledRoutes) == 0 {
+		next.PooledRoutes = nil
 	}
 	next.RetiredLandings = maps.Clone(m.RetiredLandings)
 	if next.RetiredLandings == nil {

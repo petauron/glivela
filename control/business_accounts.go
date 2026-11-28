@@ -103,7 +103,7 @@ func (s *Store) CreateAccount(ctx context.Context, id, name string, plan glivela
 			return AccountCreated{}, err
 		}
 	}
-	projected, err := projectAccountCreation(s.nodes, next, id)
+	projected, err := s.projectAccountCreationLocked(s.nodes, next, id)
 	if err != nil {
 		return AccountCreated{}, err
 	}
@@ -118,8 +118,9 @@ func (s *Store) CreateAccount(ctx context.Context, id, name string, plan glivela
 	return AccountCreated{AccountChangeResult: s.accountChangeResult(id, time.Now()), SubscriptionToken: s.business.material.SubscriptionTokens[id]}, nil
 }
 
-func projectAccountCreation(nodes map[string]Node, material glivela.ImportMaterial, id string) (map[string]Node, error) {
-	credentials, _, err := effectiveBusinessCredentials(material, time.Now())
+func (s *Store) projectAccountCreationLocked(nodes map[string]Node, material glivela.ImportMaterial, id string) (map[string]Node, error) {
+	now := time.Now().UTC()
+	credentials, _, err := effectiveBusinessCredentials(material, now)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +158,7 @@ func projectAccountCreation(nodes map[string]Node, material glivela.ImportMateri
 		next[certificate] = node
 		invalidateEntryChecks(next, node.ID)
 	}
-	projected, _, err := projectBusinessEntries(next, material, time.Now())
+	projected, _, err := s.projectBusinessLocked(next, material, now)
 	return projected, err
 }
 

@@ -21,7 +21,7 @@ type PrunedEntry struct {
 
 func (m ImportMaterial) validatePrunedEntries() error {
 	bad := errors.New("glivela: invalid pruned entry or active dependency")
-	if len(m.PrunedEntries) > 10000 || len(m.PrunedEntries) > 0 && (m.Ownership == nil || m.ServerTransportVersion != 1) {
+	if len(m.PrunedEntries) > 10000 || len(m.PrunedEntries) > 0 && (m.Ownership == nil || m.ServerTransportVersion != 1 && m.ServerTransportVersion != CurrentServerTransportVersion) {
 		return bad
 	}
 	certificates, endpoints, services := map[string]bool{}, map[string]bool{}, map[string]bool{}
@@ -36,6 +36,29 @@ func (m ImportMaterial) validatePrunedEntries() error {
 		}
 		if _, shared := m.ClientLandings[id]; shared {
 			return bad
+		}
+		if _, hasKey := m.EIHNodeKeys[id]; hasKey {
+			return bad
+		}
+		if _, hasCfg := m.EntryRelayConfigs[id]; hasCfg {
+			return bad
+		}
+		for _, pool := range m.RelayPools {
+			for _, member := range pool.Members {
+				if member.NodeID == id || member.CertificateID == entry.CertificateID {
+					return bad
+				}
+			}
+		}
+		for _, route := range m.PooledRoutes {
+			if route.EntryID == id || route.EgressID == id || route.LandingCertificateID == entry.CertificateID {
+				return bad
+			}
+		}
+		for _, b := range m.TwoHopEIHBindings {
+			if b.EntryID == id || b.EgressID == id {
+				return bad
+			}
 		}
 		for _, endpoint := range m.Endpoints {
 			if endpoint.Reality.EntryID == id || endpoint.Reality.ID == entry.EndpointID || endpoint.ServiceID == entry.ServiceID || endpoint.RuntimeCertificateID == entry.CertificateID {

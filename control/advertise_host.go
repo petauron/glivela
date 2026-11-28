@@ -96,7 +96,7 @@ func (s *Store) ChangeAdvertiseHost(ctx context.Context, input AdvertiseHostChan
 	if !matched {
 		return AdvertiseHostView{}, invalid
 	}
-	projected, changed, err := projectBusinessEntries(nodes, material, time.Now())
+	projected, changed, err := s.projectBusinessLocked(nodes, material, time.Now().UTC())
 	if err != nil {
 		return AdvertiseHostView{}, err
 	}

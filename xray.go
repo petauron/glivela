@@ -202,6 +202,9 @@ func (p RoutePeer) Validate() error {
 type XrayPlan struct {
 	ClientLinks       []PrivateClientPolicy `json:"clientLinks,omitempty"`
 	PublicSSH         *PublicSSHPolicy      `json:"publicSSH,omitempty"`
+	Observatory       *ObservatoryConfig    `json:"observatory,omitempty"`
+	RelayEdges        []EntryRelayEdge      `json:"relayEdges,omitempty"`
+	RelayPools        []EntryRelayPool      `json:"relayPools,omitempty"`
 	Revision          uint64                `json:"revision"`
 	NativeEgress      EgressPolicy          `json:"nativeEgress,omitempty"`
 	RealityEndpoints  []RealityEndpoint     `json:"realityEndpoints,omitempty"`
@@ -218,8 +221,9 @@ type XrayPlan struct {
 // Bit four permits explicitly scoped provider-LAN client sockets.
 // Bit five enables explicitly authorized UDP-over-TCP server routes.
 // Bit six disables Xray access logging while retaining warning/error logs.
+// Bit seven enables dynamic relay pools, burstObservatory and ObservatoryService.
 // Versions 0..3, 7, 15, 31 and 63 remain immutable snapshot readers.
-const XrayRenderVersion uint8 = 127
+const XrayRenderVersion uint8 = 255
 
 func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 	return renderXrayConfiguration(plan, XrayRenderVersion)
@@ -227,7 +231,7 @@ func RenderXrayConfiguration(plan XrayPlan) ([]byte, error) {
 
 func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 	base := version &^ 64
-	if base > 3 && base != 7 && base != 15 && base != 31 && base != 63 {
+	if base > 3 && base != 7 && base != 15 && base != 31 && base != 63 && base != 191 {
 		return nil, errors.New("glivela: unsupported Xray render version")
 	}
 	if base >= 2 {
@@ -238,6 +242,9 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 	}
 	if base&32 == 0 && slices.ContainsFunc(plan.Grants, func(g RouteGrant) bool { return g.UDP }) {
 		return nil, errors.New("glivela: UDP forwarding requires the current entry format")
+	}
+	if base&128 == 0 && (plan.Observatory != nil || len(plan.RelayEdges) != 0 || len(plan.RelayPools) != 0 || slices.ContainsFunc(plan.Grants, func(g RouteGrant) bool { return g.RelayPoolID != "" })) {
+		return nil, errors.New("glivela: relay pools require the current entry format")
 	}
 	projection, err := prepareXrayProjection(plan)
 	if err != nil {
@@ -368,7 +375,91 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 		rules = append(rules, map[string]any{"type": "field", "user": users, "network": "tcp", "ip": []string{link.Address + "/32"}, "port": strconv.Itoa(link.Port), "outboundTag": tag})
 	}
 	composite := false
+	balancers := []any{}
+	observedSelectors := []string{}
+	emittedPools := map[string]bool{}
+	for _, edge := range projection.relayEdges {
+		outbounds = append(outbounds, map[string]any{
+			"tag":         RelayEdgeOutboundTag(edge.ID),
+			"protocol":    "shadowsocks",
+			"sendThrough": edge.Source,
+			"settings": map[string]any{
+				"servers": []any{map[string]any{
+					"address":  edge.Address,
+					"port":     edge.Port,
+					"method":   SS2022Method,
+					"password": edge.Password,
+				}},
+			},
+		})
+	}
 	for _, grant := range projection.grants {
+		if grant.RelayPoolID != "" {
+			pool := projection.relayPools[grant.PoolKey()]
+			if len(pool.Candidates) == 0 {
+				// Empty authorized pool routes explicitly to blocked while
+				// preserving credential identity, subscription and traffic ledger.
+				rules = append(rules, map[string]any{"type": "field", "user": []string{grant.Route.User}, "outboundTag": "blocked"})
+				continue
+			}
+			balTag := PoolBalancerTag(pool.Key)
+			if !emittedPools[pool.Key] {
+				emittedPools[pool.Key] = true
+				prefix := PoolCandidatePrefix(pool.Key)
+				observedSelectors = append(observedSelectors, prefix)
+				for idx, cand := range pool.Candidates {
+					out := map[string]any{
+						"tag":      PoolCandidateTag(pool.Key, idx),
+						"protocol": "shadowsocks",
+						"settings": map[string]any{
+							"servers": []any{map[string]any{
+								"address":  cand.LandingAddress,
+								"port":     cand.LandingPort,
+								"method":   SS2022Method,
+								"password": cand.LandingPass,
+							}},
+						},
+						"streamSettings": map[string]any{
+							"sockopt": map[string]any{"dialerProxy": RelayEdgeOutboundTag(cand.RelayEdgeID)},
+						},
+					}
+					if pool.UDP {
+						out["mux"] = map[string]any{"enabled": true, "concurrency": -1, "xudpConcurrency": 1, "xudpProxyUDP443": "reject"}
+					}
+					outbounds = append(outbounds, out)
+				}
+				expected := min(pool.Strategy.Expected, len(pool.Candidates))
+				settings := map[string]any{
+					"expected": expected,
+					"maxRTT":   strconv.Itoa(pool.Strategy.MaxRTTMS) + "ms",
+				}
+				if pool.Strategy.Tolerance > 0 {
+					settings["tolerance"] = pool.Strategy.Tolerance
+				}
+				balancers = append(balancers, map[string]any{
+					"tag":         balTag,
+					"selector":    []string{prefix},
+					"fallbackTag": PoolCandidateTag(pool.Key, 0),
+					"strategy": map[string]any{
+						"type":     "leastLoad",
+						"settings": settings,
+					},
+				})
+			}
+			scopeBalancer := func(network string) map[string]any {
+				return map[string]any{"type": "field", "inboundTag": []string{grant.InboundTag}, "user": []string{grant.Route.User}, "network": network, "balancerTag": balTag}
+			}
+			if grant.UDP {
+				rules = append(rules, scopeBalancer("tcp,udp"))
+			} else {
+				rules = append(rules,
+					map[string]any{"type": "field", "inboundTag": []string{grant.InboundTag}, "user": []string{grant.Route.User}, "network": "udp", "outboundTag": "blocked"},
+					scopeBalancer("tcp"),
+				)
+			}
+			rules = append(rules, map[string]any{"type": "field", "user": []string{grant.Route.User}, "outboundTag": "blocked"})
+			continue
+		}
 		peer := projection.peers[grant.PeerKey()]
 		tag := routeOutboundTag(grant.ID)
 		if grant.UDP && (peer.Transport.Protocol != "ss2022" || grant.IPv4EgressID != "" && projection.peers[grant.IPv4EgressID].Transport.Protocol != "ss2022") {
@@ -417,25 +508,48 @@ func renderXrayConfiguration(plan XrayPlan, version uint8) ([]byte, error) {
 	if version&64 != 0 {
 		logConfig["access"] = "none"
 	}
+	apiServices := []string{"HandlerService", "LoggerService", "StatsService"}
+	routing := map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules}
+	if len(balancers) > 0 {
+		routing["balancers"] = balancers
+		apiServices = []string{"HandlerService", "LoggerService", "ObservatoryService", "StatsService"}
+	}
 	config := map[string]any{
 		"log":       logConfig,
 		"inbounds":  inbounds,
 		"outbounds": outbounds,
-		"api":       map[string]any{"tag": "api", "services": []string{"HandlerService", "LoggerService", "StatsService"}},
+		"api":       map[string]any{"tag": "api", "services": apiServices},
 		"stats":     map[string]any{},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true}},
 			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},
 		},
-		"routing": map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
+		"routing": routing,
 		"dns":     map[string]any{"tag": "resolver", "queryStrategy": "UseIP", "servers": resolverAddresses},
+	}
+	if len(observedSelectors) > 0 {
+		slices.Sort(observedSelectors)
+		obs := DefaultObservatoryConfig()
+		if plan.Observatory != nil {
+			obs = *plan.Observatory
+		}
+		config["burstObservatory"] = map[string]any{
+			"subjectSelector": observedSelectors,
+			"pingConfig": map[string]any{
+				"destination":  obs.Destination,
+				"connectivity": "",
+				"interval":     strconv.Itoa(obs.IntervalSec) + "s",
+				"sampling":     obs.Sampling,
+				"timeout":      strconv.Itoa(obs.TimeoutSec) + "s",
+			},
+		}
 	}
 	if base < 2 && plan.PublicSSH != nil {
 		// Resolve protected SSH targets before a user-scoped route can match.
-		config["routing"] = map[string]any{"domainStrategy": "IPOnDemand", "rules": rules}
+		routing["domainStrategy"] = "IPOnDemand"
 	}
 	if composite {
-		config["routing"] = map[string]any{"domainStrategy": "IPOnDemand", "rules": rules}
+		routing["domainStrategy"] = "IPOnDemand"
 		// Local DoH bypasses proxy routing and control-plane DNS. Xray owns
 		// resolution and caching; no Agent-side resolver or scripts are needed.
 		config["dns"] = map[string]any{
@@ -492,11 +606,18 @@ type xrayProjection struct {
 	credentials       map[string][]CredentialMaterial
 	grants            []RouteGrant
 	peers             map[string]RoutePeer
+	relayEdges        []EntryRelayEdge
+	relayPools        map[string]EntryRelayPool
 }
 
 func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	if err := plan.PublicSSH.Validate(); err != nil {
 		return xrayProjection{}, err
+	}
+	if plan.Observatory != nil {
+		if err := plan.Observatory.Validate(); err != nil {
+			return xrayProjection{}, err
+		}
 	}
 	for _, endpoint := range plan.RealityEndpoints {
 		for _, address := range []string{endpoint.AdvertiseHost, endpoint.ListenAddress, endpoint.IPv4ListenAddress} {
@@ -516,7 +637,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	if err := plan.NativeEgress.Validate(); err != nil {
 		return xrayProjection{}, err
 	}
-	if plan.Revision == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) > 256 || len(plan.Credentials) > 65536 || len(plan.Grants) > 65536 || len(plan.Peers) > 1024 {
+	if plan.Revision == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) == 0 || len(plan.RealityEndpoints)+len(plan.HysteriaEndpoints) > 256 || len(plan.Credentials) > 65536 || len(plan.Grants) > 65536 || len(plan.Peers) > 1024 || len(plan.RelayEdges) > 1024 || len(plan.RelayPools) > 1024 {
 		return xrayProjection{}, errors.New("glivela: invalid Xray plan")
 	}
 	if len(plan.ClientLinks) > 1000 {
@@ -532,7 +653,7 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 		}
 		seenLinks[link.ID], sockets[socket] = true, true
 	}
-	projection := xrayProjection{credentials: map[string][]CredentialMaterial{}, peers: map[string]RoutePeer{}}
+	projection := xrayProjection{credentials: map[string][]CredentialMaterial{}, peers: map[string]RoutePeer{}, relayPools: map[string]EntryRelayPool{}}
 	entryTags, routeTags, tags, ports := map[string][]string{}, map[string]string{}, map[string]bool{}, map[string]bool{}
 	projection.realityEndpoints = slices.Clone(plan.RealityEndpoints)
 	slices.SortFunc(projection.realityEndpoints, func(a, b RealityEndpoint) int { return strings.Compare(a.EntryID, b.EntryID) })
@@ -570,6 +691,27 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 		}
 		projection.peers[peer.PeerKey()] = peer
 	}
+	edgesByID := map[string]EntryRelayEdge{}
+	for _, edge := range plan.RelayEdges {
+		if edge.Validate() != nil || edgesByID[edge.ID].ID != "" {
+			return xrayProjection{}, errors.New("glivela: conflicting entry relay edge")
+		}
+		edgesByID[edge.ID] = edge
+		projection.relayEdges = append(projection.relayEdges, edge)
+	}
+	slices.SortFunc(projection.relayEdges, func(a, b EntryRelayEdge) int { return strings.Compare(a.ID, b.ID) })
+	for _, pool := range plan.RelayPools {
+		if pool.Validate() != nil || projection.relayPools[pool.Key].Key != "" {
+			return xrayProjection{}, errors.New("glivela: conflicting entry relay pool")
+		}
+		for _, cand := range pool.Candidates {
+			edge, ok := edgesByID[cand.RelayEdgeID]
+			if !ok || edge.RelayNodeID != cand.RelayNodeID || edge.Address == cand.LandingAddress {
+				return xrayProjection{}, errors.New("glivela: relay pool candidate references invalid edge")
+			}
+		}
+		projection.relayPools[pool.Key] = pool
+	}
 	materialByID := map[string]CredentialMaterial{}
 	users, identities, hysteriaIdentities := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, material := range plan.Credentials {
@@ -597,8 +739,23 @@ func prepareXrayProjection(plan XrayPlan) (xrayProjection, error) {
 	for _, grant := range grants {
 		base, hasBase := materialByID[grant.Base.ID]
 		route, hasRoute := materialByID[grant.Route.ID]
+		if grant.Validate() != nil || seenGrants[grant.ID] || !hasBase || !hasRoute || base.Credential != grant.Base || route.Credential != grant.Route || usedRoutes[grant.Route.ID] || routeTags[grant.EntryID] != grant.InboundTag || !grant.Deployable() && route.Credential.Enabled {
+			return xrayProjection{}, errors.New("glivela: conflicting Xray route grant")
+		}
+		if grant.RelayPoolID != "" {
+			seenGrants[grant.ID], usedRoutes[grant.Route.ID] = true, true
+			if !grant.Deployable() {
+				continue
+			}
+			pool, hasPool := projection.relayPools[grant.PoolKey()]
+			if !hasPool || pool.GrantID != grant.ID || pool.AccountID != grant.AccountID || pool.PoolID != grant.RelayPoolID || pool.EgressID != grant.EgressID || pool.UDP != grant.UDP {
+				return xrayProjection{}, errors.New("glivela: conflicting Xray relay pool grant")
+			}
+			projection.grants = append(projection.grants, grant)
+			continue
+		}
 		peer, hasPeer := projection.peers[grant.PeerKey()]
-		if grant.Validate() != nil || seenGrants[grant.ID] || !hasBase || !hasRoute || base.Credential != grant.Base || route.Credential != grant.Route || usedRoutes[grant.Route.ID] || !hasPeer || peer.EgressID != grant.EgressID || routeTags[grant.EntryID] != grant.InboundTag || !grant.Deployable() && route.Credential.Enabled {
+		if !hasPeer || peer.EgressID != grant.EgressID {
 			return xrayProjection{}, errors.New("glivela: conflicting Xray route grant")
 		}
 		seenGrants[grant.ID], usedRoutes[grant.Route.ID] = true, true

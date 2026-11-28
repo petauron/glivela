@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -87,6 +88,38 @@ func (s *Store) RetireEntry(ctx context.Context, change RetireEntryChange) error
 			return errors.New("control: retire owned server transport first")
 		}
 	}
+	for _, route := range next.PooledRoutes {
+		if route.EntryID == change.ID || route.EgressID == change.ID {
+			return errors.New("control: disable and delete pooled routes first")
+		}
+	}
+	next.TwoHopEIHBindings = maps.Clone(next.TwoHopEIHBindings)
+	for id, b := range next.TwoHopEIHBindings {
+		if b.EntryID != change.ID && b.EgressID != change.ID {
+			continue
+		}
+		for _, a := range next.Plan.Accounts {
+			for _, g := range a.Grants {
+				if !next.DeletedRoutes[g.ID] && g.Enabled && g.EntryID == b.EntryID && (g.EgressID == b.EgressID || g.IPv4EgressID == b.EgressID) {
+					return errors.New("control: retire two-hop EIH bindings first")
+				}
+			}
+		}
+		delete(next.TwoHopEIHBindings, id)
+	}
+	if len(next.TwoHopEIHBindings) == 0 {
+		next.TwoHopEIHBindings = nil
+	}
+	for _, cutover := range s.socketCutovers {
+		if cutover.TargetNodeID == change.ID {
+			return refused
+		}
+		for _, c := range cutover.Consumers {
+			if c.EntryID == change.ID {
+				return refused
+			}
+		}
+	}
 	next.Endpoints = slices.Clone(next.Endpoints)
 	index := slices.IndexFunc(next.Endpoints, func(e glivela.ImportEndpoint) bool { return e.Reality.EntryID == change.ID })
 	if index < 0 || realityChangePending(next.Endpoints[index]) {
@@ -122,7 +155,8 @@ func (s *Store) RetireEntry(ctx context.Context, change RetireEntryChange) error
 	if err != nil || next.Validate() != nil {
 		return refused
 	}
-	projected, _, err := projectBusinessEntries(s.nodes, next, now)
+	gcUnreferencedRelayPoolCredentials(&next, s.nodes, s.socketCutovers)
+	projected, _, err := s.projectBusinessLocked(s.nodes, next, now)
 	if err != nil || !reflect.DeepEqual(projected, s.nodes) {
 		return errors.New("control: retirement would change another runtime")
 	}

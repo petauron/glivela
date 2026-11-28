@@ -363,6 +363,84 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 			_ = json.NewEncoder(w).Encode(struct {
 				Saved bool `json:"saved"`
 			}{true})
+		case "/v1/admin/relay-pools":
+			var input RelayPoolChange
+			if decode(http.MaxBytesReader(w, r.Body, 64<<10), &input) != nil {
+				http.Error(w, "invalid relay pool request", http.StatusBadRequest)
+				return
+			}
+			result, err := store.ChangeRelayPool(r.Context(), input)
+			if err != nil {
+				http.Error(w, "relay pool change not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(result)
+		case "/v1/admin/entry-observatory":
+			var input EntryRelayConfigChange
+			if decode(http.MaxBytesReader(w, r.Body, 8192), &input) != nil {
+				http.Error(w, "invalid entry observatory request", http.StatusBadRequest)
+				return
+			}
+			view, err := store.ChangeEntryRelayConfig(r.Context(), input)
+			if err != nil {
+				http.Error(w, "entry observatory change not confirmed", http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(view)
+		case "/v1/admin/socket-cutover":
+			var input SocketCutoverRequest
+			if decode(http.MaxBytesReader(w, r.Body, 8192), &input) != nil {
+				http.Error(w, "invalid socket cutover request", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			switch input.Action {
+			case "inspect":
+				plan, err := store.InspectSocketCutover(input.TargetNodeID, input.Address)
+				if err != nil {
+					http.Error(w, "socket cutover inspection unavailable", http.StatusConflict)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(plan)
+			case "start":
+				view, err := store.StartSocketCutover(r.Context(), input.TargetNodeID, input.Address, input.ExpectedTargetRevision)
+				if err != nil {
+					http.Error(w, "socket cutover start refused", http.StatusConflict)
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(view)
+			case "advance":
+				view, err := store.AdvanceSocketCutover(r.Context(), input.CutoverID)
+				if err != nil {
+					http.Error(w, "socket cutover advance refused", http.StatusConflict)
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(view)
+			case "rollback":
+				view, err := store.RollbackSocketCutover(r.Context(), input.CutoverID)
+				if err != nil {
+					http.Error(w, "socket cutover rollback refused", http.StatusConflict)
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(view)
+			case "cutover-legacy":
+				result, err := store.CutoverLegacyPooledRoute(r.Context(), input.GrantID)
+				if err != nil {
+					http.Error(w, "legacy three-hop cutover not ready", http.StatusConflict)
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(result)
+			default:
+				http.Error(w, "unsupported socket cutover action", http.StatusBadRequest)
+			}
 		case "/v1/admin/routes":
 			var request RouteChange
 			if decode(http.MaxBytesReader(w, r.Body, 8192), &request) != nil {

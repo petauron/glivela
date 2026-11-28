@@ -437,8 +437,9 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 			"198.51.100.21/32", // relay-dual IPv4 24000 listener
 			"198.51.100.34/32", // synthetic documentation probe/TCP/UDP target
 			"203.0.113.21/32",  // relay-dual fixed IPv4 landing exit
-			"203.0.113.51/32",  // landing-1 fixed IPv4 exit
+			"203.0.113.51/32",  // landing-1 primary fixed IPv4 exit
 			"203.0.113.52/32",  // landing-2 fixed IPv4 exit
+			"203.0.113.53/32",  // landing-1 secondary fixed IPv4 exit (same landing, distinct EIH uPSK)
 			"192.168.50.3/32",  // forbidden RFC1918 private destination
 		},
 		[]string{
@@ -482,16 +483,17 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 	verifyTCPWitnessReachable(t, "[2001:db8:240::99]:24000", "2001:db8:240::10")
 
 	const (
-		relayDualIPSK = "AAECAwQFBgcICQoLDA0ODw=="
-		upskV6Landing = "EBESExQVFhcYGRobHB0eHw=="
-		upskV6Relay   = "ICEiIyQlJicoKSorLC0uLw=="
-		upskV4Relay   = "MDEyMzQ1Njc4OTo7PD0+Pw=="
-		upskTempRelay = "Q0RFRkdISUpLTE1OT1BRUg=="
-		upskUnknown   = "f359fHx7enl4d3Z1dHNycQ=="
-		landing1IPSK  = "QEFCQ0RFRkdISUpLTE1OTw=="
-		landing1UPSK  = "UFFSU1RVVldYWVpbXF1eXw=="
-		landing2IPSK  = "YGFhYmNkZWZnaGlqa2xtbg=="
-		landing2UPSK  = "b3BxcnN0dXZ3eHl6e3x9fg=="
+		relayDualIPSK   = "AAECAwQFBgcICQoLDA0ODw=="
+		upskV6Landing   = "EBESExQVFhcYGRobHB0eHw=="
+		upskV6Relay     = "ICEiIyQlJicoKSorLC0uLw=="
+		upskV4Relay     = "MDEyMzQ1Njc4OTo7PD0+Pw=="
+		upskTempRelay   = "Q0RFRkdISUpLTE1OT1BRUg=="
+		upskUnknown     = "f359fHx7enl4d3Z1dHNycQ=="
+		landing1IPSK    = "QEFCQ0RFRkdISUpLTE1OTw=="
+		landing1UPSK    = "UFFSU1RVVldYWVpbXF1eXw=="
+		landing1AltUPSK = "YWJjZGVmZ2hpamtsbW5vcA=="
+		landing2IPSK    = "YGFhYmNkZWZnaGlqa2xtbg=="
+		landing2UPSK    = "b3BxcnN0dXZ3eHl6e3x9fg=="
 	)
 
 	landing1 := startManagedXray(t, ctx, xrayBin, dir, "landing-1",
@@ -501,7 +503,10 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 			listenIPv6:    "2001:db8:240::31",
 			serverIPSK:    landing1IPSK,
 			defaultEgress: "203.0.113.51",
-			clients:       []eihRouteClient{{email: "relay-dual-l1", upsk: landing1UPSK, sourceCIDR: "2001:db8:240::21/128", allowUDP: true}},
+			clients: []eihRouteClient{
+				{email: "relay-dual-l1", upsk: landing1UPSK, sourceCIDR: "2001:db8:240::21/128", allowUDP: true},
+				{email: "relay-dual-l1-alt", upsk: landing1AltUPSK, sourceCIDR: "2001:db8:240::21/128", allowUDP: true, egressIP: "203.0.113.53"},
+			},
 		}))
 	defer landing1.Stop()
 
@@ -568,6 +573,8 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 			socksTestInbound("in-temp-upsk", 19288),
 			socksTestInbound("in-hk-landing-allow443", 19289),
 			socksTestInbound("in-l2-v4-denied", 19290),
+			socksTestInbound("in-no-sendthrough", 19291),
+			socksTestInbound("in-l1-alt", 19292),
 		},
 		"outbounds": []any{
 			map[string]any{"tag": "blocked", "protocol": "blackhole"},
@@ -577,11 +584,14 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 			ss2022ClientOutbound("relay-v6-xudp", "2001:db8:240::21", 24000, relayDualIPSK+":"+upskV6Relay, "2001:db8:240::10", "", true, "allow"),
 			ss2022ClientOutbound("relay-v4", "198.51.100.21", 24000, relayDualIPSK+":"+upskV4Relay, "192.0.2.10", "", false, ""),
 			ss2022ClientOutbound("path-l1", "2001:db8:240::31", 24000, landing1IPSK+":"+landing1UPSK, "", "relay-v6", true, "reject"),
+			ss2022ClientOutbound("path-l1-alt", "2001:db8:240::31", 24000, landing1IPSK+":"+landing1AltUPSK, "", "relay-v6", true, "reject"),
 			ss2022ClientOutbound("path-l2", "2001:db8:240::32", 24000, landing2IPSK+":"+landing2UPSK, "", "relay-v6", true, "reject"),
 			ss2022ClientOutbound("v4-l1", "2001:db8:240::31", 24000, landing1IPSK+":"+landing1UPSK, "", "relay-v4", false, ""),
 			ss2022ClientOutbound("v4-l2", "2001:db8:240::32", 24000, landing2IPSK+":"+landing2UPSK, "", "relay-v4", false, ""),
 			ss2022ClientOutbound("wrong-source-relay", "2001:db8:240::21", 24000, relayDualIPSK+":"+upskV6Relay, "2001:db8:240::99", "", false, ""),
 			ss2022ClientOutbound("wrong-source-path", "2001:db8:240::31", 24000, landing1IPSK+":"+landing1UPSK, "", "wrong-source-relay", false, ""),
+			ss2022ClientOutbound("no-sendthrough-relay", "2001:db8:240::21", 24000, relayDualIPSK+":"+upskV6Relay, "", "", false, ""),
+			ss2022ClientOutbound("no-sendthrough-path", "2001:db8:240::31", 24000, landing1IPSK+":"+landing1UPSK, "", "no-sendthrough-relay", false, ""),
 			ss2022ClientOutbound("unknown-upsk-relay", "2001:db8:240::21", 24000, relayDualIPSK+":"+upskUnknown, "2001:db8:240::10", "", false, ""),
 			ss2022ClientOutbound("unknown-upsk-path", "2001:db8:240::31", 24000, landing1IPSK+":"+landing1UPSK, "", "unknown-upsk-relay", false, ""),
 			ss2022ClientOutbound("temp-upsk-relay", "2001:db8:240::21", 24000, relayDualIPSK+":"+upskTempRelay, "2001:db8:240::10", "", false, ""),
@@ -592,19 +602,21 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 				map[string]any{"type": "field", "inboundTag": []string{"in-hk-landing"}, "outboundTag": "twohop-hk-landing"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-hk-landing-allow443"}, "outboundTag": "twohop-hk-landing-allow443"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-l1"}, "outboundTag": "path-l1"},
+				map[string]any{"type": "field", "inboundTag": []string{"in-l1-alt"}, "outboundTag": "path-l1-alt"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-l2"}, "outboundTag": "path-l2"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-l1-v4"}, "outboundTag": "v4-l1"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-l2-v4-denied"}, "outboundTag": "v4-l2"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-abuse-relay"}, "outboundTag": "relay-v6"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-abuse-relay-xudp"}, "outboundTag": "relay-v6-xudp"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-wrong-source"}, "outboundTag": "wrong-source-path"},
+				map[string]any{"type": "field", "inboundTag": []string{"in-no-sendthrough"}, "outboundTag": "no-sendthrough-path"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-unknown-upsk"}, "outboundTag": "unknown-upsk-path"},
 				map[string]any{"type": "field", "inboundTag": []string{"in-temp-upsk"}, "outboundTag": "temp-upsk-path"},
 			},
 		},
 	}
 	entryReady := []string{"127.0.0.1:19086"}
-	for p := 19280; p <= 19290; p++ {
+	for p := 19280; p <= 19292; p++ {
 		entryReady = append(entryReady, fmt.Sprintf("127.0.0.1:%d", p))
 	}
 	entry := startManagedXray(t, ctx, xrayBin, dir, "entry-isolation", entryReady, entryCfg)
@@ -640,6 +652,20 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 	}
 	if err := assertSOCKS5UDPEcho("127.0.0.1:19281", "198.51.100.34:8443", "203.0.113.51", 256); err != nil {
 		t.Fatalf("three-hop landing-1 XUDP failed: %v", err)
+	}
+	// Same relay-v6 physical edge + same landing-1 node with a second distinct
+	// EIH uPSK must independently select fixed exit 203.0.113.53 for TCP and XUDP.
+	if err := assertSOCKS5TCPEcho("127.0.0.1:19292", "198.51.100.34:8444", "203.0.113.53", 256); err != nil {
+		t.Fatalf("three-hop landing-1 secondary exit TCP failed: %v", err)
+	}
+	if err := assertSOCKS5UDPEcho("127.0.0.1:19292", "198.51.100.34:8443", "203.0.113.53", 256); err != nil {
+		t.Fatalf("three-hop landing-1 secondary exit XUDP failed: %v", err)
+	}
+	if err := assertSOCKS5TCPEcho("127.0.0.1:19281", "198.51.100.34:8444", "203.0.113.51", 256); err != nil {
+		t.Fatalf("three-hop landing-1 primary exit TCP regressed: %v", err)
+	}
+	if err := assertSOCKS5UDPEcho("127.0.0.1:19281", "198.51.100.34:8443", "203.0.113.51", 256); err != nil {
+		t.Fatalf("three-hop landing-1 primary exit XUDP regressed: %v", err)
 	}
 	if err := assertSOCKS5TCPEcho("127.0.0.1:19282", "198.51.100.34:8444", "203.0.113.52", 256); err != nil {
 		t.Fatalf("three-hop landing-2 TCP failed: %v", err)
@@ -705,17 +731,21 @@ func TestOfficialCoreSinglePortEIHAndIsolation(t *testing.T) {
 	assertSOCKS5UDPDenied(t, "127.0.0.1:19287", "198.51.100.34:8443", udpObs)
 	assertSOCKS5UDPDenied(t, "127.0.0.1:19287", "[2001:db8:240::34]:8443", v6UDPObs)
 
-	// 3. Wrong source IP, unknown uPSK, and genuine before/after EIH uPSK revocation
-	// (removing ONLY the clients[] entry while retaining the routing rule).
+	// 3. Wrong source IP, missing sendThrough (kernel picks non-authorized loopback
+	// source instead of explicit 2001:db8:240::10), unknown uPSK, and genuine
+	// before/after EIH uPSK revocation (removing ONLY clients[] while retaining rule).
 	beforeAuthHits := tcpObs.total()
 	if err := assertSOCKS5TCPEcho("127.0.0.1:19285", "198.51.100.34:8444", "203.0.113.51", 64); err == nil {
 		t.Fatal("wrong source IP with valid uPSK unexpectedly passed")
+	}
+	if err := assertSOCKS5TCPEcho("127.0.0.1:19291", "198.51.100.34:8444", "203.0.113.51", 64); err == nil {
+		t.Fatal("relay edge without explicit sendThrough unexpectedly passed")
 	}
 	if err := assertSOCKS5TCPEcho("127.0.0.1:19286", "198.51.100.34:8444", "203.0.113.51", 64); err == nil {
 		t.Fatal("unknown uPSK unexpectedly passed")
 	}
 	if tcpObs.total() != beforeAuthHits {
-		t.Fatalf("unauthorized source or unknown uPSK reached target: before=%d after=%d", beforeAuthHits, tcpObs.total())
+		t.Fatalf("unauthorized source, missing sendThrough, or unknown uPSK reached target: before=%d after=%d", beforeAuthHits, tcpObs.total())
 	}
 
 	// Prove upskTempRelay works BEFORE revocation.
@@ -1262,6 +1292,7 @@ type eihRouteClient struct {
 	upsk       string
 	sourceCIDR string
 	allowUDP   bool
+	egressIP   string
 }
 
 type eihLandingSpec struct {
@@ -1278,16 +1309,41 @@ func buildEIHLandingConfig(spec eihLandingSpec) map[string]any {
 	rules := []any{
 		map[string]any{"type": "field", "ip": blockedRouteIPs, "outboundTag": "deny"},
 	}
+	makeEgressOutbound := func(tag, sendThrough string) map[string]any {
+		return map[string]any{
+			"tag":         tag,
+			"protocol":    "freedom",
+			"sendThrough": sendThrough,
+			"settings": map[string]any{
+				"targetStrategy": "ForceIPv4",
+				// Allow only the synthetic documentation witness target while retaining
+				// full RFC1918 and special-purpose blocks for negative controls.
+				"finalRules": []any{
+					map[string]any{"action": "allow", "ip": []string{relayPoolDocTargetCIDR}},
+					map[string]any{"action": "block", "ip": append(slices.Clone(blockedIPv4), "::/0"), "blockDelay": "0"},
+				},
+			},
+		}
+	}
+	outbounds := []any{
+		map[string]any{"tag": "deny", "protocol": "blackhole"},
+		makeEgressOutbound("egress", spec.defaultEgress),
+	}
 	for _, c := range spec.clients {
 		clients = append(clients, map[string]any{"password": c.upsk, "email": c.email, "level": 0})
+		outboundTag := "egress"
+		if c.egressIP != "" && c.egressIP != spec.defaultEgress {
+			outboundTag = "egress-" + c.email
+			outbounds = append(outbounds, makeEgressOutbound(outboundTag, c.egressIP))
+		}
 		if c.allowUDP {
 			rules = append(rules,
 				map[string]any{"type": "field", "inboundTag": []string{"ss-v6-24000"}, "user": []string{c.email}, "source": []string{c.sourceCIDR}, "network": "udp", "port": "443", "outboundTag": "deny"},
-				map[string]any{"type": "field", "inboundTag": []string{"ss-v6-24000"}, "user": []string{c.email}, "source": []string{c.sourceCIDR}, "network": "tcp,udp", "outboundTag": "egress"},
+				map[string]any{"type": "field", "inboundTag": []string{"ss-v6-24000"}, "user": []string{c.email}, "source": []string{c.sourceCIDR}, "network": "tcp,udp", "outboundTag": outboundTag},
 			)
 		} else {
 			rules = append(rules,
-				map[string]any{"type": "field", "inboundTag": []string{"ss-v6-24000"}, "user": []string{c.email}, "source": []string{c.sourceCIDR}, "network": "tcp", "outboundTag": "egress"},
+				map[string]any{"type": "field", "inboundTag": []string{"ss-v6-24000"}, "user": []string{c.email}, "source": []string{c.sourceCIDR}, "network": "tcp", "outboundTag": outboundTag},
 			)
 		}
 	}
@@ -1312,24 +1368,8 @@ func buildEIHLandingConfig(spec eihLandingSpec) map[string]any {
 				},
 			},
 		},
-		"outbounds": []any{
-			map[string]any{"tag": "deny", "protocol": "blackhole"},
-			map[string]any{
-				"tag":         "egress",
-				"protocol":    "freedom",
-				"sendThrough": spec.defaultEgress,
-				"settings": map[string]any{
-					"targetStrategy": "ForceIPv4",
-					// Allow only the synthetic documentation witness target while retaining
-					// full RFC1918 and special-purpose blocks for negative controls.
-					"finalRules": []any{
-						map[string]any{"action": "allow", "ip": []string{relayPoolDocTargetCIDR}},
-						map[string]any{"action": "block", "ip": append(slices.Clone(blockedIPv4), "::/0"), "blockDelay": "0"},
-					},
-				},
-			},
-		},
-		"routing": map[string]any{"domainStrategy": "AsIs", "rules": rules},
+		"outbounds": outbounds,
+		"routing":   map[string]any{"domainStrategy": "AsIs", "rules": rules},
 	}
 }
 
