@@ -194,6 +194,10 @@ jobs:
           run_case udp-tcp-ipv6-ipv4 sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER=ipv6 GLIVELA_UDP_EGRESS_FAMILY=ipv4 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
           run_case udp-tcp-ipv6-ipv6 sudo env GLIVELA_LANDING_UDP_TEST=1 GLIVELA_UDP_LISTENER=ipv6 GLIVELA_UDP_EGRESS_FAMILY=ipv6 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestRenderedLandingUDPOverTCP$' -test.v -test.timeout 45s
           wait_cases
+          run_case relay-pool-failover sudo env GLIVELA_RELAY_POOL_CORE_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestOfficialCoreRelayPoolFailover$' -test.v -test.timeout 140s
+          run_case relay-pool-degraded-outage sudo env GLIVELA_RELAY_POOL_CORE_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestOfficialCoreRelayPoolDegradedAndOutage$' -test.v -test.timeout 140s
+          run_case relay-pool-eih-isolation sudo env GLIVELA_RELAY_POOL_CORE_TEST=1 GLIVELA_XRAY_BINARY="$RUNNER_TEMP/native-runtime/xray" unshare --net "$RUNNER_TEMP/glivela-dns.test" -test.run '^TestOfficialCoreSinglePortEIHAndIsolation$' -test.v -test.timeout 120s
+          wait_cases
       - name: Verify actual entry account authentication in isolated namespace
         run: |
           set -eu
