@@ -529,7 +529,7 @@ func (s *Store) subscriptionPeerAuthorized(entry Node, landingID string, now tim
 			}
 			if strings.Contains(peer.Transport.Key, ":") {
 				serverKey, userKey, cut := strings.Cut(peer.Transport.Key, ":")
-				if !cut || peer.Port != glivela.RelayPoolPort {
+				if !cut || peer.Port != glivela.RelayPoolPort || authorized.EIHAddress != peer.Transport.PublicAddress {
 					continue
 				}
 				for _, l := range node.Desired.Landing.EIHListeners {

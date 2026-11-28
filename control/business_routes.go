@@ -7,6 +7,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -463,6 +464,28 @@ func (s *Store) managedRouteReactivationCertificate(change RouteChange) (string,
 				continue
 			}
 			if peer.Transport.ClientListenerID == "" {
+				if strings.Contains(peer.Transport.Key, ":") {
+					for cert, target := range s.nodes {
+						if target.ID != change.EgressID || target.Desired.Landing == nil {
+							continue
+						}
+						authorized, ok := target.RouteEntries[entry.ID]
+						if !ok || entry.Desired.EntryNetwork.Source == nil || authorized.CertificateID != entry.CertificateID || authorized.Address != entry.Desired.EntryNetwork.Source.Address || authorized.EIHAddress != peer.Transport.PublicAddress {
+							return "", refused
+						}
+						for _, network := range entry.Desired.EntryNetwork.Peers {
+							if network.PeerKey() != peer.PeerKey() {
+								continue
+							}
+							now := time.Now()
+							if !s.availableRuntime(target, now) || target.Receipt.ManagementIdentity == nil || *target.Receipt.ManagementIdentity != network.Identity || network.Identity.Address != target.Desired.Landing.Address {
+								return "", refused
+							}
+							return cert, nil
+						}
+					}
+					return "", refused
+				}
 				return s.managedRouteLandingCertificate(change)
 			}
 			for cert, target := range s.nodes {

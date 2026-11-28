@@ -2110,3 +2110,114 @@ func TestSocketCutoverLegacyThreeHopAndDualStackTransportPreservation(t *testing
 		t.Fatal("retired legacy-three-hop-landing TwoHopEIHBinding was not pruned after landing receipt")
 	}
 }
+
+func TestSocketCutoverDisableLastRouteSurvivesRestart(t *testing.T) {
+	s, entryCert, targetCert, grant := managedServerLandingFixture(t)
+	revision := func() uint64 { return s.business.material.Plan.Accounts[0].Account.DesiredRevision }
+	targetID := s.nodes[entryCert].Desired.EntryNetwork.Peers[0].Identity
+
+	// Single two-hop-source route on landing-example with NO pooled routes.
+	grant.ID = "single-twohop"
+	grant.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatal(err)
+	}
+	reportFreshLanding(t, s, targetCert, targetID)
+	reportFreshEntry(t, s, entryCert)
+
+	// Complete Option A cutover on 9.9.9.9:24000.
+	started, err := s.StartSocketCutover(context.Background(), "landing-example", "9.9.9.9", s.nodes[targetCert].Desired.Revision)
+	if err != nil || started.Phase != "listener-pending" {
+		t.Fatalf("StartSocketCutover failed: %+v err=%v", started, err)
+	}
+	if s.nodes[targetCert].RouteEntries["entry-example"].EIHAddress != "9.9.9.9" {
+		t.Fatalf("cutover did not persist RouteEntry.EIHAddress: %+v", s.nodes[targetCert].RouteEntries)
+	}
+	reportFreshLanding(t, s, targetCert, targetID)
+	if _, err := s.AdvanceSocketCutover(context.Background(), started.ID); err != nil {
+		t.Fatalf("AdvanceSocketCutover Stage 2 failed: %v", err)
+	}
+	reportFreshEntry(t, s, entryCert)
+	if done, err := s.AdvanceSocketCutover(context.Background(), started.ID); err != nil || !done.Completed {
+		t.Fatalf("AdvanceSocketCutover completion failed: %+v err=%v", done, err)
+	}
+
+	// Disable the ONLY route on landing-example: both Sources and EIHListeners become empty.
+	grant.Enabled = false
+	grant.ExpectedRevision = revision()
+	if _, err := s.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatalf("disable last cut-over route failed: %v", err)
+	}
+	if len(s.nodes[targetCert].Desired.Landing.Sources) != 0 || len(s.nodes[targetCert].Desired.Landing.EIHListeners) != 0 {
+		t.Fatalf("expected empty Sources and EIHListeners after disabling last route: sources=%d eih=%d",
+			len(s.nodes[targetCert].Desired.Landing.Sources), len(s.nodes[targetCert].Desired.Landing.EIHListeners))
+	}
+	// Disabled route has no active EIH user so subscription authorization MUST remain false.
+	s.mu.Lock()
+	authDisabled := s.subscriptionPeerAuthorized(s.nodes[entryCert], "landing-example", time.Now().UTC())
+	s.mu.Unlock()
+	if authDisabled {
+		t.Fatal("subscriptionPeerAuthorized accepted disabled cut-over EIH route without active EIH user")
+	}
+
+	// Restart controller (OpenStore + LoadBusiness) while Sources and EIHListeners are both empty.
+	keyPath := filepath.Join(filepath.Dir(s.path), "business.key")
+	reloaded, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatalf("OpenStore failed after disabling last cut-over EIH route: %v", err)
+	}
+	if err := reloaded.LoadBusiness(keyPath); err != nil {
+		t.Fatalf("LoadBusiness failed after disabling last cut-over EIH route: %v", err)
+	}
+	if reloaded.nodes[targetCert].RouteEntries["entry-example"].EIHAddress != "9.9.9.9" {
+		t.Fatalf("RouteEntry.EIHAddress lost across restart: %+v", reloaded.nodes[targetCert].RouteEntries)
+	}
+
+	// Re-enabling the cut-over route after restart restores its active EIH user and authorization.
+	reportFreshLanding(t, reloaded, targetCert, targetID)
+	reportFreshEntry(t, reloaded, entryCert)
+	grant.Enabled = true
+	grant.ExpectedRevision = reloaded.business.material.Plan.Accounts[0].Account.DesiredRevision
+	if _, err := reloaded.ChangeRoute(context.Background(), grant); err != nil {
+		t.Fatalf("re-enable cut-over EIH route after restart failed: %v", err)
+	}
+	if len(reloaded.nodes[targetCert].Desired.Landing.EIHListeners) != 1 {
+		t.Fatalf("expected active EIH listener restored after re-enable, got %d", len(reloaded.nodes[targetCert].Desired.Landing.EIHListeners))
+	}
+	reloaded.mu.Lock()
+	authRestored := reloaded.subscriptionPeerAuthorized(reloaded.nodes[entryCert], "landing-example", time.Now().UTC())
+	reloaded.mu.Unlock()
+	if !authRestored {
+		t.Fatal("subscriptionPeerAuthorized rejected restored cut-over EIH route after restart")
+	}
+
+	// Negative validation: forged EIHAddress on an occupied single-user socket or invalid IP must be refused.
+	for name, badEntry := range map[string]RouteEntry{
+		"occupied-single-user": {CertificateID: entryCert, Address: "100.64.0.3", EIHAddress: "9.9.9.9"},
+		"invalid-eih-ip":       {CertificateID: entryCert, Address: "100.64.0.3", EIHAddress: "10.0.0.1"},
+		"same-as-landing-ip":   {CertificateID: entryCert, Address: "100.64.0.2", EIHAddress: "9.9.9.19"},
+	} {
+		n := Node{ID: "landing-bad", CertificateID: strings.Repeat("d", 64), Desired: artifact(1), RouteEntries: map[string]RouteEntry{"entry-example": badEntry}}
+		if name == "occupied-single-user" {
+			p := *artifact(1).Landing
+			p.Transport = glivela.PrivateTransport{Protocol: "ss2022", PublicAddress: "9.9.9.9", Port: 24000, Key: "MDEyMzQ1Njc4OWFiY2RlZg=="}
+			p.Sources = []landing.Source{{Address: "100.64.0.9", TCPOnly: true, PublicAddress: "8.8.4.4"}}
+			d, derr := NewDesired(p)
+			if derr != nil {
+				t.Fatal(derr)
+			}
+			n.Desired = d
+		} else {
+			p := *artifact(1).Landing
+			p.Sources = nil
+			d, derr := NewDesired(p)
+			if derr != nil {
+				t.Fatal(derr)
+			}
+			n.Desired = d
+		}
+		if validateRouteEntries(n) == nil {
+			t.Fatalf("validateRouteEntries accepted invalid EIH RouteEntry (%s)", name)
+		}
+	}
+}

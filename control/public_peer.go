@@ -82,7 +82,7 @@ func (s *Store) publicPeerAcceptanceLocked(cert string, request landingAcceptanc
 		}
 		if strings.Contains(route.Transport.Key, ":") {
 			serverKey, userKey, ok := strings.Cut(route.Transport.Key, ":")
-			if !ok || route.Port != glivela.RelayPoolPort {
+			if !ok || route.Port != glivela.RelayPoolPort || authorized.EIHAddress != route.Transport.PublicAddress {
 				return publicPeerProof{}, refused
 			}
 			matched := false

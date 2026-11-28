@@ -812,6 +812,18 @@ func (s *Store) applyCutoverStartLocked(record SocketCutover, now time.Time) (So
 		}))
 	if !alreadySwitched {
 		target.Desired, target.Receipt, target.ReportedAt, target.Checks = candidateDesired, nil, time.Time{}, nil
+		if len(target.RouteEntries) > 0 {
+			entries := maps.Clone(target.RouteEntries)
+			for _, c := range record.Consumers {
+				if c.Kind == "two-hop-source" {
+					if re, ok := entries[c.EntryID]; ok && re.CertificateID == c.EntryCertID {
+						re.EIHAddress = record.Address
+						entries[c.EntryID] = re
+					}
+				}
+			}
+			target.RouteEntries = entries
+		}
 		nextNodes[record.TargetCertID] = target
 		if err := s.commit(nextNodes); err != nil {
 			return SocketCutoverView{}, err
@@ -1312,12 +1324,30 @@ func (s *Store) applyCutoverRollbackLocked(record SocketCutover, now time.Time) 
 			return err
 		}
 		target.Desired, target.Receipt, target.ReportedAt, target.Checks = desiredLanding, nil, time.Time{}, nil
+	}
+	routeEntriesChanged := false
+	if record.Rollback.Target.HadServerTransport && len(target.RouteEntries) > 0 {
+		entries := maps.Clone(target.RouteEntries)
+		for _, c := range record.Consumers {
+			if c.Kind == "two-hop-source" {
+				if re, ok := entries[c.EntryID]; ok && re.EIHAddress == record.Address {
+					re.EIHAddress = ""
+					entries[c.EntryID] = re
+					routeEntriesChanged = true
+				}
+			}
+		}
+		if routeEntriesChanged {
+			target.RouteEntries = entries
+		}
+	}
+	if targetChanged || routeEntriesChanged {
 		nextNodes[record.TargetCertID] = target
 	}
 
 	// 2. Targeted delta restore on live consumer entries (ONLY this cutover's peers!).
 	rolledEntries := map[string]bool{}
-	nodesChanged := targetChanged
+	nodesChanged := targetChanged || routeEntriesChanged
 	for _, prb := range record.Rollback.Peers {
 		entry, exists := nextNodes[prb.EntryCertID]
 		if !exists || entry.Desired.Entry == nil {
