@@ -67,30 +67,125 @@ export function CreateAccount({ inventory, names, disabled, save }: { inventory:
 export function CreateRoute({ inventory, names, disabled, save, latencies, now, latencyFailed }: { inventory: Inventory; names: Map<string, string>; disabled: boolean; save: (operation: string, body: unknown) => Promise<boolean>; latencies: Map<string, RouteLatency>; now: number; latencyFailed: boolean }) {
   const formID = useId();
   const id = useRef(crypto.randomUUID());
+  const [mode, setMode] = useState<"two-hop" | "pooled">("two-hop");
   const [accountID, setAccountID] = useState("");
   const [entryID, setEntryID] = useState("");
+  const [relayPoolID, setRelayPoolID] = useState("");
   const [egressID, setEgressID] = useState("");
+  const [landingAddress, setLandingAddress] = useState("");
+  const [expectedExit, setExpectedExit] = useState("");
+  const [egressIp, setEgressIp] = useState("");
+  const [ingressFamily, setIngressFamily] = useState("auto");
+  const [routeName, setRouteName] = useState("");
+  const [udp, setUdp] = useState(false);
   const [hideNative, setHideNative] = useState(false);
   useEffect(() => {
     if (inventory.routes.some(item => item.id === id.current)) {
       id.current = crypto.randomUUID();
-      setAccountID(""); setEntryID(""); setEgressID(""); setHideNative(false);
+      setAccountID(""); setEntryID(""); setRelayPoolID(""); setEgressID("");
+      setLandingAddress(""); setExpectedExit(""); setEgressIp(""); setIngressFamily("auto"); setRouteName("");
+      setUdp(false); setHideNative(false);
     }
   }, [inventory.routes]);
   const account = inventory.accounts.find(a => a.account.id === accountID);
   const entry = inventory.runtimes.find(node => node.role === "entry" && node.id === entryID);
-  const landings = entry?.peers ?? [];
+  const pools = inventory.relayPools ?? [];
+  const selectedPool = pools.find(pool => pool.id === relayPoolID);
+  const twoHopLandings = entry?.peers ?? [];
+  const pooledLandings = inventory.runtimes.filter(node => node.role === "landing" && node.id !== entryID);
+  const selectedLandingRuntime = pooledLandings.find(node => node.id === egressID);
+  const entryCapableForPool = !!entry?.relayPoolCapable;
+  const canSubmit = mode === "two-hop"
+    ? !!account && !!entry && twoHopLandings.includes(egressID)
+    : !!account && !!entry && entryCapableForPool && !!selectedPool && !!selectedLandingRuntime;
   return <form onSubmit={event => {
     event.preventDefault();
-    if (!account || !entry || !landings.includes(egressID)) return;
-    void save("routes", { id: id.current, accountId: accountID, entryId: entryID, egressId: egressID, enabled: true, hideNative, expectedRevision: account.account.desiredRevision });
+    if (!canSubmit || !account || !entry) return;
+    if (mode === "pooled") {
+      const payload: Record<string, unknown> = {
+        id: id.current,
+        accountId: accountID,
+        entryId: entryID,
+        egressId: egressID,
+        relayPoolId: relayPoolID,
+        enabled: true,
+        hideNative,
+        expectedRevision: account.account.desiredRevision,
+      };
+      if (udp) payload.udp = true;
+      if (landingAddress.trim()) payload.landingAddress = landingAddress.trim();
+      if (expectedExit.trim()) payload.expectedExit = expectedExit.trim();
+      if (egressIp.trim()) payload.egressIp = egressIp.trim();
+      if (ingressFamily !== "auto") payload.ingressFamily = ingressFamily;
+      if (routeName.trim()) payload.name = routeName.trim();
+      void save("routes", payload);
+      return;
+    }
+    const payload: Record<string, unknown> = {
+      id: id.current,
+      accountId: accountID,
+      entryId: entryID,
+      egressId: egressID,
+      enabled: true,
+      hideNative,
+      expectedRevision: account.account.desiredRevision,
+    };
+    if (udp) payload.udp = true;
+    void save("routes", payload);
   }}><FieldGroup>
+    <div className="gl-segment" role="group" aria-label="线路类型">
+      <button type="button" aria-pressed={mode === "two-hop"} onClick={() => { setMode("two-hop"); setEgressID(""); }}>两跳固定落地</button>
+      <button type="button" aria-pressed={mode === "pooled"} onClick={() => { setMode("pooled"); setEgressID(""); }}>三跳中转池</button>
+    </div>
     <Field><FieldLabel htmlFor={`${formID}-account`}>账户</FieldLabel><SelectControl id={`${formID}-account`} aria-label="账户" required disabled={disabled} value={accountID} onValueChange={setAccountID} placeholder="请选择" options={inventory.accounts.map(a => ({ value: a.account.id, label: a.account.displayName }))} /></Field>
-    <Field><FieldLabel htmlFor={`${formID}-entry`}>入口</FieldLabel><SelectControl id={`${formID}-entry`} aria-label="入口" required disabled={disabled} value={entryID} onValueChange={value => { setEntryID(value); setEgressID(""); }} placeholder="请选择" options={inventory.runtimes.filter(n => n.role === "entry").map(n => ({ value: n.id, label: names.get(n.id) ?? n.id }))} /></Field>
-    <Field><FieldLabel htmlFor={`${formID}-landing`}>已授权落地</FieldLabel><SelectControl id={`${formID}-landing`} aria-label="已授权落地" required disabled={disabled} value={egressID} onValueChange={setEgressID} placeholder="请选择" options={landings.map(id => ({ value: id, label: `${names.get(id) ?? id}${optionLatency(latencies.get(latencyKey(entryID, id)), now, latencyFailed)}` }))} /></Field>
+    <Field><FieldLabel htmlFor={`${formID}-entry`}>入口</FieldLabel><SelectControl id={`${formID}-entry`} aria-label="入口" required disabled={disabled} value={entryID} onValueChange={value => { setEntryID(value); setEgressID(""); }} placeholder="请选择" options={inventory.runtimes.filter(n => n.role === "entry").map(n => ({ value: n.id, label: `${names.get(n.id) ?? n.id}${mode === "pooled" && !n.relayPoolCapable ? "（尚未上报中转池能力）" : ""}` }))} /></Field>
+    {mode === "pooled" ? <>
+      <Field>
+        <FieldLabel htmlFor={`${formID}-pool`}>中转池</FieldLabel>
+        <SelectControl id={`${formID}-pool`} aria-label="中转池" required disabled={disabled || pools.length === 0} value={relayPoolID} onValueChange={setRelayPoolID} placeholder={pools.length ? "请选择中转池" : "请先在「中转池与拓扑」创建中转池"} options={pools.map(pool => ({ value: pool.id, label: `${pool.name}（${pool.members.filter(m => !m.drained && !m.nodeSuspended && m.runtimeReady).length}/${pool.members.length} 就绪 · expected=${pool.strategy.expected}）` }))} />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${formID}-pooled-landing`}>固定出口落地</FieldLabel>
+        <SelectControl id={`${formID}-pooled-landing`} aria-label="固定出口落地" required disabled={disabled || !entryID} value={egressID} onValueChange={value => {
+          setEgressID(value);
+          // Leave landingAddress and expectedExit empty by default so backend
+          // ChangeRoute applies its authoritative IPv6Only / Transport default.
+          setLandingAddress("");
+          setExpectedExit("");
+        }} placeholder="请选择已登记落地" options={pooledLandings.map(node => ({ value: node.id, label: `${names.get(node.id) ?? node.id}${node.egressIp ? ` · 出口 ${node.egressIp}` : ""}${node.occupiedPort24000?.length ? " · 24000 待切窗" : ""}` }))} />
+      </Field>
+      <Field><FieldLabel htmlFor={`${formID}-route-name`}>线路备注名（可选）<Input id={`${formID}-route-name`} disabled={disabled} placeholder="例如：日本固定出口（池化）" value={routeName} onChange={event => setRouteName(event.target.value)} /></FieldLabel></Field>
+      <Field>
+        <FieldLabel htmlFor={`${formID}-landing-address`}>
+          落地连接地址（留空使用后端默认地址）
+          <Input id={`${formID}-landing-address`} disabled={disabled} placeholder="留空交给控制面按落地默认传输地址选择" value={landingAddress} onChange={event => setLandingAddress(event.target.value)} />
+        </FieldLabel>
+        {selectedLandingRuntime && (selectedLandingRuntime.publicIpv4 || selectedLandingRuntime.publicIpv6) ? (
+          <div className="gl-address-hints" role="group" aria-label="落地公网候选地址">
+            <Button type="button" variant="outline" disabled={disabled || landingAddress === ""} onClick={() => setLandingAddress("")}>使用后端默认</Button>
+            {selectedLandingRuntime.publicIpv4 ? (
+              <Button type="button" variant="outline" disabled={disabled} onClick={() => setLandingAddress(selectedLandingRuntime.publicIpv4!)}>指定 IPv4：{selectedLandingRuntime.publicIpv4}</Button>
+            ) : null}
+            {selectedLandingRuntime.publicIpv6 ? (
+              <Button type="button" variant="outline" disabled={disabled} onClick={() => setLandingAddress(selectedLandingRuntime.publicIpv6!)}>指定 IPv6：{selectedLandingRuntime.publicIpv6}</Button>
+            ) : null}
+          </div>
+        ) : null}
+        <FieldDescription>双栈落地默认留空时由控制面选择默认传输地址；若中转池仅配置 IPv4 出站，请勿强制指定 IPv6 地址。</FieldDescription>
+      </Field>
+      <div className="gl-pool-member-ip-grid">
+        <Field><FieldLabel htmlFor={`${formID}-egress-ip`}>指定出口源 IP（可选）<Input id={`${formID}-egress-ip`} disabled={disabled} placeholder="留空沿用落地默认出口" value={egressIp} onChange={event => setEgressIp(event.target.value)} /></FieldLabel></Field>
+        <Field><FieldLabel htmlFor={`${formID}-expected-exit`}>期望出口 IP（可选）<Input id={`${formID}-expected-exit`} disabled={disabled} placeholder={selectedLandingRuntime?.egressIp ? `默认：${selectedLandingRuntime.egressIp}` : "留空沿用落地默认出口"} value={expectedExit} onChange={event => setExpectedExit(event.target.value)} /></FieldLabel></Field>
+      </div>
+      <Field><FieldLabel htmlFor={`${formID}-ingress-family`}>入口到中转地址族</FieldLabel><SelectControl id={`${formID}-ingress-family`} aria-label="入口到中转地址族" disabled={disabled} value={ingressFamily} onValueChange={setIngressFamily} options={[{ value: "auto", label: "自动（优先兼容的 IPv6 / IPv4）" }, { value: "ipv4", label: "仅 IPv4" }, { value: "ipv6", label: "仅 IPv6" }]} /></Field>
+      {entry && !entryCapableForPool ? <p role="alert" className="gl-inline-error">该入口尚未上报中转池渲染能力，暂不可提交三跳池化线路；请先升级入口并确认回执能力。</p> : null}
+    </> : <>
+      <Field><FieldLabel htmlFor={`${formID}-landing`}>已授权落地</FieldLabel><SelectControl id={`${formID}-landing`} aria-label="已授权落地" required disabled={disabled} value={egressID} onValueChange={setEgressID} placeholder="请选择" options={twoHopLandings.map(id => ({ value: id, label: `${names.get(id) ?? id}${optionLatency(latencies.get(latencyKey(entryID, id)), now, latencyFailed)}` }))} /></Field>
+      {entryID && egressID ? <div className="text-sm"><span className="text-muted-foreground">落地传输端口 TCP 1080 参考延迟：</span><LatencyCell value={latencies.get(latencyKey(entryID, egressID))} now={now} failed={latencyFailed} /></div> : null}
+    </>}
+    <Field><FieldLabel className="gl-toggle-label" htmlFor={`${formID}-udp`}>启用 UDP（XUDP）<input id={`${formID}-udp`} className="gl-toggle" type="checkbox" role="switch" disabled={disabled} checked={udp} onChange={event => setUdp(event.target.checked)} /></FieldLabel><FieldDescription>在既有 SS2022 TCP 隧道内承载 XUDP；UDP 443 保持阻断。</FieldDescription></Field>
     <Field><FieldLabel className="gl-toggle-label" htmlFor={`${formID}-hide-native`}>隐藏入口直连<input id={`${formID}-hide-native`} className="gl-toggle" type="checkbox" role="switch" aria-describedby={`${formID}-hide-native-hint`} disabled={disabled} checked={hideNative} onChange={event => setHideNative(event.target.checked)} /></FieldLabel><FieldDescription id={`${formID}-hide-native-hint`}>在订阅中隐藏该入口的 VLESS 直连节点，仅保留转发线路；保留原身份与历史流量。</FieldDescription></Field>
-    {entryID && egressID ? <div className="text-sm"><span className="text-muted-foreground">落地传输端口 TCP 1080 参考延迟：</span><LatencyCell value={latencies.get(latencyKey(entryID, egressID))} now={now} failed={latencyFailed} /></div> : null}
-    <Button type="submit" disabled={disabled || !account || !entry || !egressID}>新增线路</Button>
+    <Button type="submit" disabled={disabled || !canSubmit}>{mode === "pooled" ? "新增三跳池化线路" : "新增线路"}</Button>
   </FieldGroup></form>;
 }
 

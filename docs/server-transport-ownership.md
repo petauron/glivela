@@ -71,3 +71,12 @@ not required by this ownership change.
 Source preparation alone does not perform migration, delete publications or prove
 live proxy health. Migration, identity/deletion regression verification and real
 existing-route checks must complete before accepting a production cleanup.
+
+## Schema version 2 (dynamic relay pools)
+
+Transport schema version 2 extends `ImportMaterial` with named dynamic
+`RelayPools`, `PooledRoutes`, `EntryRelayConfigs`, `EIHNodeKeys`,
+`RelayPoolCredentials`, and `TwoHopEIHBindings`. Existing v1 single-relay
+three-hop `ServerTransports` are staged non-destructively with
+`pendingLegacyCutover` until downstream EIH 24000 receipts confirm readiness
+and explicit cutover runs. See [dynamic relay pools and topology](relay-pools.md).

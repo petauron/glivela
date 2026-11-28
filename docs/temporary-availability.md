@@ -41,3 +41,9 @@ the controller state and included in encrypted controller backups/restores.
 Keep it with the state directory during upgrades. Invalid files fail startup.
 Restored cached runtime observations remain invalid until fresh reports arrive.
 No platform installer change or new dependency is required.
+
+For dual-role hosts participating in a dynamic `RelayPool`, draining a single
+relay member (`/v1/admin/relay-pools`) removes it only from that pool's relay
+candidates without suspending its fixed-landing routes. Node-level temporary
+suspension here withholds both fixed-landing publication and relay-pool
+candidacy across all pools. See [dynamic relay pools and topology](relay-pools.md).

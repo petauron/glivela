@@ -103,32 +103,47 @@ type BusinessInventory struct {
 }
 
 type BusinessRoute struct {
-	UDP           bool   `json:"udp"`
-	ClientChainID string `json:"clientChainId,omitempty"`
-	RelayPoolID   string `json:"relayPoolId,omitempty"`
-	RelayID       string `json:"relayId,omitempty"`
-	ActiveRelays  int    `json:"activeRelays,omitempty"`
-	Port          int    `json:"port"`
-	IPv4Port      int    `json:"ipv4Port,omitempty"`
-	ID            string `json:"id"`
-	AccountID     string `json:"accountId"`
-	EntryID       string `json:"entryId"`
-	EgressID      string `json:"egressId"`
-	IPv4EgressID  string `json:"ipv4EgressId,omitempty"`
-	Enabled       bool   `json:"enabled"`
-	HideNative    bool   `json:"hideNative"`
-	State         string `json:"state"`
+	UDP                     bool     `json:"udp"`
+	ClientChainID           string   `json:"clientChainId,omitempty"`
+	RelayPoolID             string   `json:"relayPoolId,omitempty"`
+	PendingRelayPoolID      string   `json:"pendingRelayPoolId,omitempty"`
+	PendingLegacyCutover    bool     `json:"pendingLegacyCutover,omitempty"`
+	RetiringLegacyTransport bool     `json:"retiringLegacyTransport,omitempty"`
+	RelayID                 string   `json:"relayId,omitempty"`
+	ActiveRelays            int      `json:"activeRelays,omitempty"`
+	ActiveRelayIDs          []string `json:"activeRelayIds,omitempty"`
+	LandingAddress          string   `json:"landingAddress,omitempty"`
+	ExpectedExit            string   `json:"expectedExit,omitempty"`
+	EgressIP                string   `json:"egressIp,omitempty"`
+	IngressFamily           string   `json:"ingressFamily,omitempty"`
+	Name                    string   `json:"name,omitempty"`
+	Port                    int      `json:"port"`
+	IPv4Port                int      `json:"ipv4Port,omitempty"`
+	ID                      string   `json:"id"`
+	AccountID               string   `json:"accountId"`
+	EntryID                 string   `json:"entryId"`
+	EgressID                string   `json:"egressId"`
+	IPv4EgressID            string   `json:"ipv4EgressId,omitempty"`
+	Enabled                 bool     `json:"enabled"`
+	HideNative              bool     `json:"hideNative"`
+	State                   string   `json:"state"`
 }
 
 type BusinessRuntime struct {
-	CertificateID string    `json:"certificateId"`
-	HostID        string    `json:"hostId,omitempty"`
-	ID            string    `json:"id"`
-	Role          string    `json:"role"`
-	Revision      uint64    `json:"revision,string"`
-	RuntimeReady  bool      `json:"runtimeReady"`
-	ReportedAt    time.Time `json:"reportedAt"`
-	Peers         []string  `json:"peers"`
+	CertificateID     string    `json:"certificateId"`
+	HostID            string    `json:"hostId,omitempty"`
+	ID                string    `json:"id"`
+	Role              string    `json:"role"`
+	Revision          uint64    `json:"revision,string"`
+	AppliedRevision   uint64    `json:"appliedRevision,string,omitempty"`
+	RuntimeReady      bool      `json:"runtimeReady"`
+	RelayPoolCapable  bool      `json:"relayPoolCapable,omitempty"`
+	PublicIPv4        string    `json:"publicIpv4,omitempty"`
+	PublicIPv6        string    `json:"publicIpv6,omitempty"`
+	EgressIP          string    `json:"egressIp,omitempty"`
+	OccupiedPort24000 []string  `json:"occupiedPort24000,omitempty"`
+	ReportedAt        time.Time `json:"reportedAt"`
+	Peers             []string  `json:"peers"`
 }
 
 type BusinessNode struct {
@@ -316,7 +331,26 @@ func (s *Store) Business() BusinessInventory {
 			for id := range node.RouteEntries {
 				names[id] = true
 			}
-			view.Runtimes = append(view.Runtimes, BusinessRuntime{CertificateID: node.CertificateID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+			var appliedRev uint64
+			if node.Receipt != nil {
+				appliedRev = node.Receipt.Revision
+			}
+			capable, pubV4, pubV6, egressIP, occupied24000 := runtimeRelayMetadata(node, nil)
+			view.Runtimes = append(view.Runtimes, BusinessRuntime{
+				CertificateID:     node.CertificateID,
+				ID:                node.ID,
+				Role:              role,
+				Revision:          node.Desired.Revision,
+				AppliedRevision:   appliedRev,
+				RuntimeReady:      s.availableRuntime(node, time.Now()),
+				RelayPoolCapable:  capable,
+				PublicIPv4:        pubV4,
+				PublicIPv6:        pubV6,
+				EgressIP:          egressIP,
+				OccupiedPort24000: occupied24000,
+				ReportedAt:        node.ReportedAt,
+				Peers:             peers,
+			})
 			if node.EntryQuota != nil {
 				view.Endpoints = append(view.Endpoints, BusinessEndpoint{ID: node.ID, EntryID: node.ID, Name: node.ID, NextResetAt: node.EntryQuota.NextResetAt.Format(time.RFC3339)})
 			}
@@ -433,6 +467,8 @@ func (s *Store) Business() BusinessInventory {
 				state = "temporarily-suspended"
 			}
 			port, ipv4Port, activeRelays := 0, 0, 0
+			var relayID string
+			var activeRelayIDs []string
 			for _, entry := range s.nodes {
 				if entry.ID != grant.EntryID || entry.Desired.Entry == nil {
 					continue
@@ -442,6 +478,12 @@ func (s *Store) Business() BusinessInventory {
 					for _, ep := range entry.Desired.Entry.RelayPools {
 						if ep.Key == grant.PoolKey() {
 							activeRelays = len(ep.Candidates)
+							if len(ep.Candidates) > 0 {
+								activeRelayIDs = make([]string, 0, len(ep.Candidates))
+								for _, cand := range ep.Candidates {
+									activeRelayIDs = append(activeRelayIDs, cand.RelayNodeID)
+								}
+							}
 						}
 					}
 					continue
@@ -449,13 +491,55 @@ func (s *Store) Business() BusinessInventory {
 				for _, peer := range entry.Desired.Entry.Peers {
 					if peer.PeerKey() == grant.PeerKey() {
 						port = peer.Port
+						if peer.Relay != nil {
+							relayID = peer.Relay.NodeID
+						}
 					}
 					if peer.EgressID == grant.IPv4EgressID {
 						ipv4Port = peer.Port
 					}
 				}
 			}
-			view.Routes = append(view.Routes, BusinessRoute{UDP: grant.UDP, ClientChainID: grant.ClientChainID, RelayPoolID: grant.RelayPoolID, ActiveRelays: activeRelays, Port: port, IPv4Port: ipv4Port, ID: grant.ID, AccountID: grant.AccountID, EntryID: grant.EntryID, EgressID: grant.EgressID, IPv4EgressID: grant.IPv4EgressID, Enabled: grant.Enabled, HideNative: grant.HideNative, State: state})
+			var pendingRelayPoolID, landingAddress, expectedExit, egressIP, ingressFamily, routeName string
+			var pendingLegacyCutover, retiringLegacyTransport bool
+			if pr, hasPR := m.PooledRoutes[grant.ID]; hasPR {
+				landingAddress = pr.LandingAddress
+				expectedExit = pr.ExpectedExit
+				egressIP = pr.EgressIP
+				ingressFamily = pr.IngressFamily
+				routeName = pr.Name
+				pendingLegacyCutover = pr.PendingLegacyCutover
+				retiringLegacyTransport = pr.RetiringLegacyTransport
+				if pr.PendingLegacyCutover {
+					pendingRelayPoolID = pr.RelayPoolID
+				}
+			}
+			view.Routes = append(view.Routes, BusinessRoute{
+				UDP:                     grant.UDP,
+				ClientChainID:           grant.ClientChainID,
+				RelayPoolID:             grant.RelayPoolID,
+				PendingRelayPoolID:      pendingRelayPoolID,
+				PendingLegacyCutover:    pendingLegacyCutover,
+				RetiringLegacyTransport: retiringLegacyTransport,
+				RelayID:                 relayID,
+				ActiveRelays:            activeRelays,
+				ActiveRelayIDs:          activeRelayIDs,
+				LandingAddress:          landingAddress,
+				ExpectedExit:            expectedExit,
+				EgressIP:                egressIP,
+				IngressFamily:           ingressFamily,
+				Name:                    routeName,
+				Port:                    port,
+				IPv4Port:                ipv4Port,
+				ID:                      grant.ID,
+				AccountID:               grant.AccountID,
+				EntryID:                 grant.EntryID,
+				EgressID:                grant.EgressID,
+				IPv4EgressID:            grant.IPv4EgressID,
+				Enabled:                 grant.Enabled,
+				HideNative:              grant.HideNative,
+				State:                   state,
+			})
 		}
 	}
 	for _, node := range s.nodes {
@@ -478,7 +562,27 @@ func (s *Store) Business() BusinessInventory {
 			}
 		}
 		slices.Sort(peers)
-		view.Runtimes = append(view.Runtimes, BusinessRuntime{CertificateID: node.CertificateID, HostID: hostID, ID: node.ID, Role: role, Revision: node.Desired.Revision, RuntimeReady: s.availableRuntime(node, time.Now()), ReportedAt: node.ReportedAt, Peers: peers})
+		var appliedRev uint64
+		if node.Receipt != nil {
+			appliedRev = node.Receipt.Revision
+		}
+		capable, pubV4, pubV6, egressIP, occupied24000 := runtimeRelayMetadata(node, &m)
+		view.Runtimes = append(view.Runtimes, BusinessRuntime{
+			CertificateID:     node.CertificateID,
+			HostID:            hostID,
+			ID:                node.ID,
+			Role:              role,
+			Revision:          node.Desired.Revision,
+			AppliedRevision:   appliedRev,
+			RuntimeReady:      s.availableRuntime(node, time.Now()),
+			RelayPoolCapable:  capable,
+			PublicIPv4:        pubV4,
+			PublicIPv6:        pubV6,
+			EgressIP:          egressIP,
+			OccupiedPort24000: occupied24000,
+			ReportedAt:        node.ReportedAt,
+			Peers:             peers,
+		})
 	}
 	slices.SortFunc(view.Nodes, func(a, b BusinessNode) int { return strings.Compare(a.ID, b.ID) })
 	slices.SortFunc(view.Runtimes, func(a, b BusinessRuntime) int { return strings.Compare(a.ID, b.ID) })

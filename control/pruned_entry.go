@@ -58,6 +58,13 @@ func (s *Store) PruneRetiredEntry(ctx context.Context, change PruneRetiredEntryC
 		}
 		next.PrunedEntries[change.ID] = glivela.PrunedEntry{CertificateID: change.CertificateID, Revision: change.ExpectedRevision, EndpointID: e.Reality.ID, ServiceID: e.ServiceID, InboundTag: e.Reality.InboundTag, TotalBytes: e.TotalBytes, UsedBytes: e.UsedBytes, ResetDay: e.ResetDay, ResetSchedule: e.ResetSchedule, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		next.Endpoints = slices.Delete(slices.Clone(next.Endpoints), index, index+1)
+		if cfg, ok := next.EntryRelayConfigs[change.ID]; ok && cfg.SourceIPv4 == "" && cfg.SourceIPv6 == "" && cfg.Observatory == nil {
+			next.EntryRelayConfigs = maps.Clone(next.EntryRelayConfigs)
+			delete(next.EntryRelayConfigs, change.ID)
+			if len(next.EntryRelayConfigs) == 0 {
+				next.EntryRelayConfigs = nil
+			}
+		}
 	}
 	if next.Validate() != nil {
 		return bad

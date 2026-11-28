@@ -7,7 +7,7 @@ updates and access to the panel.
 ## What it provides
 
 - Account credentials, quotas and subscription generation.
-- VLESS/REALITY entries, SS2022 forwarding and OpenClash/Mihomo client chains.
+- VLESS/REALITY entries, SS2022 forwarding, dynamic relay pools (port 24000 EIH) and three-column topology.
 - Entry and landing inventory, route configuration and availability controls.
 - IP quality and unlock results, route latency and node-to-node speed tests.
 - Network-optimization status and explicitly requested configuration changes.
@@ -29,6 +29,7 @@ outside the source checkout.
 - [Entry and landing on one host](docs/node-pair.md)
 - [Client chains and composite routes](docs/composite-routes.md)
 - [Server-owned transport resources](docs/server-transport-ownership.md)
+- [Dynamic relay pools and topology](docs/relay-pools.md)
 - [Managed UDP forwarding](docs/udp-forwarding.md)
 - [Manual subscription order](docs/subscription-order.md)
 - [REALITY target changes](docs/reality-target-change.md)

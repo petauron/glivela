@@ -407,7 +407,7 @@ func controllerHandler(store *Store, administrators []string) (http.Handler, err
 				}
 				_ = json.NewEncoder(w).Encode(plan)
 			case "start":
-				view, err := store.StartSocketCutover(r.Context(), input.TargetNodeID, input.Address, input.ExpectedTargetRevision)
+				view, err := store.StartSocketCutoverWithScope(r.Context(), input.TargetNodeID, input.Address, input.ExpectedTargetRevision, input.ExpectedScopeDigest)
 				if err != nil {
 					http.Error(w, "socket cutover start refused", http.StatusConflict)
 					return
